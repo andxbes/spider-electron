@@ -3,6 +3,7 @@ const path = require('node:path');
 const { URL } = require('node:url');
 const cheerio = require('cheerio');
 
+const robotsParser = require('robots-parser');
 // Функция для создания главного окна приложения
 const createWindow = () => {
     const mainWindow = new BrowserWindow({
@@ -42,21 +43,52 @@ app.on('window-all-closed', () => {
 
 // Хранилища для URL
 const visitedUrls = new Set();
-const queue = [];
+let queue = [];
 const MAX_PAGES_TO_VISIT = 50; // Ограничение, чтобы не сканировать вечно
+const robotsCache = new Map(); // Кэш для robots.txt по хостам
 
 /**
  * Основная функция сканирования одной страницы
  * @param {string} url - URL для сканирования
+ * @param {string} referrer - URL, с которого пришли на эту страницу
  * @param {BrowserWindow} browserWindow - Окно для отправки результатов
  */
-async function crawl(url, browserWindow) {
+async function crawl(url, referrer, browserWindow) {
     if (visitedUrls.size >= MAX_PAGES_TO_VISIT || visitedUrls.has(url)) {
         return;
     }
 
     console.log(`Сканирую: ${url}`);
     visitedUrls.add(url);
+
+    // --- Проверка robots.txt ---
+    const urlObject = new URL(url);
+    const robotsUrl = `${urlObject.protocol}//${urlObject.host}/robots.txt`;
+    let robots = robotsCache.get(urlObject.host);
+    if (!robots) {
+        try {
+            const robotsResponse = await fetch(robotsUrl);
+            const robotsTxt = await robotsResponse.text();
+            robots = robotsParser(robotsUrl, robotsTxt);
+            robotsCache.set(urlObject.host, robots);
+        } catch (e) {
+            robots = robotsParser(robotsUrl, ''); // Если robots.txt нет, считаем, что все разрешено
+            robotsCache.set(urlObject.host, robots);
+        }
+    }
+
+    if (!robots.isAllowed(url, 'MyElectronSpider/1.0')) {
+        console.log(`Заблокировано robots.txt: ${url}`);
+        browserWindow.webContents.send('spider-result', {
+            status: 'SKIPPED',
+            url: url,
+            title: 'Заблокировано robots.txt',
+            referrer: referrer,
+            linkCount: 0,
+            headings: []
+        });
+        return;
+    }
 
     try {
         // Используем fetch вместо axios
@@ -75,25 +107,44 @@ async function crawl(url, browserWindow) {
         const html = await response.text(); // Получаем HTML как текст
         const $ = cheerio.load(html);
 
-        // 1. Извлекаем данные (например, заголовок страницы)
+        // 1. Извлекаем данные
         const title = $('title').text().trim();
+        const linkCount = $('a').length;
+        const headings = [];
+        $('h1, h2, h3, h4, h5, h6').each((i, el) => {
+            headings.push({
+                level: parseInt(el.tagName.substring(1)),
+                text: $(el).text().trim()
+            });
+        });
+
         browserWindow.webContents.send('spider-result', {
             status: response.status,
             url: url,
             title: title || 'Без заголовка',
+            referrer: referrer,
+            linkCount: linkCount,
+            headings: headings
         });
 
-        // 2. Ищем новые ссылки для обхода
+        // 2. Проверяем meta-robots на 'nofollow'
+        const metaRobots = $('meta[name="robots"]').attr('content') || '';
+        if (metaRobots.includes('nofollow')) {
+            console.log(`Найден nofollow на странице: ${url}`);
+            return; // Не ищем новые ссылки
+        }
+
+        // 3. Ищем новые ссылки для обхода
         $('a').each((i, link) => {
             const href = $(link).attr('href');
             if (href) {
                 try {
                     const absoluteUrl = new URL(href, url).href.split('#')[0]; // Убираем якоря
                     // Добавляем в очередь, если еще не посещали и не в очереди
-                    if (!visitedUrls.has(absoluteUrl) && !queue.includes(absoluteUrl)) {
+                    if (!visitedUrls.has(absoluteUrl) && !queue.some(item => item.url === absoluteUrl)) {
                         // Простое правило: остаемся на том же домене
                         if (new URL(absoluteUrl).hostname === new URL(url).hostname) {
-                            queue.push(absoluteUrl);
+                            queue.push({ url: absoluteUrl, referrer: url });
                         }
                     }
                 } catch (e) {
@@ -107,6 +158,9 @@ async function crawl(url, browserWindow) {
             status: 'ERROR',
             url: url,
             title: error.message,
+            referrer: referrer,
+            linkCount: 0,
+            headings: []
         });
     }
 }
@@ -124,11 +178,12 @@ async function startSpider(startUrl, browserWindow) {
             queue: queue.length,
         });
     };
+
     // Очищаем перед новым запуском
     visitedUrls.clear();
-    queue.length = 0; // Эффективная очистка массива
+    queue = [];
 
-    queue.push(startUrl);
+    queue.push({ url: startUrl, referrer: 'N/A' });
 
     // Рекурсивная функция для неблокирующего обхода
     const processQueue = async () => {
@@ -139,9 +194,9 @@ async function startSpider(startUrl, browserWindow) {
             return;
         }
 
-        const currentUrl = queue.shift(); // Берем первый URL из очереди
-        if (currentUrl) {
-            await crawl(currentUrl, browserWindow);
+        const currentItem = queue.shift(); // Берем первый URL из очереди
+        if (currentItem) {
+            await crawl(currentItem.url, currentItem.referrer, browserWindow);
             sendProgress();
         }
 

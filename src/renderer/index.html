@@ -7,11 +7,11 @@
       content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'"
     />
     <title>Electron Web Spider</title>
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="./styles.css" />
   </head>
-  <body class="bg-slate-100 text-slate-800 font-sans">
+  <body class="bg-zinc-100 text-zinc-800 font-sans">
     <div class="container mx-auto p-4 flex flex-col h-screen">
-      <h1 class="text-2xl font-bold text-center text-slate-700 mb-4">
+      <h1 class="text-2xl font-bold text-center text-zinc-700 mb-4">
         Electron Web Spider
       </h1>
       <div class="controls flex gap-2 mb-4">
@@ -19,24 +19,24 @@
           type="text"
           id="urlInput"
           placeholder="Введите стартовый URL (например, https://www.electronjs.org)"
-          class="flex-grow p-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none"
+          class="flex-grow p-2 border border-zinc-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none"
         />
         <button
           id="startButton"
-          class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-slate-400 disabled:cursor-not-allowed"
+          class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-zinc-400 disabled:cursor-not-allowed"
         >
           Начать сканирование
         </button>
       </div>
       <div
         id="results-container"
-        class="flex-grow border border-slate-300 rounded-md p-2 overflow-y-auto bg-white min-h-[200px]"
+        class="flex-grow border border-zinc-300 rounded-md overflow-y-auto bg-white min-h-[200px]"
       >
         <div id="results"></div>
       </div>
       <div
         id="status-bar"
-        class="mt-2 p-2 bg-slate-200 rounded-md text-xs text-slate-600 flex justify-between"
+        class="mt-2 p-2 bg-zinc-200 rounded-md text-xs text-zinc-600 flex justify-between"
       >
         <span id="status-text" class="italic">Готов к работе...</span>
         <div class="flex gap-4">
