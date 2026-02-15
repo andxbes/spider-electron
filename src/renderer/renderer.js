@@ -25,6 +25,7 @@ startButton.addEventListener('click', () => {
 window.api.onSpiderResult((data) => {
     const resultWrapper = document.createElement('div');
     resultWrapper.className = 'border-b border-zinc-200';
+    resultWrapper.dataset.url = data.url;
 
     let statusClass = 'text-zinc-500';
     if (data.status === 200) statusClass = 'text-green-600';
@@ -36,6 +37,10 @@ window.api.onSpiderResult((data) => {
             <span class="font-mono font-bold">H${h.level}</span>: ${h.text}
         </div>
     `).join('');
+
+    const referrersHTML = (data.referrers && data.referrers.length > 0)
+        ? data.referrers.map(r => `<div class="truncate" title="${r}">${r}</div>`).join('')
+        : '<span class="text-zinc-400">Нет (стартовая страница)</span>';
 
     resultWrapper.innerHTML = `
         <button class="p-2 w-full text-left hover:bg-zinc-50 focus:outline-none">
@@ -49,7 +54,16 @@ window.api.onSpiderResult((data) => {
             </div>
         </button>
         <div class="details hidden p-4 bg-zinc-50 border-t border-zinc-200 text-sm">
-            <p><strong>Referrer:</strong> <span class="text-zinc-600">${data.referrer}</span></p>
+            <div class="mb-2">
+                <strong>Meta Description:</strong> <span class="text-zinc-600">${data.metaDescription || '<span class="italic text-zinc-400">Не указано</span>'}</span>
+            </div>
+            <div class="mb-2">
+                <strong>Canonical:</strong> <span class="text-zinc-600">${data.metaCanonical || '<span class="italic text-zinc-400">Не указано</span>'}</span>
+            </div>
+            <div class="mb-2">
+                <strong>Referrers:</strong>
+                <div class="referrers-container ml-2 text-zinc-600 max-h-20 overflow-y-auto border border-zinc-200 p-1 rounded bg-white">${referrersHTML}</div>
+            </div>
             <p><strong>Найдено ссылок:</strong> <span class="text-zinc-600">${data.linkCount}</span></p>
             <p class="mt-2"><strong>Заголовки:</strong></p>
             ${headingsHTML || '<p class="ml-4 text-sm text-zinc-500">Не найдено.</p>'}
@@ -63,6 +77,24 @@ window.api.onSpiderResult((data) => {
         const details = e.currentTarget.nextElementSibling;
         details.classList.toggle('hidden');
         e.currentTarget.querySelector('svg').classList.toggle('rotate-180');
+    });
+});
+
+// Слушаем событие обновления рефереров после завершения сканирования
+window.api.onSpiderReferrersUpdate((allReferrers) => {
+    const items = document.querySelectorAll('#results > div');
+    items.forEach(item => {
+        const url = item.dataset.url;
+        if (url && allReferrers[url]) {
+            const container = item.querySelector('.referrers-container');
+            if (container) {
+                const refs = allReferrers[url];
+                const newHTML = (refs && refs.length > 0)
+                    ? refs.map(r => `<div class="truncate" title="${r}">${r}</div>`).join('')
+                    : '<span class="text-zinc-400">Нет (стартовая страница)</span>';
+                container.innerHTML = newHTML;
+            }
+        }
     });
 });
 

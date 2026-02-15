@@ -2,7 +2,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 // "Белый список" каналов для безопасного взаимодействия
 const validSendChannels = ['start-spider'];
-const validReceiveChannels = ['spider-result', 'spider-end', 'spider-progress'];
+const validReceiveChannels = ['spider-result', 'spider-end', 'spider-progress', 'spider-referrers-update'];
 
 // Предоставляем глобальному объекту window в рендерере доступ к API
 contextBridge.exposeInMainWorld('api', {
@@ -27,6 +27,11 @@ contextBridge.exposeInMainWorld('api', {
     onSpiderProgress: (callback) => {
         if (validReceiveChannels.includes('spider-progress')) {
             ipcRenderer.on('spider-progress', (event, ...args) => callback(...args));
+        }
+    },
+    onSpiderReferrersUpdate: (callback) => {
+        if (validReceiveChannels.includes('spider-referrers-update')) {
+            ipcRenderer.on('spider-referrers-update', (event, ...args) => callback(...args));
         }
     },
 });

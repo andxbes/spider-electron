@@ -46,6 +46,7 @@ const visitedUrls = new Set();
 let queue = [];
 const MAX_PAGES_TO_VISIT = 50; // Ограничение, чтобы не сканировать вечно
 const robotsCache = new Map(); // Кэш для robots.txt по хостам
+const referrersMap = new Map(); // Карта обратных ссылок (url -> Set<referrer>)
 
 /**
  * Основная функция сканирования одной страницы
@@ -79,11 +80,12 @@ async function crawl(url, referrer, browserWindow) {
 
     if (!robots.isAllowed(url, 'MyElectronSpider/1.0')) {
         console.log(`Заблокировано robots.txt: ${url}`);
+        const referrers = referrersMap.has(url) ? Array.from(referrersMap.get(url)) : (referrer !== 'N/A' ? [referrer] : []);
         browserWindow.webContents.send('spider-result', {
             status: 'SKIPPED',
             url: url,
             title: 'Заблокировано robots.txt',
-            referrer: referrer,
+            referrers: referrers,
             linkCount: 0,
             headings: []
         });
@@ -109,6 +111,8 @@ async function crawl(url, referrer, browserWindow) {
 
         // 1. Извлекаем данные
         const title = $('title').text().trim();
+        const description = $('meta[name="description"]').attr('content') || '';
+        const canonical = $('link[rel="canonical"]').attr('href') || '';
         const linkCount = $('a').length;
         const headings = [];
         $('h1, h2, h3, h4, h5, h6').each((i, el) => {
@@ -118,11 +122,15 @@ async function crawl(url, referrer, browserWindow) {
             });
         });
 
+        const referrers = referrersMap.has(url) ? Array.from(referrersMap.get(url)) : (referrer !== 'N/A' ? [referrer] : []);
+
         browserWindow.webContents.send('spider-result', {
             status: response.status,
             url: url,
             title: title || 'Без заголовка',
-            referrer: referrer,
+            referrers: referrers,
+            metaDescription: description,
+            metaCanonical: canonical,
             linkCount: linkCount,
             headings: headings
         });
@@ -140,6 +148,12 @@ async function crawl(url, referrer, browserWindow) {
             if (href) {
                 try {
                     const absoluteUrl = new URL(href, url).href.split('#')[0]; // Убираем якоря
+
+                    if (!referrersMap.has(absoluteUrl)) {
+                        referrersMap.set(absoluteUrl, new Set());
+                    }
+                    referrersMap.get(absoluteUrl).add(url);
+
                     // Добавляем в очередь, если еще не посещали и не в очереди
                     if (!visitedUrls.has(absoluteUrl) && !queue.some(item => item.url === absoluteUrl)) {
                         // Простое правило: остаемся на том же домене
@@ -158,7 +172,7 @@ async function crawl(url, referrer, browserWindow) {
             status: 'ERROR',
             url: url,
             title: error.message,
-            referrer: referrer,
+            referrers: [referrer],
             linkCount: 0,
             headings: []
         });
@@ -182,6 +196,7 @@ async function startSpider(startUrl, browserWindow) {
     // Очищаем перед новым запуском
     visitedUrls.clear();
     queue = [];
+    referrersMap.clear();
 
     queue.push({ url: startUrl, referrer: 'N/A' });
 
@@ -190,6 +205,14 @@ async function startSpider(startUrl, browserWindow) {
         if (queue.length === 0 || visitedUrls.size >= MAX_PAGES_TO_VISIT) {
             sendProgress();
             console.log('Сканирование завершено.');
+
+            // Отправляем финальный список рефереров для обновления UI
+            const allReferrers = {};
+            for (const [link, refs] of referrersMap.entries()) {
+                allReferrers[link] = Array.from(refs);
+            }
+            browserWindow.webContents.send('spider-referrers-update', allReferrers);
+
             browserWindow.webContents.send('spider-end', 'Сканирование завершено!');
             return;
         }
