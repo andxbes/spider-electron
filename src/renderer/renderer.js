@@ -5,6 +5,53 @@ const statusText = document.getElementById('status-text');
 const statusScanned = document.getElementById('status-scanned');
 const statusQueue = document.getElementById('status-queue');
 
+// --- Кнопка экспорта в CSV ---
+const exportButton = document.createElement('button');
+exportButton.textContent = 'Экспорт CSV';
+exportButton.className = 'ml-2 px-4 py-2 bg-zinc-600 text-white rounded hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors';
+exportButton.disabled = true;
+
+// Вставляем кнопку после кнопки старта
+if (startButton && startButton.parentNode) {
+    startButton.parentNode.insertBefore(exportButton, startButton.nextSibling);
+}
+
+// Хранилище результатов для экспорта
+let scanResults = new Map();
+
+exportButton.addEventListener('click', () => {
+    if (scanResults.size === 0) return;
+
+    const bom = '\uFEFF'; // Для корректного отображения кириллицы в Excel
+    const headers = ['URL', 'Status', 'Title', 'Meta Description', 'Canonical', 'Link Count', 'Redirect URL', 'Referrers', 'Headings'];
+    const csvRows = [headers.join(',')];
+
+    for (const [url, data] of scanResults) {
+        const referrers = data.referrers ? data.referrers.join('; ') : '';
+        const headings = data.headings ? data.headings.map(h => `H${h.level}: ${h.text}`).join('; ') : '';
+        // Экранируем кавычки и оборачиваем поля в кавычки
+        const row = [
+            `"${(data.url || '').replace(/"/g, '""')}"`,
+            `"${(data.status || '')}"`,
+            `"${(data.title || '').replace(/"/g, '""')}"`,
+            `"${(data.metaDescription || '').replace(/"/g, '""')}"`,
+            `"${(data.metaCanonical || '').replace(/"/g, '""')}"`,
+            `"${(data.linkCount || 0)}"`,
+            `"${(data.redirectUrl || '').replace(/"/g, '""')}"`,
+            `"${referrers.replace(/"/g, '""')}"`,
+            `"${headings.replace(/"/g, '""')}"`
+        ];
+        csvRows.push(row.join(','));
+    }
+
+    const csvString = bom + csvRows.join('\n');
+    const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `spider_results_${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+});
+
 // Отправляем событие в основной процесс при клике на кнопку
 startButton.addEventListener('click', () => {
     const startUrl = urlInput.value.trim();
@@ -12,6 +59,8 @@ startButton.addEventListener('click', () => {
         // Простая валидация URL
         new URL(startUrl);
         resultsDiv.innerHTML = ''; // Очищаем предыдущие результаты
+        scanResults.clear(); // Очищаем данные для экспорта
+        exportButton.disabled = true;
         statusText.textContent = `Начинаю сканирование с ${startUrl}...`;
         startButton.disabled = true;
         // Используем API, предоставленное через preload.js
@@ -23,6 +72,8 @@ startButton.addEventListener('click', () => {
 
 // Слушаем событие 'spider-result' от основного процесса
 window.api.onSpiderResult((data) => {
+    scanResults.set(data.url, data); // Сохраняем данные
+
     const resultWrapper = document.createElement('div');
     resultWrapper.className = 'border-b border-zinc-200';
     resultWrapper.dataset.url = data.url;
@@ -89,6 +140,15 @@ window.api.onSpiderResult((data) => {
 
 // Слушаем событие обновления рефереров после завершения сканирования
 window.api.onSpiderReferrersUpdate((allReferrers) => {
+    // Обновляем данные в памяти для экспорта
+    for (const [url, refs] of Object.entries(allReferrers)) {
+        if (scanResults.has(url)) {
+            const data = scanResults.get(url);
+            data.referrers = refs;
+            scanResults.set(url, data);
+        }
+    }
+
     const items = document.querySelectorAll('#results > div');
     items.forEach(item => {
         const url = item.dataset.url;
@@ -109,6 +169,7 @@ window.api.onSpiderReferrersUpdate((allReferrers) => {
 window.api.onSpiderEnd((message) => {
     statusText.textContent = message;
     startButton.disabled = false;
+    exportButton.disabled = false; // Активируем кнопку экспорта
 });
 
 // Слушаем событие о прогрессе сканирования

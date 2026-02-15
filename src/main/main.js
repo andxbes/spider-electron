@@ -104,11 +104,10 @@ async function crawl(url, referrer, browserWindow) {
 
         const referrers = referrersMap.has(url) ? Array.from(referrersMap.get(url)) : (referrer !== 'N/A' ? [referrer] : []);
 
-        // 1. Обработка редиректов (3xx или если fetch перешел сам)
-        // Если fetch перешел по редиректу (несмотря на manual), response.redirected будет true
-
-
-        if ((response.status >= 300 && response.status < 400) || response.redirected || (response.url !== url)) {
+        // 1. Обработка редиректов
+        // Если статус 3xx, или fetch перешел сам (redirected), или URL изменился (response.url !== url)
+        // При автоматическом переходе fetch возвращает 200, поэтому оригинальный код (301/302) теряется.
+        if ((response.status >= 300 && response.status < 400) || response.redirected || (response.url && response.url !== url)) {
             let redirectUrl = null;
             let status = response.status;
 
@@ -116,10 +115,9 @@ async function crawl(url, referrer, browserWindow) {
                 const locationHeader = response.headers.get('location');
                 redirectUrl = locationHeader ? new URL(locationHeader, url).href : null;
             } else {
-                // Если статус 200, но redirected=true, значит fetch перешел по редиректу
+                // Если статус 200, но мы определили редирект (по флагу или URL), ставим 302
                 redirectUrl = response.url;
-                status = 302; // Условный код, так как оригинал мы потеряли, но знаем что это редирект
-                // console.info(status, url);
+                status = 302; // Условный код, так как оригинал потерян
             }
 
             browserWindow.webContents.send('spider-result', {
