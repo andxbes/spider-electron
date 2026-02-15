@@ -96,14 +96,68 @@ async function crawl(url, referrer, browserWindow) {
         // Используем fetch вместо axios
         const response = await fetch(url, {
             signal: AbortSignal.timeout(5000), // Аналог timeout в axios
+            redirect: 'manual', // Не переходим по редиректам автоматически, чтобы зафиксировать их
             headers: {
                 'User-Agent': 'MyElectronSpider/1.0 (+https://github.com/your-repo)',
             },
         });
 
-        // fetch не выбрасывает ошибку на 4xx/5xx статусы, проверяем вручную
+        const referrers = referrersMap.has(url) ? Array.from(referrersMap.get(url)) : (referrer !== 'N/A' ? [referrer] : []);
+
+        // 1. Обработка редиректов (3xx или если fetch перешел сам)
+        // Если fetch перешел по редиректу (несмотря на manual), response.redirected будет true
+
+
+        if ((response.status >= 300 && response.status < 400) || response.redirected || (response.url !== url)) {
+            let redirectUrl = null;
+            let status = response.status;
+
+            if (response.status >= 300 && response.status < 400) {
+                const locationHeader = response.headers.get('location');
+                redirectUrl = locationHeader ? new URL(locationHeader, url).href : null;
+            } else {
+                // Если статус 200, но redirected=true, значит fetch перешел по редиректу
+                redirectUrl = response.url;
+                status = 302; // Условный код, так как оригинал мы потеряли, но знаем что это редирект
+                // console.info(status, url);
+            }
+
+            browserWindow.webContents.send('spider-result', {
+                status: status,
+                url: url,
+                title: `Редирект на ${redirectUrl || 'неизвестно'}`,
+                referrers: referrers,
+                metaDescription: '',
+                metaCanonical: '',
+                linkCount: 0,
+                headings: [],
+                redirectUrl: redirectUrl
+            });
+
+            // Добавляем цель редиректа в очередь, если она есть
+            if (redirectUrl) {
+                if (!referrersMap.has(redirectUrl)) {
+                    referrersMap.set(redirectUrl, new Set());
+                }
+                referrersMap.get(redirectUrl).add(url);
+
+                if (!visitedUrls.has(redirectUrl) && !queue.some(item => item.url === redirectUrl)) {
+                    // Проверяем, остаемся ли мы в пределах домена (или разрешаем редирект на поддомен/www)
+                    try {
+                        // Для редиректов можно использовать ту же логику или чуть мягче. Используем текущую.
+                        if (new URL(redirectUrl).hostname === new URL(url).hostname) {
+                            queue.push({ url: redirectUrl, referrer: url });
+                        }
+                    } catch (e) { }
+                }
+            }
+            return;
+        }
+
+        // 2. Обработка ошибок клиента/сервера (4xx, 5xx)
         if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+            // Вместо выброса ошибки отправляем результат с кодом статуса
+            throw new Error(`HTTP ошибка ${response.status}`);
         }
 
         const html = await response.text(); // Получаем HTML как текст
@@ -121,8 +175,6 @@ async function crawl(url, referrer, browserWindow) {
                 text: $(el).text().trim()
             });
         });
-
-        const referrers = referrersMap.has(url) ? Array.from(referrersMap.get(url)) : (referrer !== 'N/A' ? [referrer] : []);
 
         browserWindow.webContents.send('spider-result', {
             status: response.status,
@@ -171,7 +223,7 @@ async function crawl(url, referrer, browserWindow) {
         browserWindow.webContents.send('spider-result', {
             status: 'ERROR',
             url: url,
-            title: error.message,
+            title: error.message || 'Ошибка',
             referrers: [referrer],
             linkCount: 0,
             headings: []

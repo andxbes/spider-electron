@@ -31,6 +31,7 @@ window.api.onSpiderResult((data) => {
     if (data.status === 200) statusClass = 'text-green-600';
     if (data.status === 'ERROR' || data.status >= 400) statusClass = 'text-red-600';
     if (data.status === 'SKIPPED') statusClass = 'text-yellow-600';
+    if (data.status >= 300 && data.status < 400) statusClass = 'text-blue-600';
 
     const headingsHTML = data.headings.map(h => `
         <div class="ml-4 text-sm text-zinc-600">
@@ -41,6 +42,11 @@ window.api.onSpiderResult((data) => {
     const referrersHTML = (data.referrers && data.referrers.length > 0)
         ? data.referrers.map(r => `<div class="truncate" title="${r}">${r}</div>`).join('')
         : '<span class="text-zinc-400">Нет (стартовая страница)</span>';
+
+    const redirectHTML = data.redirectUrl
+        ? `<div class="mb-2 p-2 bg-blue-50 border border-blue-100 rounded text-blue-800">
+             <strong>➡ Редирект на:</strong> <a href="#" class="underline break-all">${data.redirectUrl}</a>
+           </div>` : '';
 
     resultWrapper.innerHTML = `
         <button class="p-2 w-full text-left hover:bg-zinc-50 focus:outline-none">
@@ -54,6 +60,7 @@ window.api.onSpiderResult((data) => {
             </div>
         </button>
         <div class="details hidden p-4 bg-zinc-50 border-t border-zinc-200 text-sm">
+            ${redirectHTML}
             <div class="mb-2">
                 <strong>Meta Description:</strong> <span class="text-zinc-600">${data.metaDescription || '<span class="italic text-zinc-400">Не указано</span>'}</span>
             </div>
