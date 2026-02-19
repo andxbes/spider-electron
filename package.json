@@ -2,6 +2,7 @@
   "name": "spider-electron",
   "version": "1.0.0",
   "description": "A simple web spider built with Electron",
+  "author": "andxbes",
   "main": "src/main/main.js",
   "scripts": {
     "build:css": "postcss ./src/renderer/input.css -o ./src/renderer/styles.css",
@@ -19,7 +20,7 @@
     "@electron-forge/plugin-fuses": "^7.11.1",
     "@tailwindcss/postcss": "^4.2.0",
     "autoprefixer": "^10.4.24",
-    "electron": "40.5.0",
+    "electron": "^40.5.0",
     "postcss": "^8.5.6",
     "postcss-cli": "^11.0.1",
     "tailwindcss": "^4.2.0"
@@ -27,5 +28,49 @@
   "dependencies": {
     "cheerio": "^1.2.0",
     "robots-parser": "^3.0.1"
+  },
+  "config": {
+    "forge": {
+      "packagerConfig": {
+        "asar": true
+      },
+      "makers": [
+        {
+          "name": "@electron-forge/maker-squirrel",
+          "config": {
+            "name": "spider_electron"
+          }
+        },
+        {
+          "name": "@electron-forge/maker-zip",
+          "platforms": [
+            "darwin",
+            "linux",
+            "win32"
+          ]
+        }
+      ],
+      "plugins": [
+        {
+          "name": "@electron-forge/plugin-auto-unpack-natives",
+          "config": {}
+        },
+        {
+          "name": "@electron-forge/plugin-fuses",
+          "config": {
+            "version": "v1",
+            "enableMissionControl": false,
+            "enableEmbeddedAsarIntegrityValidation": true,
+            "enableMvsOutgrow": true,
+            "runAsNode": false,
+            "enableCookieEncryption": true,
+            "enableNodeOptionsEnvironmentVariable": false,
+            "enableNodeCliInspectArguments": false,
+            "enableTlsHttps": false,
+            "enableDartAssertion": false
+          }
+        }
+      ]
+    }
   }
 }
