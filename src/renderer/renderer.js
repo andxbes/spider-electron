@@ -1,5 +1,7 @@
 const urlInput = document.getElementById('urlInput');
 const startButton = document.getElementById('startButton');
+const useSitemapCheckbox = document.getElementById('useSitemapCheckbox');
+const maxPagesInput = document.getElementById('maxPagesInput');
 const resultsDiv = document.getElementById('results');
 const statusText = document.getElementById('status-text');
 const statusScanned = document.getElementById('status-scanned');
@@ -64,7 +66,11 @@ startButton.addEventListener('click', () => {
         statusText.textContent = `Начинаю сканирование с ${startUrl}...`;
         startButton.disabled = true;
         // Используем API, предоставленное через preload.js
-        window.api.startSpider(startUrl);
+        const maxPages = parseInt(maxPagesInput.value, 10);
+        window.api.startSpider(startUrl, {
+            useSitemap: useSitemapCheckbox.checked,
+            maxPages: Number.isNaN(maxPages) ? 0 : maxPages,
+        });
     } catch (e) {
         alert('Пожалуйста, введите корректный URL (например, https://example.com).');
     }
@@ -84,7 +90,7 @@ window.api.onSpiderResult((data) => {
     if (data.status === 'SKIPPED') statusClass = 'text-yellow-600';
     if (data.status >= 300 && data.status < 400) statusClass = 'text-blue-600';
 
-    const headingsHTML = data.headings.map(h => `
+    const headingsHTML = (data.headings || []).map(h => `
         <div class="ml-4 text-sm text-zinc-600">
             <span class="font-mono font-bold">H${h.level}</span>: ${h.text}
         </div>
@@ -174,7 +180,7 @@ window.api.onSpiderEnd((message) => {
 
 // Слушаем событие о прогрессе сканирования
 window.api.onSpiderProgress((progress) => {
-    statusText.textContent = 'В процессе...';
+    statusText.textContent = progress.status || 'В процессе...';
     statusScanned.textContent = `Просканировано: ${progress.scanned}`;
     statusQueue.textContent = `В очереди: ${progress.queue}`;
 });

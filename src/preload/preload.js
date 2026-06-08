@@ -7,9 +7,9 @@ const validReceiveChannels = ['spider-result', 'spider-end', 'spider-progress', 
 // Предоставляем глобальному объекту window в рендерере доступ к API
 contextBridge.exposeInMainWorld('api', {
     // Функция для отправки данных из Renderer в Main
-    startSpider: (url) => {
+    startSpider: (startUrl, options = {}) => {
         if (validSendChannels.includes('start-spider')) {
-            ipcRenderer.send('start-spider', url);
+            ipcRenderer.send('start-spider', { startUrl, options });
         }
     },
     // Функции для подписки на события от Main в Renderer

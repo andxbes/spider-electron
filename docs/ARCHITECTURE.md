@@ -1,6 +1,6 @@
 # Spider-Electron — внутрішня документація
 
-> Останнє оновлення: 2026-06-08  
+> Останнє оновлення: 2026-06-08 (sitemap)  
 > Короткий довідник для розробки та правок. Детальніше про підтримку — [DOC_MAINTENANCE.md](./DOC_MAINTENANCE.md).
 
 ## Що це
@@ -50,6 +50,8 @@ Renderer
 
 **Запуск:** `ipcMain.on('start-spider')` → `startSpider()` → `processQueue()` (рекурсія через `setTimeout(..., 0)`).
 
+**Опція sitemap (`useSitemap`):** перед обходом читається `robots.txt`, з нього витягуються рядки `Sitemap:`. Якщо їх немає — пробуються `/sitemap_index.xml`, `/sitemap.xml`, `/index.xml`. XML парситься (індекс + вкладені sitemap + `urlset`), URL сторінок додаються в чергу **першими**. Referrer для таких URL — адреса sitemap-файлу.
+
 **На кожній сторінці (`crawl`):**
 
 1. Skip, якщо URL вже в `visitedUrls` або ліміт досягнуто.
@@ -61,13 +63,13 @@ Renderer
 7. Якщо `<meta name="robots" content="nofollow">` — не додає нові посилання.
 8. `<a href>` → абсолютні URL без `#`, лише той самий `hostname` → `queue` + `referrersMap`.
 
-**Завершення:** порожня черга або `visitedUrls.size >= MAX_PAGES_TO_VISIT` → `spider-referrers-update` → `spider-end`.
+**Завершення:** порожня черга або досягнуто `maxPages` (якщо > 0) → `spider-referrers-update` → `spider-end`.
 
 ## Константи (hardcoded у `main.js`)
 
 | Константа | Значення | Рядок |
 |-----------|----------|-------|
-| `MAX_PAGES_TO_VISIT` | 50 | ~47 |
+| `maxPages` (опція UI) | 0 = без ліміту | renderer → main |
 | HTTP timeout | 5000 ms | ~98 |
 | User-Agent | `MyElectronSpider/1.0` | ~81, ~101 |
 | Область обходу | один `hostname` | ~146, ~210 |
@@ -78,9 +80,9 @@ Renderer
 
 | Напрямок | Канал | Payload |
 |----------|-------|---------|
-| R → M | `start-spider` | `startUrl: string` |
+| R → M | `start-spider` | `{ startUrl, options: { useSitemap?: boolean, maxPages?: number } }` |
 | M → R | `spider-result` | об'єкт сторінки (див. нижче) |
-| M → R | `spider-progress` | `{ scanned, queue }` |
+| M → R | `spider-progress` | `{ scanned, queue, status? }` |
 | M → R | `spider-referrers-update` | `{ [url]: referrers[] }` |
 | M → R | `spider-end` | `message: string` |
 

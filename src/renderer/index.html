@@ -14,19 +14,42 @@
       <h1 class="text-2xl font-bold text-center text-zinc-700 mb-4">
         Electron Web Spider
       </h1>
-      <div class="controls flex gap-2 mb-4">
-        <input
-          type="text"
-          id="urlInput"
-          placeholder="Введите стартовый URL (например, https://www.electronjs.org)"
-          class="flex-grow p-2 border border-zinc-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none"
-        />
-        <button
-          id="startButton"
-          class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-zinc-400 disabled:cursor-not-allowed"
-        >
-          Начать сканирование
-        </button>
+      <div class="controls flex flex-col gap-2 mb-4">
+        <div class="flex gap-2">
+          <input
+            type="text"
+            id="urlInput"
+            placeholder="Введите стартовый URL (например, https://www.electronjs.org)"
+            class="flex-grow p-2 border border-zinc-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none"
+          />
+          <button
+            id="startButton"
+            class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-zinc-400 disabled:cursor-not-allowed"
+          >
+            Начать сканирование
+          </button>
+        </div>
+        <div class="flex flex-wrap items-center gap-4 text-sm text-zinc-600">
+          <label class="flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              id="useSitemapCheckbox"
+              class="rounded border-zinc-300 text-blue-600 focus:ring-blue-500"
+            />
+            Сначала из sitemap + обход ссылок на страницах
+          </label>
+          <label class="flex items-center gap-2 select-none">
+            Лимит страниц:
+            <input
+              type="number"
+              id="maxPagesInput"
+              min="0"
+              placeholder="∞"
+              class="w-20 p-1 border border-zinc-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none"
+            />
+            <span class="text-zinc-400">(0 или пусто — без лимита)</span>
+          </label>
+        </div>
       </div>
       <div
         id="results-container"
