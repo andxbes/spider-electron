@@ -4,7 +4,7 @@ const { URL } = require('node:url');
 const cheerio = require('cheerio');
 
 const robotsParser = require('robots-parser');
-const { getSettingsPath, loadSettings, saveSettings } = require('./settings-persistence');
+const { getSettingsPath, loadSettings, saveSettings, MAX_CONCURRENCY } = require('./settings-persistence');
 
 // Функція створення головного вікна застосунку
 const createWindow = () => {
@@ -55,6 +55,17 @@ const referrersMap = new Map();
 
 function isPageLimitReached() {
     return maxPagesToVisit > 0 && visitedUrls.size >= maxPagesToVisit;
+}
+
+function tryClaimUrl(url) {
+    if (visitedUrls.has(url)) {
+        return false;
+    }
+    if (isPageLimitReached()) {
+        return false;
+    }
+    visitedUrls.add(url);
+    return true;
 }
 
 function fetchPage(url) {
@@ -238,12 +249,11 @@ async function seedQueueFromSitemaps(startUrl, browserWindow) {
  * @param {BrowserWindow} browserWindow - Вікно для надсилання результатів
  */
 async function crawl(url, referrer, browserWindow) {
-    if (isPageLimitReached() || visitedUrls.has(url)) {
+    if (!tryClaimUrl(url)) {
         return;
     }
 
     console.log(`Сканую: ${url}`);
-    visitedUrls.add(url);
 
     const urlObject = new URL(url);
     const { parser: robots } = await getRobots(urlObject);
@@ -391,16 +401,88 @@ async function crawl(url, referrer, browserWindow) {
  * @param {string} startUrl - Початковий URL
  * @param {BrowserWindow} browserWindow - Вікно для надсилання результатів
  */
+function finishScan(browserWindow, sendProgress) {
+    sendProgress();
+    console.log('Сканування завершено.');
+
+    const allReferrers = {};
+    for (const [link, refs] of referrersMap.entries()) {
+        allReferrers[link] = Array.from(refs);
+    }
+    browserWindow.webContents.send('spider-referrers-update', allReferrers);
+
+    let endMessage = 'Сканування завершено!';
+    if (isPageLimitReached() && queue.length > 0) {
+        endMessage = `Досягнуто ліміт ${maxPagesToVisit} стор. У черзі залишилось: ${queue.length}`;
+    }
+
+    browserWindow.webContents.send('spider-end', endMessage);
+}
+
 async function startSpider(startUrl, options, browserWindow) {
     const useSitemap = options?.useSitemap ?? false;
     maxPagesToVisit = Math.max(0, parseInt(options?.maxPages, 10) || 0);
+    const concurrency = Math.min(
+        MAX_CONCURRENCY,
+        Math.max(1, parseInt(options?.concurrency, 10) || 1)
+    );
+
+    let activeWorkers = 0;
+    let scanFinished = false;
 
     const sendProgress = (status) => {
         browserWindow.webContents.send('spider-progress', {
             scanned: visitedUrls.size,
             queue: queue.length,
+            active: activeWorkers,
             status,
         });
+    };
+
+    const tryFinishOrPump = () => {
+        if (scanFinished) {
+            return;
+        }
+
+        const limitReached = isPageLimitReached();
+        const canStartMore = !limitReached && queue.length > 0 && activeWorkers < concurrency;
+
+        if (canStartMore) {
+            pumpQueue();
+            return;
+        }
+
+        if (activeWorkers === 0 && (queue.length === 0 || limitReached)) {
+            scanFinished = true;
+            finishScan(browserWindow, sendProgress);
+        }
+    };
+
+    const pumpQueue = () => {
+        while (
+            !scanFinished &&
+            activeWorkers < concurrency &&
+            queue.length > 0 &&
+            !isPageLimitReached()
+        ) {
+            const item = queue.shift();
+            if (!item) {
+                break;
+            }
+
+            activeWorkers++;
+            crawl(item.url, item.referrer, browserWindow)
+                .catch((err) => {
+                    console.error(`Помилка воркера для ${item.url}:`, err);
+                })
+                .finally(() => {
+                    activeWorkers--;
+                    sendProgress();
+                    tryFinishOrPump();
+                });
+        }
+
+        tryFinishOrPump();
     };
 
     visitedUrls.clear();
@@ -418,37 +500,7 @@ async function startSpider(startUrl, options, browserWindow) {
     }
 
     enqueueUrl(startUrl, 'N/A', new URL(startUrl).hostname);
-
-    const processQueue = async () => {
-        if (queue.length === 0 || isPageLimitReached()) {
-            sendProgress();
-            console.log('Сканування завершено.');
-
-            const allReferrers = {};
-            for (const [link, refs] of referrersMap.entries()) {
-                allReferrers[link] = Array.from(refs);
-            }
-            browserWindow.webContents.send('spider-referrers-update', allReferrers);
-
-            let endMessage = 'Сканування завершено!';
-            if (isPageLimitReached() && queue.length > 0) {
-                endMessage = `Досягнуто ліміт ${maxPagesToVisit} стор. У черзі залишилось: ${queue.length}`;
-            }
-
-            browserWindow.webContents.send('spider-end', endMessage);
-            return;
-        }
-
-        const currentItem = queue.shift();
-        if (currentItem) {
-            await crawl(currentItem.url, currentItem.referrer, browserWindow);
-            sendProgress();
-        }
-
-        setTimeout(processQueue, 0);
-    };
-
-    await processQueue();
+    pumpQueue();
 }
 
 ipcMain.handle('settings:get', async () => {

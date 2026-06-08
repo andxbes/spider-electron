@@ -1,6 +1,7 @@
 const form = document.getElementById('settingsForm');
 const useSitemapInput = document.getElementById('useSitemap');
 const maxPagesInput = document.getElementById('maxPages');
+const concurrencyInput = document.getElementById('concurrency');
 const saveStatus = document.getElementById('saveStatus');
 const settingsPathHint = document.getElementById('settingsPathHint');
 
@@ -10,6 +11,7 @@ async function initSettingsPage() {
 
     useSitemapInput.checked = loaded.useSitemap;
     maxPagesInput.value = loaded.maxPages || '';
+    concurrencyInput.value = loaded.concurrency || 3;
 
     if (settingsPathHint && path) {
         settingsPathHint.textContent = path;
@@ -18,11 +20,10 @@ async function initSettingsPage() {
 
 form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const current = await loadSettings();
     const { filePath } = await saveSettings({
         useSitemap: useSitemapInput.checked,
         maxPages: maxPagesInput.value,
-        lastStartUrl: current.lastStartUrl || '',
+        concurrency: concurrencyInput.value,
     });
     if (settingsPathHint && filePath) {
         settingsPathHint.textContent = filePath;

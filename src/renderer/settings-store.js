@@ -1,7 +1,7 @@
 const DEFAULT_SETTINGS = {
     useSitemap: false,
     maxPages: 0,
-    lastStartUrl: '',
+    concurrency: 3,
 };
 
 async function loadSettings() {

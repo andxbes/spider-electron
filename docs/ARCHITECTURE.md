@@ -73,6 +73,7 @@ Renderer
 | Константа | Значення | Рядок |
 |-----------|----------|-------|
 | `maxPages` (опція UI) | 0 = без ліміту | renderer → main |
+| `concurrency` (опція UI) | 1–20, за замовч. 3 | паралельних `crawl()` |
 | HTTP timeout | 5000 ms | ~98 |
 | User-Agent | `MyElectronSpider/1.0` | ~81, ~101 |
 | Область обходу | один `hostname` | ~146, ~210 |
@@ -83,10 +84,10 @@ Renderer
 
 | Напрямок | Канал | Payload |
 |----------|-------|---------|
-| R → M | `start-spider` | `{ startUrl, options: { useSitemap?, maxPages? } }` |
+| R → M | `start-spider` | `{ startUrl, options: { useSitemap?, maxPages?, concurrency? } }` |
 | R ↔ M | `settings:get` / `settings:save` | налаштування (файл у userData) |
 | M → R | `spider-result` | об'єкт сторінки (див. нижче) |
-| M → R | `spider-progress` | `{ scanned, queue, status? }` |
+| M → R | `spider-progress` | `{ scanned, queue, active?, status? }` |
 | M → R | `spider-referrers-update` | `{ [url]: referrers[] }` |
 | M → R | `spider-end` | `message: string` |
 

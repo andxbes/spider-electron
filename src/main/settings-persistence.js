@@ -2,10 +2,13 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { app } = require('electron');
 
+const DEFAULT_CONCURRENCY = 3;
+const MAX_CONCURRENCY = 20;
+
 const DEFAULT_SETTINGS = {
     useSitemap: false,
     maxPages: 0,
-    lastStartUrl: '',
+    concurrency: DEFAULT_CONCURRENCY,
 };
 
 function getSettingsPath() {
@@ -13,10 +16,14 @@ function getSettingsPath() {
 }
 
 function normalizeSettings(raw) {
+    const concurrency = parseInt(raw?.concurrency, 10);
     return {
         useSitemap: Boolean(raw?.useSitemap),
         maxPages: Math.max(0, parseInt(raw?.maxPages, 10) || 0),
-        lastStartUrl: typeof raw?.lastStartUrl === 'string' ? raw.lastStartUrl : '',
+        concurrency: Math.min(
+            MAX_CONCURRENCY,
+            Math.max(1, Number.isNaN(concurrency) ? DEFAULT_CONCURRENCY : concurrency)
+        ),
     };
 }
 
@@ -40,6 +47,8 @@ async function saveSettings(settings) {
 
 module.exports = {
     DEFAULT_SETTINGS,
+    DEFAULT_CONCURRENCY,
+    MAX_CONCURRENCY,
     getSettingsPath,
     loadSettings,
     saveSettings,

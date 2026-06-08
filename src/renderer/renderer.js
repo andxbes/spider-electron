@@ -7,6 +7,7 @@ const selectedUrlHint = document.getElementById('selectedUrlHint');
 const statusText = document.getElementById('status-text');
 const statusScanned = document.getElementById('status-scanned');
 const statusQueue = document.getElementById('status-queue');
+const statusActive = document.getElementById('status-active');
 
 const scanResults = new Map();
 const insertionOrder = [];
@@ -344,14 +345,11 @@ startButton.addEventListener('click', async () => {
         startButton.disabled = true;
 
         const settings = await loadSettings();
-        await saveSettings({
-            ...settings,
-            lastStartUrl: startUrl,
-        });
 
         window.api.startSpider(startUrl, {
             useSitemap: settings.useSitemap,
             maxPages: settings.maxPages,
+            concurrency: settings.concurrency,
         });
     } catch {
         alert('Будь ласка, введіть коректний URL (наприклад, https://example.com).');
@@ -382,11 +380,7 @@ window.api.onSpiderProgress((progress) => {
     statusText.textContent = progress.status || 'В процесі...';
     statusScanned.textContent = `Проскановано: ${progress.scanned}`;
     statusQueue.textContent = `У черзі: ${progress.queue}`;
-});
-
-(async function initMainPage() {
-    const settings = await loadSettings();
-    if (settings.lastStartUrl) {
-        urlInput.value = settings.lastStartUrl;
+    if (statusActive) {
+        statusActive.textContent = `Активних: ${progress.active ?? 0}`;
     }
-})();
+});

@@ -43,6 +43,21 @@
         </section>
 
         <section>
+          <label for="concurrency" class="block font-medium mb-1">Паралельних потоків</label>
+          <input
+            type="number"
+            id="concurrency"
+            min="1"
+            max="20"
+            placeholder="3"
+            class="w-32 p-2 border border-zinc-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none"
+          />
+          <p class="text-sm text-zinc-500 mt-1">
+            Скільки сторінок сканувати одночасно (1–20). Більше — швидше, але вище навантаження на сайт.
+          </p>
+        </section>
+
+        <section>
           <label for="maxPages" class="block font-medium mb-1">Ліміт сторінок</label>
           <input
             type="number"
