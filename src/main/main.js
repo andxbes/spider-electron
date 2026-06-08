@@ -45,6 +45,7 @@ app.on('window-all-closed', () => {
 // --- ЛОГІКА ВЕБ-ПАВУКА ---
 
 const USER_AGENT = 'MyElectronSpider/1.0 (+https://github.com/your-repo)';
+const ROBOTS_UA = 'MyElectronSpider/1.0';
 const FETCH_TIMEOUT_MS = 5000;
 const MAX_REDIRECT_HOPS = 10;
 const FALLBACK_SITEMAP_PATHS = ['/sitemap_index.xml', '/sitemap.xml', '/index.xml'];
@@ -123,11 +124,112 @@ function buildSpiderResult(overrides) {
         metaDescription: '',
         metaCanonical: '',
         contentType: '',
+        metaRobots: '',
+        metaRobotsStatus: 'none',
+        metaRobotsLabel: '',
+        robotsAllowed: null,
+        robotsRule: '',
         linkCount: 0,
         outlinks: [],
         headings: [],
         ...overrides,
     };
+}
+
+function getXRobotsTag(response) {
+    return response.headers.get('x-robots-tag') || '';
+}
+
+function getRobotsTxtInfo(robots, robotsText, url) {
+    const allowed = robots.isAllowed(url, ROBOTS_UA);
+    if (allowed === undefined) {
+        return {
+            robotsAllowed: null,
+            robotsRule: '—',
+        };
+    }
+
+    const lineNumber = robots.getMatchingLineNumber(url, ROBOTS_UA);
+    let robotsRule = '';
+
+    if (lineNumber > 0 && robotsText) {
+        const line = robotsText.split('\n')[lineNumber - 1];
+        robotsRule = line ? line.trim() : '';
+    } else if (allowed) {
+        robotsRule = 'немає правила (дозволено)';
+    } else {
+        robotsRule = 'заборонено';
+    }
+
+    return {
+        robotsAllowed: allowed,
+        robotsRule,
+    };
+}
+
+function parseMetaRobotsDirective(content) {
+    const raw = String(content || '').trim();
+    if (!raw) {
+        return {
+            metaRobots: '',
+            metaRobotsStatus: 'allowed',
+            metaRobotsLabel: 'index, follow',
+            blocksFollow: false,
+        };
+    }
+
+    const tokens = raw.toLowerCase().split(/[,\s]+/).filter(Boolean);
+    const hasNoindex = tokens.includes('noindex');
+    const hasNofollow = tokens.includes('nofollow');
+
+    if (hasNoindex && hasNofollow) {
+        return {
+            metaRobots: raw,
+            metaRobotsStatus: 'closed',
+            metaRobotsLabel: raw,
+            blocksFollow: true,
+        };
+    }
+    if (hasNoindex) {
+        return {
+            metaRobots: raw,
+            metaRobotsStatus: 'noindex',
+            metaRobotsLabel: raw,
+            blocksFollow: false,
+        };
+    }
+    if (hasNofollow) {
+        return {
+            metaRobots: raw,
+            metaRobotsStatus: 'nofollow',
+            metaRobotsLabel: raw,
+            blocksFollow: true,
+        };
+    }
+
+    return {
+        metaRobots: raw,
+        metaRobotsStatus: 'allowed',
+        metaRobotsLabel: raw,
+        blocksFollow: false,
+    };
+}
+
+function buildResultWithIndexing(robots, robotsText, url, fields, metaRobotsRaw = null) {
+    const metaFields = metaRobotsRaw === null
+        ? {
+            metaRobots: '',
+            metaRobotsStatus: 'none',
+            metaRobotsLabel: '',
+            blocksFollow: false,
+        }
+        : parseMetaRobotsDirective(metaRobotsRaw);
+
+    return buildSpiderResult({
+        ...getRobotsTxtInfo(robots, robotsText, url),
+        ...metaFields,
+        ...fields,
+    });
 }
 
 function normalizePageUrl(url) {
@@ -361,12 +463,12 @@ async function crawl(url, referrer, browserWindow) {
     console.log(`Сканую: ${url}`);
 
     const urlObject = new URL(url);
-    const { parser: robots } = await getRobots(urlObject);
+    const { parser: robots, text: robotsText } = await getRobots(urlObject);
 
-    if (!robots.isAllowed(url, 'MyElectronSpider/1.0')) {
+    if (!robots.isAllowed(url, ROBOTS_UA)) {
         console.log(`Заблоковано robots.txt: ${url}`);
         const referrers = referrersMap.has(url) ? Array.from(referrersMap.get(url)) : (referrer !== 'N/A' ? [referrer] : []);
-        browserWindow.webContents.send('spider-result', buildSpiderResult({
+        browserWindow.webContents.send('spider-result', buildResultWithIndexing(robots, robotsText, url, {
             status: 'SKIPPED',
             url: url,
             title: 'Заблоковано robots.txt',
@@ -386,7 +488,7 @@ async function crawl(url, referrer, browserWindow) {
         while (isRedirectStatus(response.status) && hop < MAX_REDIRECT_HOPS) {
             const redirectUrl = resolveRedirectTarget(currentUrl, response.headers.get('location'));
 
-            browserWindow.webContents.send('spider-result', buildSpiderResult({
+            browserWindow.webContents.send('spider-result', buildResultWithIndexing(robots, robotsText, currentUrl, {
                 status: response.status,
                 url: currentUrl,
                 title: `Редирект на ${redirectUrl || 'невідомо'}`,
@@ -428,7 +530,7 @@ async function crawl(url, referrer, browserWindow) {
         }
 
         if (isRedirectStatus(response.status)) {
-            browserWindow.webContents.send('spider-result', buildSpiderResult({
+            browserWindow.webContents.send('spider-result', buildResultWithIndexing(robots, robotsText, currentUrl, {
                 status: response.status,
                 url: currentUrl,
                 title: 'Занадто довгий ланцюжок редиректів',
@@ -444,18 +546,24 @@ async function crawl(url, referrer, browserWindow) {
             : (referrersMap.has(currentUrl) ? Array.from(referrersMap.get(currentUrl)) : [previousUrl].filter(Boolean));
 
         if (!response.ok) {
-            browserWindow.webContents.send('spider-result', buildSpiderResult({
-                status: response.status,
-                url: currentUrl,
-                title: `HTTP ${response.status}`,
-                referrers: pageReferrers,
-                contentType,
-            }));
+            browserWindow.webContents.send('spider-result', buildResultWithIndexing(
+                robots,
+                robotsText,
+                currentUrl,
+                {
+                    status: response.status,
+                    url: currentUrl,
+                    title: `HTTP ${response.status}`,
+                    referrers: pageReferrers,
+                    contentType,
+                },
+                getXRobotsTag(response) || null
+            ));
             return;
         }
 
         if (!isHtmlContent(contentType)) {
-            browserWindow.webContents.send('spider-result', buildSpiderResult({
+            browserWindow.webContents.send('spider-result', buildResultWithIndexing(robots, robotsText, currentUrl, {
                 status: response.status,
                 url: currentUrl,
                 title: contentType || 'Медіа / не-HTML',
@@ -496,21 +604,32 @@ async function crawl(url, referrer, browserWindow) {
             });
         });
 
-        browserWindow.webContents.send('spider-result', buildSpiderResult({
-            status: response.status,
-            url: currentUrl,
-            title: title || 'Без заголовка',
-            referrers: pageReferrers,
-            metaDescription: description,
-            metaCanonical: canonical,
-            contentType: contentType || 'text/html',
-            linkCount: outlinks.length,
-            outlinks: outlinks,
-            headings: headings,
-        }));
+        const metaRobotsRaw = $('meta[name="robots"]').attr('content')
+            || $('meta[name="googlebot"]').attr('content')
+            || getXRobotsTag(response)
+            || '';
+        const metaRobotsParsed = parseMetaRobotsDirective(metaRobotsRaw);
 
-        const metaRobots = $('meta[name="robots"]').attr('content') || '';
-        if (metaRobots.includes('nofollow')) {
+        browserWindow.webContents.send('spider-result', buildResultWithIndexing(
+            robots,
+            robotsText,
+            currentUrl,
+            {
+                status: response.status,
+                url: currentUrl,
+                title: title || 'Без заголовка',
+                referrers: pageReferrers,
+                metaDescription: description,
+                metaCanonical: canonical,
+                contentType: contentType || 'text/html',
+                linkCount: outlinks.length,
+                outlinks: outlinks,
+                headings: headings,
+            },
+            metaRobotsRaw
+        ));
+
+        if (metaRobotsParsed.blocksFollow) {
             console.log(`Знайдено nofollow на сторінці: ${currentUrl}`);
             return;
         }
@@ -525,12 +644,17 @@ async function crawl(url, referrer, browserWindow) {
         const errorReferrers = referrersMap.has(url)
             ? Array.from(referrersMap.get(url))
             : (referrer !== 'N/A' ? [referrer] : []);
-        browserWindow.webContents.send('spider-result', buildSpiderResult({
-            status: 'ERROR',
-            url: url,
-            title: error.message || 'Помилка мережі',
-            referrers: errorReferrers,
-        }));
+        browserWindow.webContents.send('spider-result', buildResultWithIndexing(
+            robots,
+            robotsText,
+            url,
+            {
+                status: 'ERROR',
+                url: url,
+                title: error.message || 'Помилка мережі',
+                referrers: errorReferrers,
+            }
+        ));
     }
 }
 

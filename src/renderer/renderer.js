@@ -30,6 +30,9 @@ let activeContentFilter = 'all';
 let activeStatusFilter = 'all';
 /** @type {'idle' | 'running' | 'paused'} */
 let uiState = 'idle';
+let knownStatusCodes = new Set();
+let refreshTableTimer = null;
+const REFRESH_TABLE_DELAY_MS = 120;
 
 const MEDIA_EXTENSIONS = new Set([
     'jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'ico', 'bmp', 'avif', 'tif', 'tiff',
@@ -55,6 +58,40 @@ function statusRowClass(status) {
     if (status === 'ERROR' || (typeof status === 'number' && status >= 400)) return 'text-red-700';
     if (typeof status === 'number' && status >= 300 && status < 400) return 'text-blue-700';
     return 'text-zinc-600';
+}
+
+function indexingStateClass(kind, status, allowed) {
+    if (kind === 'meta') {
+        if (status === 'none') return 'text-zinc-400';
+        if (status === 'allowed') return 'text-green-700';
+        return 'text-red-700';
+    }
+    if (allowed === null || allowed === undefined) return 'text-zinc-400';
+    return allowed ? 'text-green-700' : 'text-red-700';
+}
+
+function metaRobotsCellHtml(data) {
+    const status = data.metaRobotsStatus || 'none';
+    if (status === 'none') {
+        return '<span class="text-zinc-400 italic">—</span>';
+    }
+    const label = data.metaRobotsLabel || data.metaRobots || 'index, follow';
+    const cls = indexingStateClass('meta', status);
+    const title = status === 'allowed'
+        ? 'Дозволено для індексації та обходу'
+        : 'Закрито (noindex / nofollow)';
+    return `<span class="${cls} font-medium" title="${escapeHtml(title)}: ${escapeHtml(label)}">${escapeHtml(truncate(label, 28))}</span>`;
+}
+
+function robotsTxtCellHtml(data) {
+    if (data.robotsAllowed === null && !data.robotsRule) {
+        return '<span class="text-zinc-400 italic">—</span>';
+    }
+    const allowed = data.robotsAllowed !== false;
+    const rule = data.robotsRule || (allowed ? 'Дозволено' : 'Заборонено');
+    const cls = indexingStateClass('robots', null, data.robotsAllowed);
+    const title = allowed ? `Дозволено: ${rule}` : `Заборонено: ${rule}`;
+    return `<span class="${cls} font-medium" title="${escapeHtml(title)}">${escapeHtml(truncate(rule, 32))}</span>`;
 }
 
 function statusSortValue(status) {
@@ -144,18 +181,25 @@ function getFilteredResults() {
     return Array.from(scanResults.values()).filter(passesTableFilters);
 }
 
-function updateStatusFilterOptions() {
+function updateStatusFilterOptions({ force = false } = {}) {
     if (!statusFilter) {
         return;
     }
 
-    const current = statusFilter.value;
     const numericStatuses = new Set();
     for (const data of scanResults.values()) {
         if (typeof data.status === 'number') {
             numericStatuses.add(data.status);
         }
     }
+
+    const statusesUnchanged = !force
+        && numericStatuses.size === knownStatusCodes.size
+        && [...numericStatuses].every((code) => knownStatusCodes.has(code));
+    if (statusesUnchanged) {
+        return;
+    }
+    knownStatusCodes = numericStatuses;
 
     const staticOptions = [
         { value: 'all', label: 'Усі' },
@@ -196,11 +240,11 @@ function updateStatusFilterOptions() {
         statusFilter.appendChild(exactGroup);
     }
 
-    const hasCurrent = [...statusFilter.options].some((opt) => opt.value === current);
-    statusFilter.value = hasCurrent ? current : 'all';
+    const hasCurrent = [...statusFilter.options].some((opt) => opt.value === activeStatusFilter);
     if (!hasCurrent) {
         activeStatusFilter = 'all';
     }
+    statusFilter.value = activeStatusFilter;
 }
 
 function updateFilterCount(shown, total) {
@@ -217,13 +261,14 @@ function updateFilterCount(shown, total) {
 function resetTableFilters() {
     activeContentFilter = 'all';
     activeStatusFilter = 'all';
+    knownStatusCodes = new Set();
     if (contentTypeFilter) {
         contentTypeFilter.value = 'all';
     }
     if (statusFilter) {
         statusFilter.value = 'all';
     }
-    updateStatusFilterOptions();
+    updateStatusFilterOptions({ force: true });
 }
 
 function truncate(str, len = 80) {
@@ -401,6 +446,8 @@ function createTableRow(data, displayIndex) {
         <td class="p-2 text-zinc-400">${displayIndex}</td>
         <td class="p-2">${urlCellHtml(data.url)}</td>
         <td class="p-2"><span class="font-mono font-semibold ${statusRowClass(data.status)}">${escapeHtml(data.status)}</span></td>
+        <td class="p-2">${metaRobotsCellHtml(data)}</td>
+        <td class="p-2">${robotsTxtCellHtml(data)}</td>
         <td class="p-2" title="${escapeHtml(data.title)}">${escapeHtml(truncate(data.title, 50))}</td>
         <td class="p-2" title="${escapeHtml(data.metaDescription)}">${escapeHtml(truncate(data.metaDescription, 60))}</td>
         <td class="p-2 text-center">${linkCount}</td>
@@ -436,20 +483,60 @@ function refreshTable() {
         document.querySelectorAll('#resultsTable tr').forEach((tr) => {
             tr.classList.remove('bg-blue-50');
         });
+    } else if (selectedUrl && scanResults.has(selectedUrl)) {
+        syncSelectedRowUi();
     }
+}
+
+function syncSelectedRowUi() {
+    if (!selectedUrl || !scanResults.has(selectedUrl)) {
+        return;
+    }
+    selectedUrlHint.textContent = truncate(selectedUrl, 80);
+    selectedUrlHint.title = selectedUrl;
+    if (selectedUrlBar) {
+        selectedUrlBar.querySelectorAll('.url-copy, .url-open').forEach((el) => el.remove());
+        const actions = document.createElement('span');
+        actions.innerHTML = urlActionButtons(selectedUrl);
+        selectedUrlBar.appendChild(actions);
+    }
+    renderDetailPanel();
+}
+
+function requestRefreshTable({ immediate = false } = {}) {
+    if (immediate) {
+        if (refreshTableTimer) {
+            clearTimeout(refreshTableTimer);
+            refreshTableTimer = null;
+        }
+        refreshTable();
+        return;
+    }
+
+    if (refreshTableTimer) {
+        return;
+    }
+
+    const delay = uiState === 'running' ? REFRESH_TABLE_DELAY_MS : 0;
+    refreshTableTimer = setTimeout(() => {
+        refreshTableTimer = null;
+        refreshTable();
+    }, delay);
 }
 
 function upsertScanResult(data) {
     if (!data.outlinks) {
         data.outlinks = [];
     }
-    if (!scanResults.has(data.url)) {
+    const isNew = !scanResults.has(data.url);
+    if (isNew) {
         insertionOrder.push(data.url);
     }
     scanResults.set(data.url, data);
-    refreshTable();
-    if (!selectedUrl) {
-        selectRow(data.url);
+    requestRefreshTable();
+
+    if (isNew && !selectedUrl) {
+        selectedUrl = data.url;
     } else if (selectedUrl === data.url) {
         renderDetailPanel();
     }
@@ -475,14 +562,14 @@ document.querySelectorAll('.detail-tab').forEach((btn) => {
 if (contentTypeFilter) {
     contentTypeFilter.addEventListener('change', () => {
         activeContentFilter = contentTypeFilter.value;
-        refreshTable();
+        requestRefreshTable({ immediate: true });
     });
 }
 
 if (statusFilter) {
     statusFilter.addEventListener('change', () => {
         activeStatusFilter = statusFilter.value;
-        refreshTable();
+        requestRefreshTable({ immediate: true });
     });
 }
 
@@ -496,7 +583,7 @@ document.querySelectorAll('.sortable-th').forEach((th) => {
             sortState.direction = 'asc';
         }
         updateSortIndicators();
-        refreshTable();
+        requestRefreshTable({ immediate: true });
     });
 });
 
@@ -505,15 +592,7 @@ function selectRow(url) {
     document.querySelectorAll('#resultsTable tr').forEach((tr) => {
         tr.classList.toggle('bg-blue-50', tr.dataset.url === url);
     });
-    selectedUrlHint.textContent = truncate(url, 80);
-    selectedUrlHint.title = url;
-    if (selectedUrlBar) {
-        selectedUrlBar.querySelectorAll('.url-copy, .url-open').forEach((el) => el.remove());
-        const actions = document.createElement('span');
-        actions.innerHTML = urlActionButtons(url);
-        selectedUrlBar.appendChild(actions);
-    }
-    renderDetailPanel();
+    syncSelectedRowUi();
 }
 
 function renderDetailTable(rows) {
@@ -571,6 +650,8 @@ function buildDetailRows(data) {
         ['Meta Description', escapeHtml(data.metaDescription) || '<span class="text-zinc-400 italic">—</span>'],
         ['Meta Description Length', data.metaDescription ? String(data.metaDescription.length) : '0'],
         ['Canonical', data.metaCanonical ? urlCellHtml(data.metaCanonical) : '<span class="text-zinc-400 italic">—</span>'],
+        ['Meta robots', metaRobotsCellHtml(data)],
+        ['Robots.txt', robotsTxtCellHtml(data)],
         ['H1', escapeHtml(h1?.text) || '<span class="text-zinc-400 italic">—</span>'],
         [
             'H2',
@@ -617,7 +698,7 @@ exportButton.addEventListener('click', () => {
     if (scanResults.size === 0) return;
 
     const bom = '\uFEFF';
-    const headers = ['URL', 'Status', 'Content-Type', 'Resource Type', 'Title', 'Meta Description', 'Canonical', 'Link Count', 'Redirect URL', 'Referrers', 'Headings'];
+    const headers = ['URL', 'Status', 'Meta Robots', 'Robots.txt Rule', 'Robots.txt Allowed', 'Content-Type', 'Resource Type', 'Title', 'Meta Description', 'Canonical', 'Link Count', 'Redirect URL', 'Referrers', 'Headings'];
     const csvRows = [headers.join(',')];
 
     for (const data of getFilteredResults()) {
@@ -626,6 +707,9 @@ exportButton.addEventListener('click', () => {
         const row = [
             `"${(data.url || '').replace(/"/g, '""')}"`,
             `"${(data.status || '')}"`,
+            `"${(data.metaRobotsLabel || data.metaRobots || '').replace(/"/g, '""')}"`,
+            `"${(data.robotsRule || '').replace(/"/g, '""')}"`,
+            `"${data.robotsAllowed === false ? 'Заборонено' : (data.robotsAllowed ? 'Дозволено' : '')}"`,
             `"${(data.contentType || '').replace(/"/g, '""')}"`,
             `"${getResourceType(data)}"`,
             `"${(data.title || '').replace(/"/g, '""')}"`,
@@ -674,9 +758,14 @@ stopButton.addEventListener('click', async () => {
     if (uiState !== 'running') {
         return;
     }
-    await window.api.pauseSpider();
     setUIState('paused');
     statusText.textContent = 'На паузі';
+    if (refreshTableTimer) {
+        clearTimeout(refreshTableTimer);
+        refreshTableTimer = null;
+    }
+    requestRefreshTable({ immediate: true });
+    await window.api.pauseSpider();
 });
 
 resumeButton.addEventListener('click', async () => {
@@ -714,6 +803,7 @@ window.api.onSpiderReferrersUpdate((allReferrers) => {
 window.api.onSpiderEnd((message) => {
     statusText.textContent = message;
     setUIState('idle');
+    requestRefreshTable({ immediate: true });
 });
 
 window.api.onSpiderProgress((progress) => {
