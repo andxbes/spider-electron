@@ -189,6 +189,87 @@ function extractMetaDescription($) {
     return values.join('; ');
 }
 
+function firstSrcsetUrl(srcset) {
+    const first = String(srcset || '').split(',')[0]?.trim().split(/\s+/)[0];
+    return first || '';
+}
+
+function isSkippableHref(href) {
+    const value = String(href || '').trim();
+    if (!value) {
+        return true;
+    }
+    const lower = value.toLowerCase();
+    return lower.startsWith('javascript:')
+        || lower.startsWith('mailto:')
+        || lower.startsWith('tel:')
+        || lower.startsWith('data:')
+        || lower.startsWith('blob:')
+        || value === '#';
+}
+
+function collectPageOutlinks($, currentUrl) {
+    const outlinks = [];
+    const seen = new Set();
+
+    const addOutlink = (href, text = '') => {
+        if (isSkippableHref(href)) {
+            return;
+        }
+        try {
+            const absoluteUrl = normalizePageUrl(new URL(href, currentUrl).href);
+            if (seen.has(absoluteUrl)) {
+                return;
+            }
+            seen.add(absoluteUrl);
+            outlinks.push({
+                href: absoluteUrl,
+                text: String(text || '').trim().slice(0, 200),
+            });
+        } catch {
+            // невалідний URL
+        }
+    };
+
+    $('a[href]').each((_, link) => {
+        addOutlink($(link).attr('href'), extractElementText($, link));
+    });
+
+    $('img[src]').each((_, img) => {
+        const el = $(img);
+        addOutlink(el.attr('src'), el.attr('alt') || el.attr('title') || 'image');
+        const srcset = firstSrcsetUrl(el.attr('srcset'));
+        if (srcset) {
+            addOutlink(srcset, el.attr('alt') || el.attr('title') || 'image');
+        }
+    });
+
+    $('picture source[srcset], source[src]').each((_, source) => {
+        const el = $(source);
+        addOutlink(el.attr('src'), 'media');
+        const srcset = firstSrcsetUrl(el.attr('srcset'));
+        if (srcset) {
+            addOutlink(srcset, 'media');
+        }
+    });
+
+    $('video[src]').each((_, video) => {
+        addOutlink($(video).attr('src'), 'video');
+    });
+    $('video source[src]').each((_, source) => {
+        addOutlink($(source).attr('src'), 'video');
+    });
+
+    $('audio[src]').each((_, audio) => {
+        addOutlink($(audio).attr('src'), 'audio');
+    });
+    $('audio source[src]').each((_, source) => {
+        addOutlink($(source).attr('src'), 'audio');
+    });
+
+    return outlinks;
+}
+
 function extractMetaRobotsRaw($, response) {
     let values = collectMetaAttributeValues($, 'head meta[name="robots"], head meta[name="googlebot"]');
     if (!values.length) {
@@ -316,7 +397,69 @@ function buildResultWithIndexing(robots, robotsText, url, fields, metaRobotsRaw 
 }
 
 function normalizePageUrl(url) {
-    return new URL(url).href.split('#')[0];
+    const parsed = new URL(url);
+    parsed.hash = '';
+    return parsed.href;
+}
+
+function mergeReferrerText(targetMap, referrerUrl, linkText = '') {
+    const text = String(linkText || '').trim().slice(0, 200);
+    if (!targetMap.has(referrerUrl)) {
+        targetMap.set(referrerUrl, text);
+        return;
+    }
+    const existing = targetMap.get(referrerUrl) || '';
+    if (!text || existing === text) {
+        return;
+    }
+    if (!existing) {
+        targetMap.set(referrerUrl, text);
+        return;
+    }
+    if (!existing.includes(text)) {
+        targetMap.set(referrerUrl, `${existing}; ${text}`.slice(0, 200));
+    }
+}
+
+function addReferrer(targetUrl, referrerUrl, linkText = '') {
+    if (!referrersMap.has(targetUrl)) {
+        referrersMap.set(targetUrl, new Map());
+    }
+    try {
+        mergeReferrerText(referrersMap.get(targetUrl), normalizePageUrl(referrerUrl), linkText);
+    } catch {
+        mergeReferrerText(referrersMap.get(targetUrl), referrerUrl, linkText);
+    }
+}
+
+function referrerEntry(href, text = '') {
+    return { href, text: text || '' };
+}
+
+function getReferrersListForUrl(url) {
+    const refs = referrersMap.get(url);
+    if (!refs) {
+        return [];
+    }
+    return Array.from(refs.entries()).map(([href, text]) => referrerEntry(href, text));
+}
+
+function getReferrersSnapshot(url, fallbackReferrer = null) {
+    if (referrersMap.has(url)) {
+        return getReferrersListForUrl(url);
+    }
+    if (fallbackReferrer && fallbackReferrer !== 'N/A') {
+        return [referrerEntry(fallbackReferrer)];
+    }
+    return [];
+}
+
+function buildAllReferrersPayload() {
+    const payload = {};
+    for (const [link, refs] of referrersMap.entries()) {
+        payload[link] = Array.from(refs.entries()).map(([href, text]) => referrerEntry(href, text));
+    }
+    return payload;
 }
 
 function getUrlExtension(url) {
@@ -400,18 +543,15 @@ async function getRobots(urlObject) {
     return entry;
 }
 
-function enqueueUrl(url, referrer, allowedHostname) {
+function enqueueUrl(url, referrer, allowedHostname, linkText = '') {
     try {
         const absoluteUrl = normalizePageUrl(url);
         if (!isSameHost(absoluteUrl, allowedHostname)) {
             return;
         }
 
-        if (!referrersMap.has(absoluteUrl)) {
-            referrersMap.set(absoluteUrl, new Set());
-        }
         if (referrer !== 'N/A') {
-            referrersMap.get(absoluteUrl).add(referrer);
+            addReferrer(absoluteUrl, referrer, linkText);
         }
 
         if (!visitedUrls.has(absoluteUrl) && !isUrlQueued(absoluteUrl)) {
@@ -515,7 +655,7 @@ async function seedQueueFromSitemaps(startUrl, browserWindow) {
         const urls = await fetchSitemapPageUrls(sitemapUrl, start.hostname, fetchedSitemaps);
         for (const pageUrl of urls) {
             pageUrls.add(pageUrl);
-            enqueueUrl(pageUrl, sitemapUrl, start.hostname);
+            enqueueUrl(pageUrl, sitemapUrl, start.hostname, 'sitemap');
         }
     }
 
@@ -550,7 +690,7 @@ async function crawl(url, referrer, browserWindow) {
 
     if (!robots.isAllowed(url, ROBOTS_UA)) {
         console.log(`Заблоковано robots.txt: ${url}`);
-        const referrers = referrersMap.has(url) ? Array.from(referrersMap.get(url)) : (referrer !== 'N/A' ? [referrer] : []);
+        const referrers = getReferrersSnapshot(url, referrer);
         browserWindow.webContents.send('spider-result', buildResultWithIndexing(robots, robotsText, url, {
             status: 'SKIPPED',
             url: url,
@@ -561,7 +701,7 @@ async function crawl(url, referrer, browserWindow) {
     }
 
     try {
-        const referrers = referrersMap.has(url) ? Array.from(referrersMap.get(url)) : (referrer !== 'N/A' ? [referrer] : []);
+        const referrers = getReferrersSnapshot(url, referrer);
 
         let currentUrl = url;
         let timed = await timedFetch(currentUrl);
@@ -577,12 +717,16 @@ async function crawl(url, referrer, browserWindow) {
                 status: response.status,
                 url: currentUrl,
                 title: '',
-                referrers: previousUrl === null ? referrers : [previousUrl],
+                referrers: previousUrl === null ? referrers : [referrerEntry(previousUrl)],
                 redirectUrl: redirectUrl,
                 responseTimeMs,
             }));
 
             if (!redirectUrl) {
+                return;
+            }
+
+            if (redirectUrl === currentUrl) {
                 return;
             }
 
@@ -607,10 +751,7 @@ async function crawl(url, referrer, browserWindow) {
             }
             visitedUrls.add(currentUrl);
 
-            if (!referrersMap.has(currentUrl)) {
-                referrersMap.set(currentUrl, new Set());
-            }
-            referrersMap.get(currentUrl).add(previousUrl);
+            addReferrer(currentUrl, previousUrl);
 
             timed = await timedFetch(currentUrl);
             response = timed.response;
@@ -622,7 +763,7 @@ async function crawl(url, referrer, browserWindow) {
                 status: response.status,
                 url: currentUrl,
                 title: '',
-                referrers: previousUrl === null ? referrers : [previousUrl],
+                referrers: previousUrl === null ? referrers : [referrerEntry(previousUrl)],
                 redirectUrl: resolveRedirectTarget(currentUrl, response.headers.get('location')),
                 responseTimeMs,
             }));
@@ -632,7 +773,9 @@ async function crawl(url, referrer, browserWindow) {
         const contentType = getContentType(response);
         const pageReferrers = currentUrl === url
             ? referrers
-            : (referrersMap.has(currentUrl) ? Array.from(referrersMap.get(currentUrl)) : [previousUrl].filter(Boolean));
+            : (referrersMap.has(currentUrl)
+                ? getReferrersListForUrl(currentUrl)
+                : (previousUrl ? [referrerEntry(previousUrl)] : []));
 
         if (!response.ok) {
             browserWindow.webContents.send('spider-result', buildResultWithIndexing(
@@ -671,22 +814,7 @@ async function crawl(url, referrer, browserWindow) {
         const title = extractPageTitle($);
         const description = extractMetaDescription($);
         const canonical = $('link[rel="canonical"]').attr('href') || '';
-        const outlinks = [];
-        $('a').each((i, link) => {
-            const href = $(link).attr('href');
-            if (!href) {
-                return;
-            }
-            try {
-                const absoluteUrl = normalizePageUrl(new URL(href, currentUrl).href);
-                outlinks.push({
-                    href: absoluteUrl,
-                    text: extractElementText($, link).slice(0, 200),
-                });
-            } catch (e) {
-                // невалідний href
-            }
-        });
+        const outlinks = collectPageOutlinks($, currentUrl);
 
         const headings = [];
         $('h1, h2, h3, h4, h5, h6').each((i, el) => {
@@ -730,14 +858,12 @@ async function crawl(url, referrer, browserWindow) {
 
         if (!isSessionPaused(session) && !session?.stopped) {
             for (const outlink of outlinks) {
-                enqueueUrl(outlink.href, currentUrl, urlObject.hostname);
+                enqueueUrl(outlink.href, currentUrl, urlObject.hostname, outlink.text);
             }
         }
     } catch (error) {
         console.error(`Помилка під час сканування ${url}: ${error.message}`);
-        const errorReferrers = referrersMap.has(url)
-            ? Array.from(referrersMap.get(url))
-            : (referrer !== 'N/A' ? [referrer] : []);
+        const errorReferrers = getReferrersSnapshot(url, referrer);
         browserWindow.webContents.send('spider-result', buildResultWithIndexing(
             robots,
             robotsText,
@@ -766,11 +892,7 @@ function completeScan(session, endMessage) {
     session.sendProgress();
     console.log(endMessage);
 
-    const allReferrers = {};
-    for (const [link, refs] of referrersMap.entries()) {
-        allReferrers[link] = Array.from(refs);
-    }
-    session.browserWindow.webContents.send('spider-referrers-update', allReferrers);
+    session.browserWindow.webContents.send('spider-referrers-update', buildAllReferrersPayload());
     session.browserWindow.webContents.send('spider-end', endMessage);
 }
 

@@ -18,7 +18,13 @@ function cloneResultEntry(data) {
         responseTimeMs: data.responseTimeMs ?? null,
         redirectUrl: data.redirectUrl ?? '',
         linkCount: data.linkCount ?? 0,
-        referrers: Array.isArray(data.referrers) ? [...data.referrers] : [],
+        referrers: Array.isArray(data.referrers)
+            ? data.referrers.map((ref) => (
+                typeof ref === 'string'
+                    ? { href: ref, text: '' }
+                    : { href: ref.href ?? '', text: ref.text ?? '' }
+            ))
+            : [],
         outlinks: Array.isArray(data.outlinks) ? data.outlinks.map((link) => ({ ...link })) : [],
         headings: Array.isArray(data.headings) ? data.headings.map((heading) => ({ ...heading })) : [],
     };

@@ -41,6 +41,7 @@ let activeH1Filter = 'all';
 /** @type {'all' | 'h1' | 'title' | 'description'} */
 let activeDuplicateFilter = 'all';
 let duplicateCountsCache = null;
+let latestReferrersByUrl = new Map();
 /** @type {'idle' | 'running' | 'paused'} */
 let uiState = 'idle';
 let knownStatusCodes = new Set();
@@ -228,6 +229,60 @@ function getH1Count(data) {
     return (data.headings || []).filter((heading) => heading.level === 1).length;
 }
 
+function normalizeReferrerEntry(item) {
+    if (typeof item === 'string') {
+        return { href: item, text: '' };
+    }
+    return {
+        href: String(item?.href || '').trim(),
+        text: String(item?.text || '').trim(),
+    };
+}
+
+function getReferrersForUrl(url) {
+    let raw = [];
+    if (latestReferrersByUrl.has(url)) {
+        raw = latestReferrersByUrl.get(url);
+    } else {
+        const data = scanResults.get(url);
+        if (data?.referrers?.length) {
+            raw = data.referrers;
+        }
+    }
+    return raw.map(normalizeReferrerEntry).filter((entry) => entry.href);
+}
+
+function rebuildLatestReferrersFromResults() {
+    latestReferrersByUrl = new Map();
+    for (const [url, data] of scanResults.entries()) {
+        if (data.referrers?.length) {
+            latestReferrersByUrl.set(url, data.referrers);
+        }
+    }
+}
+
+function applyReferrersUpdate(allReferrers) {
+    latestReferrersByUrl = new Map();
+    for (const [url, refs] of Object.entries(allReferrers || {})) {
+        const normalized = Array.isArray(refs)
+            ? refs.map(normalizeReferrerEntry).filter((entry) => entry.href)
+            : [];
+        latestReferrersByUrl.set(url, normalized);
+    }
+
+    for (const [url, data] of scanResults.entries()) {
+        if (latestReferrersByUrl.has(url)) {
+            data.referrers = latestReferrersByUrl.get(url);
+        }
+    }
+
+    requestRefreshTable({ immediate: true });
+    scheduleWorkspacePersist();
+    if (selectedUrl) {
+        renderDetailPanel();
+    }
+}
+
 function normalizeDuplicateKey(value) {
     const text = String(value ?? '').trim();
     return text ? text.toLowerCase() : '';
@@ -238,6 +293,24 @@ function getH1Texts(data) {
         .filter((heading) => heading.level === 1)
         .map((heading) => String(heading.text ?? '').trim())
         .filter(Boolean);
+}
+
+function getPrimaryH1Text(data) {
+    return getH1Texts(data)[0] || '';
+}
+
+function h1CellHtml(data, dupCounts) {
+    const h1Texts = getH1Texts(data);
+    if (!h1Texts.length) {
+        return '<span class="text-zinc-400 italic">—</span>';
+    }
+    const primary = h1Texts[0];
+    const h1Dup = getTextDuplicateCount(primary, dupCounts.h1);
+    const fullTitle = escapeHtml(h1Texts.join('\n'));
+    const extra = h1Texts.length > 1
+        ? `<span class="text-zinc-400 ml-1" title="${fullTitle}">+${h1Texts.length - 1}</span>`
+        : '';
+    return `<span title="${fullTitle}">${escapeHtml(truncate(primary, 50))}</span>${duplicateCountBadge(h1Dup)}${extra}`;
 }
 
 function invalidateDuplicateCounts() {
@@ -603,6 +676,7 @@ function setUIState(state) {
 
 function clearScanData() {
     invalidateDuplicateCounts();
+    latestReferrersByUrl = new Map();
     scanResults.clear();
     insertionOrder.length = 0;
     selectedUrl = null;
@@ -704,6 +778,7 @@ function populateScanResults(normalized) {
             scanResults.set(entry.url, entry);
         }
     }
+    rebuildLatestReferrersFromResults();
 }
 
 function restoreWorkspaceFromSession() {
@@ -767,7 +842,7 @@ async function beginScan(startUrl, { clearResults = true } = {}) {
 
 function getRowMetrics(data) {
     return {
-        inCount: data.referrers?.length || 0,
+        inCount: getReferrersForUrl(data.url).length,
         linkCount: data.linkCount ?? (data.outlinks?.length || 0),
     };
 }
@@ -804,6 +879,10 @@ function compareRows(a, b) {
         case 'title':
             va = (a.title || '').toLowerCase();
             vb = (b.title || '').toLowerCase();
+            break;
+        case 'h1':
+            va = getPrimaryH1Text(a).toLowerCase();
+            vb = getPrimaryH1Text(b).toLowerCase();
             break;
         case 'metaDescription':
             va = (a.metaDescription || '').toLowerCase();
@@ -860,6 +939,7 @@ function createTableRow(data, displayIndex) {
         <td class="p-2 text-right">${formatResponseTimeMs(data.responseTimeMs)}</td>
         <td class="p-2">${metaRobotsCellHtml(data)}</td>
         <td class="p-2">${robotsTxtCellHtml(data)}</td>
+        <td class="p-2">${h1CellHtml(data, dupCounts)}</td>
         <td class="p-2" title="${escapeHtml(data.title)}">${escapeHtml(truncate(data.title, 50))}${duplicateCountBadge(titleDup)}</td>
         <td class="p-2" title="${escapeHtml(data.metaDescription)}">${escapeHtml(truncate(data.metaDescription, 60))}${duplicateCountBadge(descDup)}</td>
         <td class="p-2 text-center">${linkCount}</td>
@@ -1044,20 +1124,23 @@ function renderDetailTable(rows) {
     return `<table class="w-full border-collapse"><tbody>${body}</tbody></table>`;
 }
 
-function renderLinkTable(links, emptyText) {
+function renderLinkTable(links, emptyText, caption = '') {
     if (!links || links.length === 0) {
         return `<p class="p-4 text-zinc-400 italic">${escapeHtml(emptyText)}</p>`;
     }
+    const captionHtml = caption
+        ? `<p class="px-4 py-2 text-xs text-zinc-500 border-b border-zinc-100 bg-zinc-50">${escapeHtml(caption)}</p>`
+        : '';
     const rows = links
         .map(
             (link) => `
         <tr class="border-b border-zinc-100 hover:bg-zinc-50">
             <td class="p-2">${urlCellHtml(link.href || link)}</td>
-            <td class="p-2 text-zinc-600">${escapeHtml(link.text || '')}</td>
+            <td class="p-2 text-zinc-600">${link.text ? escapeHtml(link.text) : '<span class="text-zinc-400 italic">—</span>'}</td>
         </tr>`
         )
         .join('');
-    return `<table class="w-full border-collapse">
+    return `${captionHtml}<table class="w-full border-collapse">
         <thead class="bg-zinc-50 sticky top-0">
             <tr class="text-left text-zinc-500">
                 <th class="p-2 font-semibold">URL</th>
@@ -1146,10 +1229,11 @@ function renderDetailPanel() {
     if (activeTab === 'details') {
         detailContent.innerHTML = renderDetailTable(buildDetailRows(data));
     } else if (activeTab === 'inlinks') {
-        const inlinks = (data.referrers || []).map((href) => ({ href, text: '' }));
+        const inlinks = getReferrersForUrl(data.url);
         detailContent.innerHTML = renderLinkTable(
             inlinks,
-            'Немає вхідних посилань (стартова або лише з sitemap)'
+            'Немає вхідних посилань (стартова або лише з sitemap)',
+            inlinks.length ? `Всього вхідних: ${inlinks.length}` : ''
         );
     } else if (activeTab === 'outlinks') {
         detailContent.innerHTML = renderLinkTable(
@@ -1171,7 +1255,7 @@ exportButton.addEventListener('click', () => {
     const csvRows = [headers.join(',')];
 
     for (const data of entries) {
-        const referrers = formatCsvUrlListPreview(data.referrers);
+        const referrers = formatCsvUrlListPreview(getReferrersForUrl(data.url));
         const outlinks = formatCsvUrlListPreview(data.outlinks);
         const headings = data.headings ? data.headings.map((h) => `H${h.level}: ${h.text}`).join('; ') : '';
         const row = [
@@ -1360,13 +1444,7 @@ window.api.onSpiderResult((data) => {
 });
 
 window.api.onSpiderReferrersUpdate((allReferrers) => {
-    for (const [url, refs] of Object.entries(allReferrers)) {
-        if (scanResults.has(url)) {
-            const data = scanResults.get(url);
-            data.referrers = refs;
-            upsertScanResult(data);
-        }
-    }
+    applyReferrersUpdate(allReferrers);
 });
 
 window.api.onSpiderEnd((message) => {
