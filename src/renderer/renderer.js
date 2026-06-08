@@ -17,6 +17,8 @@ const statusQueue = document.getElementById('status-queue');
 const statusActive = document.getElementById('status-active');
 const contentTypeFilter = document.getElementById('contentTypeFilter');
 const statusFilter = document.getElementById('statusFilter');
+const indexingFilter = document.getElementById('indexingFilter');
+const h1Filter = document.getElementById('h1Filter');
 const filterCount = document.getElementById('filterCount');
 
 const scanResults = new Map();
@@ -28,6 +30,10 @@ let sortState = { column: null, direction: 'asc' };
 let activeContentFilter = 'all';
 /** @type {string} */
 let activeStatusFilter = 'all';
+/** @type {'all' | 'blocked'} */
+let activeIndexingFilter = 'all';
+/** @type {'all' | 'multiple'} */
+let activeH1Filter = 'all';
 /** @type {'idle' | 'running' | 'paused'} */
 let uiState = 'idle';
 let knownStatusCodes = new Set();
@@ -170,15 +176,51 @@ function matchesStatusFilter(status, filter) {
     return String(status) === filter;
 }
 
+function isMetaRobotsBlocked(data) {
+    const status = data.metaRobotsStatus || 'none';
+    return ['noindex', 'nofollow', 'closed'].includes(status);
+}
+
+function isRobotsTxtBlocked(data) {
+    return data.robotsAllowed === false || data.status === 'SKIPPED';
+}
+
+function isIndexingBlocked(data) {
+    return isMetaRobotsBlocked(data) || isRobotsTxtBlocked(data);
+}
+
+function getH1Count(data) {
+    return (data.headings || []).filter((heading) => heading.level === 1).length;
+}
+
 function passesTableFilters(data) {
     if (activeContentFilter !== 'all' && getResourceType(data) !== activeContentFilter) {
         return false;
     }
-    return matchesStatusFilter(data.status, activeStatusFilter);
+    if (!matchesStatusFilter(data.status, activeStatusFilter)) {
+        return false;
+    }
+    if (activeIndexingFilter === 'blocked' && !isIndexingBlocked(data)) {
+        return false;
+    }
+    if (activeH1Filter === 'multiple' && getH1Count(data) <= 1) {
+        return false;
+    }
+    return true;
 }
 
 function getFilteredResults() {
     return Array.from(scanResults.values()).filter(passesTableFilters);
+}
+
+function getDisplayedResults() {
+    const entries = getFilteredResults();
+    if (sortState.column) {
+        entries.sort(compareRows);
+    } else {
+        entries.sort((a, b) => insertionOrder.indexOf(a.url) - insertionOrder.indexOf(b.url));
+    }
+    return entries;
 }
 
 function updateStatusFilterOptions({ force = false } = {}) {
@@ -261,12 +303,20 @@ function updateFilterCount(shown, total) {
 function resetTableFilters() {
     activeContentFilter = 'all';
     activeStatusFilter = 'all';
+    activeIndexingFilter = 'all';
+    activeH1Filter = 'all';
     knownStatusCodes = new Set();
     if (contentTypeFilter) {
         contentTypeFilter.value = 'all';
     }
     if (statusFilter) {
         statusFilter.value = 'all';
+    }
+    if (indexingFilter) {
+        indexingFilter.value = 'all';
+    }
+    if (h1Filter) {
+        h1Filter.value = 'all';
     }
     updateStatusFilterOptions({ force: true });
 }
@@ -319,9 +369,10 @@ async function openUrlInBrowser(url) {
 }
 
 function updateExportButton() {
-    const hasData = scanResults.size > 0;
-    exportButton.disabled = !hasData;
-    exportButton.classList.toggle('hidden', !hasData);
+    const canExport = uiState === 'idle' || uiState === 'paused';
+    const hasVisibleRows = getFilteredResults().length > 0;
+    exportButton.disabled = !hasVisibleRows;
+    exportButton.classList.toggle('hidden', !canExport || scanResults.size === 0);
 }
 
 function setUIState(state) {
@@ -330,8 +381,10 @@ function setUIState(state) {
     controlsRunning.classList.toggle('hidden', state !== 'running');
     controlsPaused.classList.toggle('hidden', state !== 'paused');
     urlInput.disabled = state === 'running';
-    if (state === 'idle') {
+    if (state === 'idle' || state === 'paused') {
         updateExportButton();
+    } else {
+        exportButton.classList.add('hidden');
     }
 }
 
@@ -465,12 +518,7 @@ function createTableRow(data, displayIndex) {
 function refreshTable() {
     updateStatusFilterOptions();
 
-    const entries = getFilteredResults();
-    if (sortState.column) {
-        entries.sort(compareRows);
-    } else {
-        entries.sort((a, b) => insertionOrder.indexOf(a.url) - insertionOrder.indexOf(b.url));
-    }
+    const entries = getDisplayedResults();
 
     resultsTable.innerHTML = '';
     entries.forEach((data, i) => {
@@ -478,6 +526,9 @@ function refreshTable() {
     });
 
     updateFilterCount(entries.length, scanResults.size);
+    if (uiState === 'idle' || uiState === 'paused') {
+        updateExportButton();
+    }
 
     if (selectedUrl && !entries.some((row) => row.url === selectedUrl)) {
         document.querySelectorAll('#resultsTable tr').forEach((tr) => {
@@ -573,6 +624,20 @@ if (statusFilter) {
     });
 }
 
+if (indexingFilter) {
+    indexingFilter.addEventListener('change', () => {
+        activeIndexingFilter = indexingFilter.value;
+        requestRefreshTable({ immediate: true });
+    });
+}
+
+if (h1Filter) {
+    h1Filter.addEventListener('change', () => {
+        activeH1Filter = h1Filter.value;
+        requestRefreshTable({ immediate: true });
+    });
+}
+
 document.querySelectorAll('.sortable-th').forEach((th) => {
     th.addEventListener('click', () => {
         const col = th.dataset.sort;
@@ -636,7 +701,8 @@ function renderLinkTable(links, emptyText) {
 }
 
 function buildDetailRows(data) {
-    const h1 = (data.headings || []).find((h) => h.level === 1);
+    const h1List = (data.headings || []).filter((h) => h.level === 1);
+    const h1 = h1List[0];
     const h2List = (data.headings || []).filter((h) => h.level === 2);
     const { inCount, linkCount } = getRowMetrics(data);
 
@@ -652,7 +718,13 @@ function buildDetailRows(data) {
         ['Canonical', data.metaCanonical ? urlCellHtml(data.metaCanonical) : '<span class="text-zinc-400 italic">—</span>'],
         ['Meta robots', metaRobotsCellHtml(data)],
         ['Robots.txt', robotsTxtCellHtml(data)],
-        ['H1', escapeHtml(h1?.text) || '<span class="text-zinc-400 italic">—</span>'],
+        ['H1 Count', String(getH1Count(data))],
+        [
+            'H1',
+            h1List.length
+                ? h1List.map((h) => escapeHtml(h.text)).join('<br>')
+                : '<span class="text-zinc-400 italic">—</span>',
+        ],
         [
             'H2',
             h2List.length
@@ -695,13 +767,17 @@ function renderDetailPanel() {
 }
 
 exportButton.addEventListener('click', () => {
-    if (scanResults.size === 0) return;
+    const entries = getDisplayedResults();
+    if (entries.length === 0) {
+        alert('Немає рядків для експорту за поточними фільтрами.');
+        return;
+    }
 
     const bom = '\uFEFF';
-    const headers = ['URL', 'Status', 'Meta Robots', 'Robots.txt Rule', 'Robots.txt Allowed', 'Content-Type', 'Resource Type', 'Title', 'Meta Description', 'Canonical', 'Link Count', 'Redirect URL', 'Referrers', 'Headings'];
+    const headers = ['URL', 'Status', 'Meta Robots', 'Robots.txt Rule', 'Robots.txt Allowed', 'H1 Count', 'Content-Type', 'Resource Type', 'Title', 'Meta Description', 'Canonical', 'Link Count', 'Redirect URL', 'Referrers', 'Headings'];
     const csvRows = [headers.join(',')];
 
-    for (const data of getFilteredResults()) {
+    for (const data of entries) {
         const referrers = data.referrers ? data.referrers.join('; ') : '';
         const headings = data.headings ? data.headings.map((h) => `H${h.level}: ${h.text}`).join('; ') : '';
         const row = [
@@ -710,6 +786,7 @@ exportButton.addEventListener('click', () => {
             `"${(data.metaRobotsLabel || data.metaRobots || '').replace(/"/g, '""')}"`,
             `"${(data.robotsRule || '').replace(/"/g, '""')}"`,
             `"${data.robotsAllowed === false ? 'Заборонено' : (data.robotsAllowed ? 'Дозволено' : '')}"`,
+            `"${getH1Count(data)}"`,
             `"${(data.contentType || '').replace(/"/g, '""')}"`,
             `"${getResourceType(data)}"`,
             `"${(data.title || '').replace(/"/g, '""')}"`,
@@ -726,7 +803,7 @@ exportButton.addEventListener('click', () => {
     const blob = new Blob([bom + csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `spider_results_${new Date().toISOString().slice(0, 10)}.csv`;
+    link.download = `spider_filtered_${new Date().toISOString().slice(0, 10)}.csv`;
     link.click();
 });
 

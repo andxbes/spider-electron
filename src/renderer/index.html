@@ -27,14 +27,14 @@
             >
               Сканувати
             </button>
-            <button
-              id="exportButton"
-              disabled
-              class="px-4 py-2 bg-zinc-600 text-white rounded-md hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
-            >
-              Експорт CSV
-            </button>
           </div>
+          <button
+            id="exportButton"
+            disabled
+            class="hidden px-4 py-2 bg-zinc-600 text-white rounded-md hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+          >
+            Експорт CSV
+          </button>
           <div id="controlsRunning" class="hidden flex gap-2">
             <button
               id="stopButton"
@@ -95,6 +95,26 @@
               <option value="5xx">5xx</option>
               <option value="SKIPPED">SKIPPED</option>
               <option value="ERROR">Помилка мережі</option>
+            </select>
+          </label>
+          <label class="flex items-center gap-1.5">
+            <span class="text-zinc-500 whitespace-nowrap">Індексація:</span>
+            <select
+              id="indexingFilter"
+              class="px-2 py-1 border border-zinc-300 rounded bg-white text-zinc-800 min-w-[7rem]"
+            >
+              <option value="all">Усі</option>
+              <option value="blocked">Заблоковано</option>
+            </select>
+          </label>
+          <label class="flex items-center gap-1.5">
+            <span class="text-zinc-500 whitespace-nowrap">H1:</span>
+            <select
+              id="h1Filter"
+              class="px-2 py-1 border border-zinc-300 rounded bg-white text-zinc-800 min-w-[7rem]"
+            >
+              <option value="all">Усі</option>
+              <option value="multiple">Більше 1</option>
             </select>
           </label>
           <span id="filterCount" class="text-zinc-400 ml-auto whitespace-nowrap"></span>
