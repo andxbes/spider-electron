@@ -728,9 +728,19 @@ window.api.onSpiderProgress((progress) => {
         statusText.textContent = progress.status || 'В процесі...';
     }
     statusScanned.textContent = `Проскановано: ${progress.scanned}`;
-    statusQueue.textContent = `У черзі: ${progress.queue}`;
+    const queueHtml = progress.queueHtml ?? 0;
+    const queueMedia = progress.queueMedia ?? 0;
+    if (queueHtml > 0 || queueMedia > 0) {
+        statusQueue.textContent = `У черзі: ${progress.queue} (HTML: ${queueHtml}, медіа: ${queueMedia})`;
+    } else {
+        statusQueue.textContent = `У черзі: ${progress.queue ?? 0}`;
+    }
     if (statusActive) {
-        statusActive.textContent = `Активних: ${progress.active ?? 0}`;
+        const active = progress.active ?? 0;
+        const concurrency = progress.concurrency ?? 0;
+        statusActive.textContent = concurrency > 0
+            ? `Активних: ${active}/${concurrency}`
+            : `Активних: ${active}`;
     }
 });
 

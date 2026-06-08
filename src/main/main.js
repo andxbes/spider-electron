@@ -49,8 +49,19 @@ const FETCH_TIMEOUT_MS = 5000;
 const MAX_REDIRECT_HOPS = 10;
 const FALLBACK_SITEMAP_PATHS = ['/sitemap_index.xml', '/sitemap.xml', '/index.xml'];
 
+const MEDIA_URL_EXTENSIONS = new Set([
+    'jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'ico', 'bmp', 'avif', 'tif', 'tiff',
+    'mp4', 'webm', 'ogv', 'mov', 'avi', 'mkv',
+    'mp3', 'ogg', 'wav', 'flac', 'aac', 'm4a',
+    'pdf', 'zip', 'gz', 'rar', '7z', 'tar',
+    'css', 'js', 'mjs', 'map',
+    'woff', 'woff2', 'ttf', 'eot', 'otf',
+    'xml', 'json', 'txt', 'csv',
+]);
+
 const visitedUrls = new Set();
-let queue = [];
+let htmlQueue = [];
+let mediaQueue = [];
 let maxPagesToVisit = 0; // 0 = без ліміту
 const robotsCache = new Map(); // host -> { parser, text }
 const referrersMap = new Map();
@@ -123,6 +134,47 @@ function normalizePageUrl(url) {
     return new URL(url).href.split('#')[0];
 }
 
+function getUrlExtension(url) {
+    try {
+        const pathname = new URL(url).pathname;
+        const lastSegment = pathname.split('/').pop() || '';
+        const dotIndex = lastSegment.lastIndexOf('.');
+        if (dotIndex <= 0) {
+            return '';
+        }
+        return lastSegment.slice(dotIndex + 1).toLowerCase();
+    } catch {
+        return '';
+    }
+}
+
+function isLikelyMediaUrl(url) {
+    return MEDIA_URL_EXTENSIONS.has(getUrlExtension(url));
+}
+
+function getQueueLength() {
+    return htmlQueue.length + mediaQueue.length;
+}
+
+function isUrlQueued(url) {
+    return htmlQueue.some((item) => item.url === url) || mediaQueue.some((item) => item.url === url);
+}
+
+function clearQueues() {
+    htmlQueue = [];
+    mediaQueue = [];
+}
+
+function dequeueNextUrl() {
+    if (htmlQueue.length > 0) {
+        return htmlQueue.shift();
+    }
+    if (mediaQueue.length > 0) {
+        return mediaQueue.shift();
+    }
+    return null;
+}
+
 function isSameHost(url, hostname) {
     return new URL(url).hostname === hostname;
 }
@@ -177,8 +229,9 @@ function enqueueUrl(url, referrer, allowedHostname) {
             referrersMap.get(absoluteUrl).add(referrer);
         }
 
-        if (!visitedUrls.has(absoluteUrl) && !queue.some((item) => item.url === absoluteUrl)) {
-            queue.push({ url: absoluteUrl, referrer });
+        if (!visitedUrls.has(absoluteUrl) && !isUrlQueued(absoluteUrl)) {
+            const targetQueue = isLikelyMediaUrl(absoluteUrl) ? mediaQueue : htmlQueue;
+            targetQueue.push({ url: absoluteUrl, referrer });
         }
     } catch (e) {
         // невалідний URL
@@ -538,8 +591,11 @@ async function startSpider(startUrl, options, browserWindow) {
             }
             this.browserWindow.webContents.send('spider-progress', {
                 scanned: visitedUrls.size,
-                queue: queue.length,
+                queue: getQueueLength(),
+                queueHtml: htmlQueue.length,
+                queueMedia: mediaQueue.length,
                 active: this.activeWorkers,
+                concurrency: this.concurrency,
                 paused: this.paused,
                 status: progressStatus,
             });
@@ -550,8 +606,9 @@ async function startSpider(startUrl, options, browserWindow) {
             }
 
             if (this.stopped && this.activeWorkers === 0) {
-                const msg = queue.length > 0
-                    ? `Сканування зупинено. У черзі залишилось: ${queue.length}`
+                const remaining = getQueueLength();
+                const msg = remaining > 0
+                    ? `Сканування зупинено. У черзі залишилось: ${remaining}`
                     : 'Сканування зупинено.';
                 completeScan(this, msg);
                 return;
@@ -565,17 +622,18 @@ async function startSpider(startUrl, options, browserWindow) {
             }
 
             const limitReached = isPageLimitReached();
-            const canStartMore = !limitReached && queue.length > 0 && this.activeWorkers < this.concurrency;
+            const canStartMore = !limitReached && getQueueLength() > 0 && this.activeWorkers < this.concurrency;
 
             if (canStartMore) {
                 this.pumpQueue();
                 return;
             }
 
-            if (this.activeWorkers === 0 && (queue.length === 0 || limitReached)) {
+            if (this.activeWorkers === 0 && (getQueueLength() === 0 || limitReached)) {
                 let endMessage = 'Сканування завершено!';
-                if (limitReached && queue.length > 0) {
-                    endMessage = `Досягнуто ліміт ${maxPagesToVisit} стор. У черзі залишилось: ${queue.length}`;
+                const remaining = getQueueLength();
+                if (limitReached && remaining > 0) {
+                    endMessage = `Досягнуто ліміт ${maxPagesToVisit} стор. У черзі залишилось: ${remaining}`;
                 }
                 completeScan(this, endMessage);
             }
@@ -590,10 +648,10 @@ async function startSpider(startUrl, options, browserWindow) {
                 !this.paused &&
                 !this.stopped &&
                 this.activeWorkers < this.concurrency &&
-                queue.length > 0 &&
+                getQueueLength() > 0 &&
                 !isPageLimitReached()
             ) {
-                const item = queue.shift();
+                const item = dequeueNextUrl();
                 if (!item) {
                     break;
                 }
@@ -608,8 +666,8 @@ async function startSpider(startUrl, options, browserWindow) {
                             return;
                         }
                         this.activeWorkers--;
-                        this.sendProgress();
                         this.tryFinishOrPump();
+                        this.sendProgress();
                     });
             }
 
@@ -620,7 +678,7 @@ async function startSpider(startUrl, options, browserWindow) {
     scanSession = session;
 
     visitedUrls.clear();
-    queue = [];
+    clearQueues();
     referrersMap.clear();
     robotsCache.clear();
 
