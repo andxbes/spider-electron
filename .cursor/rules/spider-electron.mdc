@@ -1,0 +1,26 @@
+---
+description: Spider-Electron crawler — architecture context and doc maintenance
+alwaysApply: true
+---
+
+# Spider-Electron
+
+Desktop web crawler (Electron). Read `docs/ARCHITECTURE.md` before editing crawler, IPC, or UI logic.
+
+## Key files
+
+- `src/main/main.js` — crawler (BFS, fetch, cheerio, robots.txt)
+- `src/preload/preload.js` — IPC whitelist, `window.api`
+- `src/renderer/renderer.js` — UI, CSV export
+- `src/renderer/index.html` — layout
+
+## After code changes
+
+If behavior, IPC, constants, data models, deps, or file structure changed — update `docs/ARCHITECTURE.md` in the same session (see `docs/DOC_MAINTENANCE.md` checklist). Update the "Останнє оновлення" date in ARCHITECTURE.md.
+
+## Conventions
+
+- Network requests only in main process.
+- New IPC channels: update preload whitelist + main + renderer.
+- Match existing style: minimal scope, no over-abstraction.
+- UI text is currently Russian; match unless user requests otherwise.
