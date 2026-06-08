@@ -6,10 +6,13 @@ const cheerio = require('cheerio');
 
 const robotsParser = require('robots-parser');
 const { getSettingsPath, loadSettings, saveSettings, MAX_CONCURRENCY } = require('./settings-persistence');
+const { registerSessionDumpHandlers, createApplicationMenu } = require('./session-dump');
+
+let mainWindow = null;
 
 // Функція створення головного вікна застосунку
 const createWindow = () => {
-    const mainWindow = new BrowserWindow({
+    mainWindow = new BrowserWindow({
         width: 800,
         height: 700,
         webPreferences: {
@@ -26,6 +29,8 @@ const createWindow = () => {
 };
 
 app.whenReady().then(() => {
+    registerSessionDumpHandlers(ipcMain);
+    createApplicationMenu(() => mainWindow);
     createWindow();
 
     app.on('activate', () => {

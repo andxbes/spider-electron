@@ -882,6 +882,115 @@ document.addEventListener('click', (e) => {
     }
 });
 
+async function ensureCanReplaceSession(actionLabel) {
+    if (uiState === 'idle') {
+        return true;
+    }
+    const message = uiState === 'paused'
+        ? `${actionLabel} зупинить паузу та замінить поточні результати. Продовжити?`
+        : `${actionLabel} зупинить активне сканування та замінить поточні результати. Продовжити?`;
+    if (!confirm(message)) {
+        return false;
+    }
+    if (uiState === 'running' || uiState === 'paused') {
+        window.api.stopSpider();
+    }
+    setUIState('idle');
+    lastScanProgress = null;
+    updateUrlInputProgress();
+    return true;
+}
+
+async function saveSessionDumpToFile() {
+    if (scanResults.size === 0) {
+        alert('Немає результатів для збереження.');
+        return;
+    }
+    const payload = buildSessionDumpPayload({
+        scanResults,
+        insertionOrder,
+        startUrl: urlInput.value.trim(),
+        uiState,
+        lastScanProgress,
+    });
+    const result = await window.api.saveSessionDump(payload);
+    if (result?.canceled) {
+        return;
+    }
+    if (!result?.ok) {
+        alert(result?.error || 'Не вдалося зберегти дамп.');
+        return;
+    }
+    statusText.textContent = `Дамп збережено: ${result.filePath}`;
+}
+
+function applySessionDump(dump, filePath = '') {
+    const normalized = normalizeLoadedDump({ ...dump, filePath });
+    clearScanResults();
+    urlInput.value = normalized.startUrl;
+
+    const resultMap = new Map(normalized.results.map((entry) => [entry.url, entry]));
+    for (const url of normalized.insertionOrder) {
+        if (resultMap.has(url)) {
+            insertionOrder.push(url);
+            scanResults.set(url, resultMap.get(url));
+        }
+    }
+    for (const entry of normalized.results) {
+        if (!scanResults.has(entry.url)) {
+            insertionOrder.push(entry.url);
+            scanResults.set(entry.url, entry);
+        }
+    }
+
+    selectedUrl = null;
+    lastScanProgress = normalized.progressAtSave;
+    requestRefreshTable({ immediate: true });
+    setUIState('idle');
+    updateUrlInputProgress(normalized.progressAtSave);
+    statusScanned.textContent = `Проскановано: ${scanResults.size}`;
+    statusQueue.textContent = 'У черзі: 0';
+    if (statusActive) {
+        statusActive.textContent = 'Активних: 0';
+    }
+    if (statusRate) {
+        statusRate.textContent = 'Швидкість: —';
+    }
+    statusText.textContent = filePath
+        ? `Завантажено дамп (${scanResults.size} URL): ${filePath}`
+        : `Завантажено дамп: ${scanResults.size} URL`;
+}
+
+async function loadSessionDumpFromFile() {
+    const canContinue = await ensureCanReplaceSession('Завантаження дампу');
+    if (!canContinue) {
+        return;
+    }
+    const result = await window.api.loadSessionDump();
+    if (result?.canceled) {
+        return;
+    }
+    if (!result?.ok) {
+        alert(result?.error || 'Не вдалося завантажити дамп.');
+        return;
+    }
+    applySessionDump(result.dump, result.filePath || '');
+}
+
+async function handleMenuLoadedDump(payload) {
+    if (!payload?.ok || !payload.dump) {
+        return;
+    }
+    const canContinue = await ensureCanReplaceSession('Завантаження дампу');
+    if (!canContinue) {
+        return;
+    }
+    applySessionDump(payload.dump, payload.filePath || '');
+}
+
+window.api.onSessionDumpRequestSave(() => saveSessionDumpToFile());
+window.api.onSessionDumpLoaded((payload) => handleMenuLoadedDump(payload));
+
 startButton.addEventListener('click', async () => {
     const startUrl = urlInput.value.trim();
     try {

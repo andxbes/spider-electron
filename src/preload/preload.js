@@ -1,8 +1,23 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 const validSendChannels = ['start-spider', 'spider-stop'];
-const validReceiveChannels = ['spider-result', 'spider-end', 'spider-progress', 'spider-referrers-update'];
-const validInvokeChannels = ['settings:get', 'settings:save', 'shell:open-external', 'spider-pause', 'spider-resume'];
+const validReceiveChannels = [
+    'spider-result',
+    'spider-end',
+    'spider-progress',
+    'spider-referrers-update',
+    'session-dump-request-save',
+    'session-dump-loaded',
+];
+const validInvokeChannels = [
+    'settings:get',
+    'settings:save',
+    'shell:open-external',
+    'spider-pause',
+    'spider-resume',
+    'session:save',
+    'session:load',
+];
 
 contextBridge.exposeInMainWorld('api', {
     startSpider: (startUrl, options = {}) => {
@@ -63,6 +78,28 @@ contextBridge.exposeInMainWorld('api', {
     onSpiderReferrersUpdate: (callback) => {
         if (validReceiveChannels.includes('spider-referrers-update')) {
             ipcRenderer.on('spider-referrers-update', (event, ...args) => callback(...args));
+        }
+    },
+    saveSessionDump: (payload) => {
+        if (validInvokeChannels.includes('session:save')) {
+            return ipcRenderer.invoke('session:save', payload);
+        }
+        return Promise.resolve({ ok: false });
+    },
+    loadSessionDump: () => {
+        if (validInvokeChannels.includes('session:load')) {
+            return ipcRenderer.invoke('session:load');
+        }
+        return Promise.resolve({ ok: false });
+    },
+    onSessionDumpRequestSave: (callback) => {
+        if (validReceiveChannels.includes('session-dump-request-save')) {
+            ipcRenderer.on('session-dump-request-save', (event, ...args) => callback(...args));
+        }
+    },
+    onSessionDumpLoaded: (callback) => {
+        if (validReceiveChannels.includes('session-dump-loaded')) {
+            ipcRenderer.on('session-dump-loaded', (event, ...args) => callback(...args));
         }
     },
 });
