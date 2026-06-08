@@ -33,7 +33,7 @@ let sortState = { column: null, direction: 'asc' };
 let activeContentFilter = 'all';
 /** @type {string} */
 let activeStatusFilter = 'all';
-/** @type {'all' | 'blocked'} */
+/** @type {'all' | 'allowed' | 'blocked'} */
 let activeIndexingFilter = 'all';
 /** @type {'all' | 'multiple'} */
 let activeH1Filter = 'all';
@@ -207,6 +207,17 @@ function isIndexingBlocked(data) {
     return isMetaRobotsBlocked(data) || isRobotsTxtBlocked(data);
 }
 
+function isIndexingAllowed(data) {
+    if (isIndexingBlocked(data)) {
+        return false;
+    }
+    if (data.robotsAllowed !== true) {
+        return false;
+    }
+    const metaStatus = data.metaRobotsStatus || 'none';
+    return metaStatus === 'allowed';
+}
+
 function getH1Count(data) {
     return (data.headings || []).filter((heading) => heading.level === 1).length;
 }
@@ -216,6 +227,9 @@ function passesTableFilters(data) {
         return false;
     }
     if (!matchesStatusFilter(data.status, activeStatusFilter)) {
+        return false;
+    }
+    if (activeIndexingFilter === 'allowed' && !isIndexingAllowed(data)) {
         return false;
     }
     if (activeIndexingFilter === 'blocked' && !isIndexingBlocked(data)) {
