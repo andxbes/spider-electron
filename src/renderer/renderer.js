@@ -447,6 +447,10 @@ function compareRows(a, b) {
             va = statusSortValue(a.status);
             vb = statusSortValue(b.status);
             break;
+        case 'contentType':
+            va = (a.contentType || '').toLowerCase();
+            vb = (b.contentType || '').toLowerCase();
+            break;
         case 'title':
             va = (a.title || '').toLowerCase();
             vb = (b.title || '').toLowerCase();
@@ -499,6 +503,7 @@ function createTableRow(data, displayIndex) {
         <td class="p-2 text-zinc-400">${displayIndex}</td>
         <td class="p-2">${urlCellHtml(data.url)}</td>
         <td class="p-2"><span class="font-mono font-semibold ${statusRowClass(data.status)}">${escapeHtml(data.status)}</span></td>
+        <td class="p-2 font-mono text-zinc-600" title="${escapeHtml(data.contentType || '')}">${data.contentType ? escapeHtml(truncate(data.contentType, 28)) : '<span class="text-zinc-400 italic">—</span>'}</td>
         <td class="p-2">${metaRobotsCellHtml(data)}</td>
         <td class="p-2">${robotsTxtCellHtml(data)}</td>
         <td class="p-2" title="${escapeHtml(data.title)}">${escapeHtml(truncate(data.title, 50))}</td>
