@@ -1,9 +1,16 @@
 const urlInput = document.getElementById('urlInput');
 const startButton = document.getElementById('startButton');
+const stopButton = document.getElementById('stopButton');
+const resumeButton = document.getElementById('resumeButton');
+const restartButton = document.getElementById('restartButton');
 const exportButton = document.getElementById('exportButton');
+const controlsIdle = document.getElementById('controlsIdle');
+const controlsRunning = document.getElementById('controlsRunning');
+const controlsPaused = document.getElementById('controlsPaused');
 const resultsTable = document.getElementById('resultsTable');
 const detailContent = document.getElementById('detailContent');
 const selectedUrlHint = document.getElementById('selectedUrlHint');
+const selectedUrlBar = document.getElementById('selectedUrlBar');
 const statusText = document.getElementById('status-text');
 const statusScanned = document.getElementById('status-scanned');
 const statusQueue = document.getElementById('status-queue');
@@ -14,6 +21,8 @@ const insertionOrder = [];
 let selectedUrl = null;
 let activeTab = 'details';
 let sortState = { column: null, direction: 'asc' };
+/** @type {'idle' | 'running' | 'paused'} */
+let uiState = 'idle';
 
 function escapeHtml(str) {
     return String(str ?? '')
@@ -41,6 +50,95 @@ function statusSortValue(status) {
 function truncate(str, len = 80) {
     const s = String(str ?? '');
     return s.length > len ? `${s.slice(0, len)}…` : s;
+}
+
+function urlActionButtons(url) {
+    const encoded = encodeURIComponent(url);
+    return `<span class="inline-flex items-center gap-0.5 shrink-0 ml-1">
+        <button type="button" class="url-copy px-1 py-0.5 text-zinc-400 hover:text-zinc-700 rounded" data-url="${encoded}" title="Копіювати">📋</button>
+        <button type="button" class="url-open px-1 py-0.5 text-zinc-400 hover:text-zinc-700 rounded" data-url="${encoded}" title="Відкрити в браузері">↗</button>
+    </span>`;
+}
+
+function urlCellHtml(url) {
+    if (!url) {
+        return '<span class="text-zinc-400 italic">—</span>';
+    }
+    return `<span class="inline-flex items-start gap-1 min-w-0 max-w-full">
+        <span class="text-blue-700 break-all">${escapeHtml(url)}</span>
+        ${urlActionButtons(url)}
+    </span>`;
+}
+
+function decodeUrlAttr(encoded) {
+    try {
+        return decodeURIComponent(encoded);
+    } catch {
+        return encoded;
+    }
+}
+
+async function copyUrlToClipboard(url) {
+    try {
+        await navigator.clipboard.writeText(url);
+        statusText.textContent = 'Посилання скопійовано';
+    } catch {
+        statusText.textContent = 'Не вдалося скопіювати';
+    }
+}
+
+async function openUrlInBrowser(url) {
+    const result = await window.api.openExternal(url);
+    if (!result?.ok) {
+        statusText.textContent = 'Не вдалося відкрити посилання';
+    }
+}
+
+function updateExportButton() {
+    const hasData = scanResults.size > 0;
+    exportButton.disabled = !hasData;
+    exportButton.classList.toggle('hidden', !hasData);
+}
+
+function setUIState(state) {
+    uiState = state;
+    controlsIdle.classList.toggle('hidden', state !== 'idle');
+    controlsRunning.classList.toggle('hidden', state !== 'running');
+    controlsPaused.classList.toggle('hidden', state !== 'paused');
+    urlInput.disabled = state === 'running';
+    if (state === 'idle') {
+        updateExportButton();
+    }
+}
+
+function clearScanResults() {
+    scanResults.clear();
+    insertionOrder.length = 0;
+    selectedUrl = null;
+    sortState = { column: null, direction: 'asc' };
+    updateSortIndicators();
+    resultsTable.innerHTML = '';
+    selectedUrlHint.textContent = 'Оберіть рядок у таблиці';
+    if (selectedUrlBar) {
+        selectedUrlBar.querySelectorAll('.url-copy, .url-open').forEach((el) => el.remove());
+    }
+    detailContent.innerHTML = '<p class="p-4 text-zinc-400 italic">Оберіть URL у таблиці вище</p>';
+    updateExportButton();
+}
+
+async function beginScan(startUrl, { clearResults = true } = {}) {
+    if (clearResults) {
+        clearScanResults();
+    }
+    setUIState('running');
+    statusText.textContent = `Починаю сканування з ${startUrl}...`;
+
+    const settings = await loadSettings();
+    window.api.startSpider(startUrl, {
+        useSitemap: settings.useSitemap,
+        maxPages: settings.maxPages,
+        concurrency: settings.concurrency,
+    });
 }
 
 function getRowMetrics(data) {
@@ -121,14 +219,19 @@ function createTableRow(data, displayIndex) {
     }
     tr.innerHTML = `
         <td class="p-2 text-zinc-400">${displayIndex}</td>
-        <td class="p-2 break-all text-blue-700">${escapeHtml(data.url)}</td>
+        <td class="p-2">${urlCellHtml(data.url)}</td>
         <td class="p-2"><span class="font-mono font-semibold ${statusRowClass(data.status)}">${escapeHtml(data.status)}</span></td>
         <td class="p-2" title="${escapeHtml(data.title)}">${escapeHtml(truncate(data.title, 50))}</td>
         <td class="p-2" title="${escapeHtml(data.metaDescription)}">${escapeHtml(truncate(data.metaDescription, 60))}</td>
         <td class="p-2 text-center">${linkCount}</td>
         <td class="p-2 text-center">${inCount}</td>
     `;
-    tr.addEventListener('click', () => selectRow(data.url));
+    tr.addEventListener('click', (e) => {
+        if (e.target.closest('.url-copy, .url-open')) {
+            return;
+        }
+        selectRow(data.url);
+    });
     return tr;
 }
 
@@ -198,7 +301,14 @@ function selectRow(url) {
     document.querySelectorAll('#resultsTable tr').forEach((tr) => {
         tr.classList.toggle('bg-blue-50', tr.dataset.url === url);
     });
-    selectedUrlHint.textContent = truncate(url, 60);
+    selectedUrlHint.textContent = truncate(url, 80);
+    selectedUrlHint.title = url;
+    if (selectedUrlBar) {
+        selectedUrlBar.querySelectorAll('.url-copy, .url-open').forEach((el) => el.remove());
+        const actions = document.createElement('span');
+        actions.innerHTML = urlActionButtons(url);
+        selectedUrlBar.appendChild(actions);
+    }
     renderDetailPanel();
 }
 
@@ -226,7 +336,7 @@ function renderLinkTable(links, emptyText) {
         .map(
             (link) => `
         <tr class="border-b border-zinc-100 hover:bg-zinc-50">
-            <td class="p-2 break-all text-blue-700">${escapeHtml(link.href || link)}</td>
+            <td class="p-2">${urlCellHtml(link.href || link)}</td>
             <td class="p-2 text-zinc-600">${escapeHtml(link.text || '')}</td>
         </tr>`
         )
@@ -248,13 +358,13 @@ function buildDetailRows(data) {
     const { inCount, linkCount } = getRowMetrics(data);
 
     const rows = [
-        ['Address', escapeHtml(data.url)],
+        ['Address', urlCellHtml(data.url)],
         ['Status Code', escapeHtml(data.status)],
         ['Title', escapeHtml(data.title)],
         ['Title Length', data.title ? String(data.title.length) : '0'],
         ['Meta Description', escapeHtml(data.metaDescription) || '<span class="text-zinc-400 italic">—</span>'],
         ['Meta Description Length', data.metaDescription ? String(data.metaDescription.length) : '0'],
-        ['Canonical', escapeHtml(data.metaCanonical) || '<span class="text-zinc-400 italic">—</span>'],
+        ['Canonical', data.metaCanonical ? urlCellHtml(data.metaCanonical) : '<span class="text-zinc-400 italic">—</span>'],
         ['H1', escapeHtml(h1?.text) || '<span class="text-zinc-400 italic">—</span>'],
         [
             'H2',
@@ -267,7 +377,7 @@ function buildDetailRows(data) {
     ];
 
     if (data.redirectUrl) {
-        rows.push(['Redirect URL', escapeHtml(data.redirectUrl)]);
+        rows.push(['Redirect URL', urlCellHtml(data.redirectUrl)]);
     }
 
     return rows;
@@ -328,29 +438,52 @@ exportButton.addEventListener('click', () => {
     link.click();
 });
 
+document.addEventListener('click', (e) => {
+    const copyBtn = e.target.closest('.url-copy');
+    const openBtn = e.target.closest('.url-open');
+    if (copyBtn) {
+        e.stopPropagation();
+        copyUrlToClipboard(decodeUrlAttr(copyBtn.dataset.url));
+        return;
+    }
+    if (openBtn) {
+        e.stopPropagation();
+        openUrlInBrowser(decodeUrlAttr(openBtn.dataset.url));
+    }
+});
+
 startButton.addEventListener('click', async () => {
     const startUrl = urlInput.value.trim();
     try {
         new URL(startUrl);
-        scanResults.clear();
-        insertionOrder.length = 0;
-        selectedUrl = null;
-        sortState = { column: null, direction: 'asc' };
-        updateSortIndicators();
-        resultsTable.innerHTML = '';
-        selectedUrlHint.textContent = 'Оберіть рядок у таблиці';
-        detailContent.innerHTML = '<p class="p-4 text-zinc-400 italic">Оберіть URL у таблиці вище</p>';
-        exportButton.disabled = true;
-        statusText.textContent = `Починаю сканування з ${startUrl}...`;
-        startButton.disabled = true;
+        await beginScan(startUrl);
+    } catch {
+        alert('Будь ласка, введіть коректний URL (наприклад, https://example.com).');
+    }
+});
 
-        const settings = await loadSettings();
+stopButton.addEventListener('click', () => {
+    if (uiState !== 'running') {
+        return;
+    }
+    window.api.pauseSpider();
+    setUIState('paused');
+    statusText.textContent = 'На паузі';
+});
 
-        window.api.startSpider(startUrl, {
-            useSitemap: settings.useSitemap,
-            maxPages: settings.maxPages,
-            concurrency: settings.concurrency,
-        });
+resumeButton.addEventListener('click', () => {
+    if (uiState !== 'paused') {
+        return;
+    }
+    window.api.resumeSpider();
+    setUIState('running');
+});
+
+restartButton.addEventListener('click', async () => {
+    const startUrl = urlInput.value.trim();
+    try {
+        new URL(startUrl);
+        await beginScan(startUrl);
     } catch {
         alert('Будь ласка, введіть коректний URL (наприклад, https://example.com).');
     }
@@ -372,15 +505,22 @@ window.api.onSpiderReferrersUpdate((allReferrers) => {
 
 window.api.onSpiderEnd((message) => {
     statusText.textContent = message;
-    startButton.disabled = false;
-    exportButton.disabled = false;
+    setUIState('idle');
 });
 
 window.api.onSpiderProgress((progress) => {
-    statusText.textContent = progress.status || 'В процесі...';
+    if (uiState === 'running' && progress.paused) {
+        setUIState('paused');
+    }
+    if (uiState === 'paused' && progress.paused === false && progress.status === 'В процесі...') {
+        setUIState('running');
+    }
+    statusText.textContent = progress.status || (uiState === 'paused' ? 'На паузі' : 'В процесі...');
     statusScanned.textContent = `Проскановано: ${progress.scanned}`;
     statusQueue.textContent = `У черзі: ${progress.queue}`;
     if (statusActive) {
         statusActive.textContent = `Активних: ${progress.active ?? 0}`;
     }
 });
+
+setUIState('idle');

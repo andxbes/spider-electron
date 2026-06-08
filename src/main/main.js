@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const path = require('node:path');
 const { URL } = require('node:url');
 const cheerio = require('cheerio');
@@ -396,30 +396,33 @@ async function crawl(url, referrer, browserWindow) {
     }
 }
 
-/**
- * Запускає процес сканування
- * @param {string} startUrl - Початковий URL
- * @param {BrowserWindow} browserWindow - Вікно для надсилання результатів
- */
-function finishScan(browserWindow, sendProgress) {
-    sendProgress();
-    console.log('Сканування завершено.');
+let scanSession = null;
+
+function completeScan(session, endMessage) {
+    if (session.finished) {
+        return;
+    }
+    session.finished = true;
+    if (scanSession === session) {
+        scanSession = null;
+    }
+
+    session.sendProgress();
+    console.log(endMessage);
 
     const allReferrers = {};
     for (const [link, refs] of referrersMap.entries()) {
         allReferrers[link] = Array.from(refs);
     }
-    browserWindow.webContents.send('spider-referrers-update', allReferrers);
-
-    let endMessage = 'Сканування завершено!';
-    if (isPageLimitReached() && queue.length > 0) {
-        endMessage = `Досягнуто ліміт ${maxPagesToVisit} стор. У черзі залишилось: ${queue.length}`;
-    }
-
-    browserWindow.webContents.send('spider-end', endMessage);
+    session.browserWindow.webContents.send('spider-referrers-update', allReferrers);
+    session.browserWindow.webContents.send('spider-end', endMessage);
 }
 
 async function startSpider(startUrl, options, browserWindow) {
+    if (scanSession && !scanSession.finished) {
+        scanSession.stopped = true;
+    }
+
     const useSitemap = options?.useSitemap ?? false;
     maxPagesToVisit = Math.max(0, parseInt(options?.maxPages, 10) || 0);
     const concurrency = Math.min(
@@ -427,63 +430,109 @@ async function startSpider(startUrl, options, browserWindow) {
         Math.max(1, parseInt(options?.concurrency, 10) || 1)
     );
 
-    let activeWorkers = 0;
-    let scanFinished = false;
-
-    const sendProgress = (status) => {
-        browserWindow.webContents.send('spider-progress', {
-            scanned: visitedUrls.size,
-            queue: queue.length,
-            active: activeWorkers,
-            status,
-        });
-    };
-
-    const tryFinishOrPump = () => {
-        if (scanFinished) {
-            return;
-        }
-
-        const limitReached = isPageLimitReached();
-        const canStartMore = !limitReached && queue.length > 0 && activeWorkers < concurrency;
-
-        if (canStartMore) {
-            pumpQueue();
-            return;
-        }
-
-        if (activeWorkers === 0 && (queue.length === 0 || limitReached)) {
-            scanFinished = true;
-            finishScan(browserWindow, sendProgress);
-        }
-    };
-
-    const pumpQueue = () => {
-        while (
-            !scanFinished &&
-            activeWorkers < concurrency &&
-            queue.length > 0 &&
-            !isPageLimitReached()
-        ) {
-            const item = queue.shift();
-            if (!item) {
-                break;
+    const session = {
+        browserWindow,
+        concurrency,
+        paused: false,
+        stopped: false,
+        finished: false,
+        activeWorkers: 0,
+        sendProgress(status) {
+            if (this.finished) {
+                return;
+            }
+            let progressStatus = status;
+            if (!progressStatus) {
+                if (this.paused) {
+                    progressStatus = 'На паузі';
+                } else if (this.stopped) {
+                    progressStatus = 'Зупинка...';
+                } else {
+                    progressStatus = 'В процесі...';
+                }
+            }
+            this.browserWindow.webContents.send('spider-progress', {
+                scanned: visitedUrls.size,
+                queue: queue.length,
+                active: this.activeWorkers,
+                paused: this.paused,
+                status: progressStatus,
+            });
+        },
+        tryFinishOrPump() {
+            if (this.finished || scanSession !== this) {
+                return;
             }
 
-            activeWorkers++;
-            crawl(item.url, item.referrer, browserWindow)
-                .catch((err) => {
-                    console.error(`Помилка воркера для ${item.url}:`, err);
-                })
-                .finally(() => {
-                    activeWorkers--;
-                    sendProgress();
-                    tryFinishOrPump();
-                });
-        }
+            if (this.stopped && this.activeWorkers === 0) {
+                const msg = queue.length > 0
+                    ? `Сканування зупинено. У черзі залишилось: ${queue.length}`
+                    : 'Сканування зупинено.';
+                completeScan(this, msg);
+                return;
+            }
 
-        tryFinishOrPump();
+            if (this.paused) {
+                if (this.activeWorkers === 0) {
+                    this.sendProgress('На паузі');
+                }
+                return;
+            }
+
+            const limitReached = isPageLimitReached();
+            const canStartMore = !limitReached && queue.length > 0 && this.activeWorkers < this.concurrency;
+
+            if (canStartMore) {
+                this.pumpQueue();
+                return;
+            }
+
+            if (this.activeWorkers === 0 && (queue.length === 0 || limitReached)) {
+                let endMessage = 'Сканування завершено!';
+                if (limitReached && queue.length > 0) {
+                    endMessage = `Досягнуто ліміт ${maxPagesToVisit} стор. У черзі залишилось: ${queue.length}`;
+                }
+                completeScan(this, endMessage);
+            }
+        },
+        pumpQueue() {
+            if (this.finished || scanSession !== this || this.paused || this.stopped) {
+                return;
+            }
+
+            while (
+                !this.finished &&
+                !this.paused &&
+                !this.stopped &&
+                this.activeWorkers < this.concurrency &&
+                queue.length > 0 &&
+                !isPageLimitReached()
+            ) {
+                const item = queue.shift();
+                if (!item) {
+                    break;
+                }
+
+                this.activeWorkers++;
+                crawl(item.url, item.referrer, this.browserWindow)
+                    .catch((err) => {
+                        console.error(`Помилка воркера для ${item.url}:`, err);
+                    })
+                    .finally(() => {
+                        if (scanSession !== this) {
+                            return;
+                        }
+                        this.activeWorkers--;
+                        this.sendProgress();
+                        this.tryFinishOrPump();
+                    });
+            }
+
+            this.tryFinishOrPump();
+        },
     };
+
+    scanSession = session;
 
     visitedUrls.clear();
     queue = [];
@@ -492,15 +541,22 @@ async function startSpider(startUrl, options, browserWindow) {
 
     if (useSitemap) {
         const sitemapPageCount = await seedQueueFromSitemaps(startUrl, browserWindow);
-        sendProgress(
+        if (scanSession !== session) {
+            return;
+        }
+        session.sendProgress(
             sitemapPageCount > 0
                 ? `З sitemap додано в чергу: ${sitemapPageCount}`
                 : 'Sitemap не знайдено, обхід за посиланнями'
         );
     }
 
+    if (scanSession !== session) {
+        return;
+    }
+
     enqueueUrl(startUrl, 'N/A', new URL(startUrl).hostname);
-    pumpQueue();
+    session.pumpQueue();
 }
 
 ipcMain.handle('settings:get', async () => {
@@ -522,6 +578,44 @@ ipcMain.on('start-spider', (event, payload) => {
         startSpider(startUrl, options, browserWindow).catch(err => {
             console.error('Критична помилка в startSpider:', err);
             browserWindow.webContents.send('spider-end', `Помилка: ${err.message}`);
+            scanSession = null;
         });
+    }
+});
+
+ipcMain.on('spider-pause', () => {
+    if (scanSession && !scanSession.finished && !scanSession.stopped) {
+        scanSession.paused = true;
+        scanSession.sendProgress('На паузі');
+    }
+});
+
+ipcMain.on('spider-resume', () => {
+    if (scanSession && !scanSession.finished && !scanSession.stopped && scanSession.paused) {
+        scanSession.paused = false;
+        scanSession.sendProgress('В процесі...');
+        scanSession.pumpQueue();
+    }
+});
+
+ipcMain.on('spider-stop', () => {
+    if (scanSession && !scanSession.finished) {
+        scanSession.stopped = true;
+        scanSession.paused = false;
+        scanSession.sendProgress('Зупинка...');
+        scanSession.tryFinishOrPump();
+    }
+});
+
+ipcMain.handle('shell:open-external', async (_event, url) => {
+    try {
+        const parsed = new URL(url);
+        if (!['http:', 'https:'].includes(parsed.protocol)) {
+            return { ok: false };
+        }
+        await shell.openExternal(url);
+        return { ok: true };
+    } catch {
+        return { ok: false };
     }
 });

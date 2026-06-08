@@ -10,35 +10,61 @@
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body class="bg-zinc-100 text-zinc-800 font-sans h-screen flex flex-col overflow-hidden">
-    <header class="shrink-0 border-b border-zinc-300 bg-white px-4 py-3">
-      <div class="flex items-center gap-3">
+    <header class="shrink-0 border-b border-zinc-300 bg-white px-3 py-3 sm:px-4">
+      <div class="flex flex-col gap-2 lg:flex-row lg:items-center lg:gap-3">
         <h1 class="text-lg font-bold text-zinc-700 shrink-0">Electron Web Spider</h1>
         <input
           type="text"
           id="urlInput"
           placeholder="Початковий URL (наприклад, http://localhost/)"
-          class="flex-grow p-2 border border-zinc-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none text-sm"
+          class="w-full min-w-0 p-2 border border-zinc-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none text-sm lg:flex-grow"
         />
-        <button
-          id="startButton"
-          class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-zinc-400 disabled:cursor-not-allowed text-sm shrink-0"
-        >
-          Сканувати
-        </button>
-        <button
-          id="exportButton"
-          disabled
-          class="px-4 py-2 bg-zinc-600 text-white rounded-md hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm shrink-0"
-        >
-          Експорт CSV
-        </button>
-        <a
-          href="./settings.html"
-          class="px-3 py-2 text-sm text-zinc-600 border border-zinc-300 rounded-md hover:bg-zinc-50 shrink-0"
-          title="Налаштування"
-        >
-          ⚙
-        </a>
+        <div class="flex flex-wrap items-center gap-2 shrink-0">
+          <div id="controlsIdle" class="flex flex-wrap gap-2">
+            <button
+              id="startButton"
+              class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm"
+            >
+              Сканувати
+            </button>
+            <button
+              id="exportButton"
+              disabled
+              class="px-4 py-2 bg-zinc-600 text-white rounded-md hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+            >
+              Експорт CSV
+            </button>
+          </div>
+          <div id="controlsRunning" class="hidden flex gap-2">
+            <button
+              id="stopButton"
+              class="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 text-sm"
+            >
+              Зупинити
+            </button>
+          </div>
+          <div id="controlsPaused" class="hidden flex flex-wrap gap-2">
+            <button
+              id="resumeButton"
+              class="px-4 py-2 bg-amber-500 text-white rounded-md hover:bg-amber-600 text-sm"
+            >
+              Продовжити
+            </button>
+            <button
+              id="restartButton"
+              class="px-4 py-2 bg-emerald-600 text-white rounded-md hover:bg-emerald-700 text-sm"
+            >
+              Заново сканувати
+            </button>
+          </div>
+          <a
+            href="./settings.html"
+            class="px-3 py-2 text-sm text-zinc-600 border border-zinc-300 rounded-md hover:bg-zinc-50"
+            title="Налаштування"
+          >
+            ⚙
+          </a>
+        </div>
       </div>
     </header>
 
@@ -89,12 +115,14 @@
             Вихідні посилання
           </button>
           <div class="flex-grow"></div>
-          <span
-            id="selectedUrlHint"
-            class="px-3 py-2 text-xs text-zinc-400 truncate max-w-md italic"
-          >
-            Оберіть рядок у таблиці
-          </span>
+          <div id="selectedUrlBar" class="flex items-center gap-1 px-2 py-1 max-w-lg min-w-0">
+            <span
+              id="selectedUrlHint"
+              class="text-xs text-zinc-500 truncate italic min-w-0"
+            >
+              Оберіть рядок у таблиці
+            </span>
+          </div>
         </div>
         <div id="detailContent" class="overflow-auto flex-grow p-0 text-xs">
           <p class="p-4 text-zinc-400 italic">Оберіть URL у таблиці вище</p>
@@ -104,10 +132,10 @@
 
     <footer
       id="status-bar"
-      class="shrink-0 px-4 py-2 bg-zinc-200 border-t border-zinc-300 text-xs text-zinc-600 flex justify-between"
+      class="shrink-0 px-3 py-2 sm:px-4 bg-zinc-200 border-t border-zinc-300 text-xs text-zinc-600 flex flex-col gap-1 sm:flex-row sm:justify-between sm:items-center"
     >
-      <span id="status-text" class="italic">Готово до роботи...</span>
-      <div class="flex gap-4">
+      <span id="status-text" class="italic min-w-0">Готово до роботи...</span>
+      <div class="flex flex-wrap gap-x-4 gap-y-0.5 shrink-0">
         <span id="status-scanned" class="font-semibold">Проскановано: 0</span>
         <span id="status-queue" class="font-semibold">У черзі: 0</span>
         <span id="status-active" class="font-semibold">Активних: 0</span>

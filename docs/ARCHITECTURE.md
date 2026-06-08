@@ -85,6 +85,8 @@ Renderer
 | Напрямок | Канал | Payload |
 |----------|-------|---------|
 | R → M | `start-spider` | `{ startUrl, options: { useSitemap?, maxPages?, concurrency? } }` |
+| R → M | `spider-pause` / `spider-resume` / `spider-stop` | керування скануванням |
+| R → M | `shell:open-external` | відкрити URL у браузері |
 | R ↔ M | `settings:get` / `settings:save` | налаштування (файл у userData) |
 | M → R | `spider-result` | об'єкт сторінки (див. нижче) |
 | M → R | `spider-progress` | `{ scanned, queue, active?, status? }` |
