@@ -470,6 +470,26 @@ function formatMultiValueDetail(value) {
     return parts.map((part) => escapeHtml(part)).join('<br>');
 }
 
+function formatCsvUrlListPreview(items, limit = 10) {
+    const list = (Array.isArray(items) ? items : [])
+        .map((item) => {
+            if (typeof item === 'string') {
+                return item.trim();
+            }
+            return String(item?.href || '').trim();
+        })
+        .filter(Boolean);
+    const total = list.length;
+    if (total === 0) {
+        return '';
+    }
+    const preview = list.slice(0, limit).join('; ');
+    if (total <= limit) {
+        return preview;
+    }
+    return `${preview} (${total})`;
+}
+
 function formatRobotsTxtDetail(data) {
     if (data.robotsAllowed === null && !data.robotsRule) {
         return '<span class="text-zinc-400 italic">—</span>';
@@ -1147,11 +1167,12 @@ exportButton.addEventListener('click', () => {
     }
 
     const bom = '\uFEFF';
-    const headers = ['URL', 'Status', 'Meta Robots', 'Robots.txt Rule', 'Robots.txt Allowed', 'H1 Count', 'Content-Type', 'Response Time (ms)', 'Resource Type', 'Title', 'Meta Description', 'Canonical', 'Link Count', 'Redirect URL', 'Referrers', 'Headings'];
+    const headers = ['URL', 'Status', 'Meta Robots', 'Robots.txt Rule', 'Robots.txt Allowed', 'H1 Count', 'Content-Type', 'Response Time (ms)', 'Resource Type', 'Title', 'Meta Description', 'Canonical', 'Link Count', 'Redirect URL', 'Referrers', 'Outlinks', 'Headings'];
     const csvRows = [headers.join(',')];
 
     for (const data of entries) {
-        const referrers = data.referrers ? data.referrers.join('; ') : '';
+        const referrers = formatCsvUrlListPreview(data.referrers);
+        const outlinks = formatCsvUrlListPreview(data.outlinks);
         const headings = data.headings ? data.headings.map((h) => `H${h.level}: ${h.text}`).join('; ') : '';
         const row = [
             `"${(data.url || '').replace(/"/g, '""')}"`,
@@ -1169,6 +1190,7 @@ exportButton.addEventListener('click', () => {
             `"${(data.linkCount || 0)}"`,
             `"${(data.redirectUrl || '').replace(/"/g, '""')}"`,
             `"${referrers.replace(/"/g, '""')}"`,
+            `"${outlinks.replace(/"/g, '""')}"`,
             `"${headings.replace(/"/g, '""')}"`,
         ];
         csvRows.push(row.join(','));
