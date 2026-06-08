@@ -1,1 +1,20 @@
 @import "tailwindcss";
+
+@layer components {
+  .panel-resize-handle {
+    @apply shrink-0 h-2 cursor-ns-resize rounded-sm bg-zinc-200 hover:bg-blue-300 active:bg-blue-400 transition-colors relative;
+  }
+
+  .panel-resize-handle::after {
+    content: '';
+    @apply absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-12 h-1 rounded-full bg-zinc-400 pointer-events-none;
+  }
+
+  body.panel-resizing {
+    @apply select-none cursor-ns-resize;
+  }
+
+  body.panel-resizing * {
+    cursor: ns-resize !important;
+  }
+}

@@ -523,4 +523,68 @@ window.api.onSpiderProgress((progress) => {
     }
 });
 
+const DETAIL_PANEL_HEIGHT_KEY = 'detailPanelHeight';
+const DEFAULT_DETAIL_PANEL_HEIGHT = 256;
+const MIN_DETAIL_PANEL_HEIGHT = 120;
+const MIN_RESULTS_PANEL_HEIGHT = 120;
+
+function initDetailPanelResize() {
+    const mainEl = document.querySelector('main');
+    const handle = document.getElementById('panelResizeHandle');
+    const panel = document.getElementById('detailPanel');
+    if (!mainEl || !handle || !panel) {
+        return;
+    }
+
+    function clampPanelHeight(height) {
+        const mainHeight = mainEl.getBoundingClientRect().height;
+        const maxHeight = Math.max(
+            MIN_DETAIL_PANEL_HEIGHT,
+            mainHeight - MIN_RESULTS_PANEL_HEIGHT - handle.offsetHeight - 12
+        );
+        return Math.min(maxHeight, Math.max(MIN_DETAIL_PANEL_HEIGHT, height));
+    }
+
+    function setPanelHeight(height) {
+        panel.style.height = `${clampPanelHeight(height)}px`;
+    }
+
+    const savedHeight = parseInt(localStorage.getItem(DETAIL_PANEL_HEIGHT_KEY), 10);
+    setPanelHeight(Number.isFinite(savedHeight) ? savedHeight : DEFAULT_DETAIL_PANEL_HEIGHT);
+
+    handle.addEventListener('mousedown', (event) => {
+        event.preventDefault();
+        const startY = event.clientY;
+        const startHeight = panel.getBoundingClientRect().height;
+
+        function onMouseMove(moveEvent) {
+            setPanelHeight(startHeight + (startY - moveEvent.clientY));
+        }
+
+        function onMouseUp() {
+            document.body.classList.remove('panel-resizing');
+            localStorage.setItem(
+                DETAIL_PANEL_HEIGHT_KEY,
+                String(Math.round(panel.getBoundingClientRect().height))
+            );
+            document.removeEventListener('mousemove', onMouseMove);
+            document.removeEventListener('mouseup', onMouseUp);
+        }
+
+        document.body.classList.add('panel-resizing');
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', onMouseUp);
+    });
+
+    handle.addEventListener('dblclick', () => {
+        setPanelHeight(DEFAULT_DETAIL_PANEL_HEIGHT);
+        localStorage.removeItem(DETAIL_PANEL_HEIGHT_KEY);
+    });
+
+    window.addEventListener('resize', () => {
+        setPanelHeight(panel.getBoundingClientRect().height);
+    });
+}
+
+initDetailPanelResize();
 setUIState('idle');

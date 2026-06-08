@@ -68,8 +68,8 @@
       </div>
     </header>
 
-    <main class="flex-grow flex flex-col min-h-0 p-2 gap-2">
-      <div class="flex-grow min-h-0 border border-zinc-300 rounded-md bg-white overflow-hidden flex flex-col">
+    <main class="flex-grow flex flex-col min-h-0 p-2 gap-0">
+      <div id="resultsPanel" class="flex-grow min-h-[120px] border border-zinc-300 rounded-md bg-white overflow-hidden flex flex-col mb-2">
         <div class="overflow-auto flex-grow min-h-0">
           <table class="w-full text-xs border-collapse">
             <thead class="sticky top-0 bg-zinc-100 border-b border-zinc-300 z-10">
@@ -89,8 +89,17 @@
       </div>
 
       <div
+        id="panelResizeHandle"
+        class="panel-resize-handle"
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="Змінити висоту панелі деталей"
+        title="Перетягніть для зміни висоти. Подвійний клік — скинути."
+      ></div>
+
+      <div
         id="detailPanel"
-        class="shrink-0 h-64 border border-zinc-300 rounded-md bg-white flex flex-col overflow-hidden"
+        class="shrink-0 min-h-[120px] border border-zinc-300 rounded-md bg-white flex flex-col overflow-hidden mt-1"
       >
         <div class="flex border-b border-zinc-300 bg-zinc-50 shrink-0">
           <button
