@@ -13,12 +13,22 @@
     <header class="shrink-0 border-b border-zinc-300 bg-white px-3 py-3 sm:px-4">
       <div class="flex flex-col gap-2 lg:flex-row lg:items-center lg:gap-3">
         <h1 class="text-lg font-bold text-zinc-700 shrink-0">Electron Web Spider</h1>
-        <input
-          type="text"
-          id="urlInput"
-          placeholder="Початковий URL (наприклад, http://localhost/)"
-          class="w-full min-w-0 p-2 border border-zinc-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none text-sm lg:flex-grow"
-        />
+        <div
+          id="urlInputWrap"
+          class="relative w-full min-w-0 rounded-md border border-zinc-300 overflow-hidden bg-white lg:flex-grow"
+        >
+          <div
+            id="urlInputProgress"
+            class="absolute inset-y-0 left-0 w-0 bg-green-200 transition-[width] duration-300 ease-out pointer-events-none"
+            aria-hidden="true"
+          ></div>
+          <input
+            type="text"
+            id="urlInput"
+            placeholder="Початковий URL (наприклад, http://localhost/)"
+            class="relative z-10 w-full min-w-0 p-2 bg-transparent border-0 focus:ring-2 focus:ring-inset focus:ring-blue-500 focus:outline-none text-sm"
+          />
+        </div>
         <div class="flex flex-wrap items-center gap-2 shrink-0">
           <div id="controlsIdle" class="flex flex-wrap gap-2">
             <button
@@ -127,6 +137,7 @@
                 <th class="sortable-th p-2 font-semibold min-w-[200px] cursor-pointer select-none hover:bg-zinc-200" data-sort="url" title="Сортувати">Address</th>
                 <th class="sortable-th p-2 font-semibold w-16 cursor-pointer select-none hover:bg-zinc-200" data-sort="status" title="Сортувати">Status</th>
                 <th class="sortable-th p-2 font-semibold min-w-[110px] cursor-pointer select-none hover:bg-zinc-200" data-sort="contentType" title="Сортувати">Content-Type</th>
+                <th class="sortable-th p-2 font-semibold w-20 cursor-pointer select-none hover:bg-zinc-200" data-sort="responseTime" title="Сортувати">Час (мс)</th>
                 <th class="p-2 font-semibold min-w-[100px]" title="Meta robots">Meta robots</th>
                 <th class="p-2 font-semibold min-w-[120px]" title="Правило robots.txt">Robots.txt</th>
                 <th class="sortable-th p-2 font-semibold min-w-[140px] cursor-pointer select-none hover:bg-zinc-200" data-sort="title" title="Сортувати">Title</th>
@@ -200,6 +211,7 @@
         <span id="status-scanned" class="font-semibold">Проскановано: 0</span>
         <span id="status-queue" class="font-semibold">У черзі: 0</span>
         <span id="status-active" class="font-semibold">Активних: 0</span>
+        <span id="status-rate" class="font-semibold">Швидкість: —</span>
       </div>
     </footer>
 

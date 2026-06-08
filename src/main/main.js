@@ -92,6 +92,17 @@ function fetchPage(url) {
     });
 }
 
+async function timedFetch(url) {
+    const startedAt = performance.now();
+    const response = await fetchPage(url);
+    return {
+        response,
+        getElapsedMs() {
+            return Math.round(performance.now() - startedAt);
+        },
+    };
+}
+
 function isRedirectStatus(status) {
     return status >= 300 && status < 400;
 }
@@ -129,6 +140,7 @@ function buildSpiderResult(overrides) {
         metaRobotsLabel: '',
         robotsAllowed: null,
         robotsRule: '',
+        responseTimeMs: null,
         linkCount: 0,
         outlinks: [],
         headings: [],
@@ -481,7 +493,9 @@ async function crawl(url, referrer, browserWindow) {
         const referrers = referrersMap.has(url) ? Array.from(referrersMap.get(url)) : (referrer !== 'N/A' ? [referrer] : []);
 
         let currentUrl = url;
-        let response = await fetchPage(currentUrl);
+        let timed = await timedFetch(currentUrl);
+        let response = timed.response;
+        let responseTimeMs = timed.getElapsedMs();
         let previousUrl = null;
         let hop = 0;
 
@@ -494,6 +508,7 @@ async function crawl(url, referrer, browserWindow) {
                 title: `Редирект на ${redirectUrl || 'невідомо'}`,
                 referrers: previousUrl === null ? referrers : [previousUrl],
                 redirectUrl: redirectUrl,
+                responseTimeMs,
             }));
 
             if (!redirectUrl) {
@@ -526,7 +541,9 @@ async function crawl(url, referrer, browserWindow) {
             }
             referrersMap.get(currentUrl).add(previousUrl);
 
-            response = await fetchPage(currentUrl);
+            timed = await timedFetch(currentUrl);
+            response = timed.response;
+            responseTimeMs = timed.getElapsedMs();
         }
 
         if (isRedirectStatus(response.status)) {
@@ -536,6 +553,7 @@ async function crawl(url, referrer, browserWindow) {
                 title: 'Занадто довгий ланцюжок редиректів',
                 referrers: previousUrl === null ? referrers : [previousUrl],
                 redirectUrl: resolveRedirectTarget(currentUrl, response.headers.get('location')),
+                responseTimeMs,
             }));
             return;
         }
@@ -556,6 +574,7 @@ async function crawl(url, referrer, browserWindow) {
                     title: `HTTP ${response.status}`,
                     referrers: pageReferrers,
                     contentType,
+                    responseTimeMs,
                 },
                 getXRobotsTag(response) || null
             ));
@@ -569,11 +588,13 @@ async function crawl(url, referrer, browserWindow) {
                 title: contentType || 'Медіа / не-HTML',
                 referrers: pageReferrers,
                 contentType,
+                responseTimeMs,
             }));
             return;
         }
 
         const html = await response.text();
+        responseTimeMs = timed.getElapsedMs();
         const $ = cheerio.load(html);
 
         const title = $('title').text().trim();
@@ -625,6 +646,7 @@ async function crawl(url, referrer, browserWindow) {
                 linkCount: outlinks.length,
                 outlinks: outlinks,
                 headings: headings,
+                responseTimeMs,
             },
             metaRobotsRaw
         ));
@@ -699,6 +721,43 @@ async function startSpider(startUrl, options, browserWindow) {
         stopped: false,
         finished: false,
         activeWorkers: 0,
+        scanStartMs: null,
+        pausedAtMs: null,
+        totalPausedMs: 0,
+        pagesCompleted: 0,
+        markScanStarted() {
+            if (this.scanStartMs === null) {
+                this.scanStartMs = Date.now();
+            }
+        },
+        markPaused() {
+            if (this.pausedAtMs === null) {
+                this.pausedAtMs = Date.now();
+            }
+        },
+        markResumed() {
+            if (this.pausedAtMs !== null) {
+                this.totalPausedMs += Date.now() - this.pausedAtMs;
+                this.pausedAtMs = null;
+            }
+        },
+        getActiveElapsedMs() {
+            if (this.scanStartMs === null) {
+                return 0;
+            }
+            let elapsed = Date.now() - this.scanStartMs - this.totalPausedMs;
+            if (this.paused && this.pausedAtMs !== null) {
+                elapsed -= Date.now() - this.pausedAtMs;
+            }
+            return Math.max(0, elapsed);
+        },
+        getPagesPerSecond() {
+            const elapsedMs = this.getActiveElapsedMs();
+            if (elapsedMs <= 0 || this.pagesCompleted === 0) {
+                return 0;
+            }
+            return this.pagesCompleted / (elapsedMs / 1000);
+        },
         sendProgress(status) {
             if (this.finished) {
                 return;
@@ -721,6 +780,7 @@ async function startSpider(startUrl, options, browserWindow) {
                 active: this.activeWorkers,
                 concurrency: this.concurrency,
                 paused: this.paused,
+                pagesPerSecond: Math.round(this.getPagesPerSecond() * 10) / 10,
                 status: progressStatus,
             });
         },
@@ -781,6 +841,7 @@ async function startSpider(startUrl, options, browserWindow) {
                 }
 
                 this.activeWorkers++;
+                this.markScanStarted();
                 crawl(item.url, item.referrer, this.browserWindow)
                     .catch((err) => {
                         console.error(`Помилка воркера для ${item.url}:`, err);
@@ -790,6 +851,7 @@ async function startSpider(startUrl, options, browserWindow) {
                             return;
                         }
                         this.activeWorkers--;
+                        this.pagesCompleted++;
                         this.tryFinishOrPump();
                         this.sendProgress();
                     });
@@ -853,6 +915,7 @@ ipcMain.on('start-spider', (event, payload) => {
 ipcMain.handle('spider-pause', () => {
     if (scanSession && !scanSession.finished && !scanSession.stopped) {
         scanSession.paused = true;
+        scanSession.markPaused();
         scanSession.sendProgress('На паузі');
         return { ok: true };
     }
@@ -862,6 +925,7 @@ ipcMain.handle('spider-pause', () => {
 ipcMain.handle('spider-resume', () => {
     if (scanSession && !scanSession.finished && !scanSession.stopped && scanSession.paused) {
         scanSession.paused = false;
+        scanSession.markResumed();
         scanSession.sendProgress('В процесі...');
         scanSession.pumpQueue();
         return { ok: true };

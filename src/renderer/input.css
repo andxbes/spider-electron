@@ -17,4 +17,14 @@
   body.panel-resizing * {
     cursor: ns-resize !important;
   }
+
+  #urlInputWrap.url-input-scanning #urlInputProgress {
+    background-color: var(--color-green-200);
+  }
+
+  #urlInputWrap.url-input-scanning #urlInput:disabled {
+    color: var(--color-zinc-800);
+    -webkit-text-fill-color: var(--color-zinc-800);
+    opacity: 1;
+  }
 }

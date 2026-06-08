@@ -1,4 +1,6 @@
 const urlInput = document.getElementById('urlInput');
+const urlInputWrap = document.getElementById('urlInputWrap');
+const urlInputProgress = document.getElementById('urlInputProgress');
 const startButton = document.getElementById('startButton');
 const stopButton = document.getElementById('stopButton');
 const resumeButton = document.getElementById('resumeButton');
@@ -15,6 +17,7 @@ const statusText = document.getElementById('status-text');
 const statusScanned = document.getElementById('status-scanned');
 const statusQueue = document.getElementById('status-queue');
 const statusActive = document.getElementById('status-active');
+const statusRate = document.getElementById('status-rate');
 const contentTypeFilter = document.getElementById('contentTypeFilter');
 const statusFilter = document.getElementById('statusFilter');
 const indexingFilter = document.getElementById('indexingFilter');
@@ -39,6 +42,7 @@ let uiState = 'idle';
 let knownStatusCodes = new Set();
 let refreshTableTimer = null;
 const REFRESH_TABLE_DELAY_MS = 120;
+let lastScanProgress = null;
 
 const MEDIA_EXTENSIONS = new Set([
     'jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'ico', 'bmp', 'avif', 'tif', 'tiff',
@@ -87,6 +91,20 @@ function metaRobotsCellHtml(data) {
         ? 'Дозволено для індексації та обходу'
         : 'Закрито (noindex / nofollow)';
     return `<span class="${cls} font-medium" title="${escapeHtml(title)}: ${escapeHtml(label)}">${escapeHtml(truncate(label, 28))}</span>`;
+}
+
+function formatResponseTimeMs(ms) {
+    if (ms === null || ms === undefined || Number.isNaN(ms)) {
+        return '<span class="text-zinc-400 italic">—</span>';
+    }
+    const value = Number(ms);
+    let cls = 'text-green-700';
+    if (value >= 3000) {
+        cls = 'text-red-700';
+    } else if (value >= 1000) {
+        cls = 'text-amber-600';
+    }
+    return `<span class="font-mono font-medium ${cls}">${value}</span>`;
 }
 
 function robotsTxtCellHtml(data) {
@@ -375,12 +393,41 @@ function updateExportButton() {
     exportButton.classList.toggle('hidden', !canExport || scanResults.size === 0);
 }
 
+function updateUrlInputProgress(progress = null) {
+    if (!urlInputProgress) {
+        return;
+    }
+    if (progress) {
+        lastScanProgress = progress;
+    }
+
+    if (uiState === 'idle') {
+        urlInputProgress.style.width = '0%';
+        if (urlInputWrap) {
+            urlInputWrap.classList.remove('url-input-scanning');
+        }
+        return;
+    }
+
+    if (urlInputWrap) {
+        urlInputWrap.classList.add('url-input-scanning');
+    }
+
+    const snapshot = progress || lastScanProgress || {};
+    const scanned = snapshot.scanned ?? 0;
+    const queue = snapshot.queue ?? 0;
+    const total = scanned + queue;
+    const percent = total > 0 ? Math.min(100, Math.max(0, (scanned / total) * 100)) : 0;
+    urlInputProgress.style.width = `${percent}%`;
+}
+
 function setUIState(state) {
     uiState = state;
     controlsIdle.classList.toggle('hidden', state !== 'idle');
     controlsRunning.classList.toggle('hidden', state !== 'running');
     controlsPaused.classList.toggle('hidden', state !== 'paused');
     urlInput.disabled = state === 'running';
+    updateUrlInputProgress();
     if (state === 'idle' || state === 'paused') {
         updateExportButton();
     } else {
@@ -408,7 +455,9 @@ async function beginScan(startUrl, { clearResults = true } = {}) {
     if (clearResults) {
         clearScanResults();
     }
+    lastScanProgress = null;
     setUIState('running');
+    updateUrlInputProgress({ scanned: 0, queue: 0 });
     statusText.textContent = `Починаю сканування з ${startUrl}...`;
 
     const settings = await loadSettings();
@@ -450,6 +499,10 @@ function compareRows(a, b) {
         case 'contentType':
             va = (a.contentType || '').toLowerCase();
             vb = (b.contentType || '').toLowerCase();
+            break;
+        case 'responseTime':
+            va = a.responseTimeMs ?? -1;
+            vb = b.responseTimeMs ?? -1;
             break;
         case 'title':
             va = (a.title || '').toLowerCase();
@@ -504,6 +557,7 @@ function createTableRow(data, displayIndex) {
         <td class="p-2">${urlCellHtml(data.url)}</td>
         <td class="p-2"><span class="font-mono font-semibold ${statusRowClass(data.status)}">${escapeHtml(data.status)}</span></td>
         <td class="p-2 font-mono text-zinc-600" title="${escapeHtml(data.contentType || '')}">${data.contentType ? escapeHtml(truncate(data.contentType, 28)) : '<span class="text-zinc-400 italic">—</span>'}</td>
+        <td class="p-2 text-right">${formatResponseTimeMs(data.responseTimeMs)}</td>
         <td class="p-2">${metaRobotsCellHtml(data)}</td>
         <td class="p-2">${robotsTxtCellHtml(data)}</td>
         <td class="p-2" title="${escapeHtml(data.title)}">${escapeHtml(truncate(data.title, 50))}</td>
@@ -715,6 +769,7 @@ function buildDetailRows(data) {
         ['Address', urlCellHtml(data.url)],
         ['Status Code', escapeHtml(data.status)],
         ['Content-Type', escapeHtml(data.contentType) || '<span class="text-zinc-400 italic">—</span>'],
+        ['Response Time (ms)', data.responseTimeMs ?? '—'],
         ['Resource Type', getResourceType(data) === 'html' ? 'HTML' : 'Медіа'],
         ['Title', escapeHtml(data.title)],
         ['Title Length', data.title ? String(data.title.length) : '0'],
@@ -779,7 +834,7 @@ exportButton.addEventListener('click', () => {
     }
 
     const bom = '\uFEFF';
-    const headers = ['URL', 'Status', 'Meta Robots', 'Robots.txt Rule', 'Robots.txt Allowed', 'H1 Count', 'Content-Type', 'Resource Type', 'Title', 'Meta Description', 'Canonical', 'Link Count', 'Redirect URL', 'Referrers', 'Headings'];
+    const headers = ['URL', 'Status', 'Meta Robots', 'Robots.txt Rule', 'Robots.txt Allowed', 'H1 Count', 'Content-Type', 'Response Time (ms)', 'Resource Type', 'Title', 'Meta Description', 'Canonical', 'Link Count', 'Redirect URL', 'Referrers', 'Headings'];
     const csvRows = [headers.join(',')];
 
     for (const data of entries) {
@@ -793,6 +848,7 @@ exportButton.addEventListener('click', () => {
             `"${data.robotsAllowed === false ? 'Заборонено' : (data.robotsAllowed ? 'Дозволено' : '')}"`,
             `"${getH1Count(data)}"`,
             `"${(data.contentType || '').replace(/"/g, '""')}"`,
+            `"${data.responseTimeMs ?? ''}"`,
             `"${getResourceType(data)}"`,
             `"${(data.title || '').replace(/"/g, '""')}"`,
             `"${(data.metaDescription || '').replace(/"/g, '""')}"`,
@@ -894,6 +950,7 @@ window.api.onSpiderProgress((progress) => {
     if (progress.paused && uiState === 'running') {
         setUIState('paused');
     }
+    updateUrlInputProgress(progress);
     if (uiState === 'paused') {
         statusText.textContent = 'На паузі';
     } else {
@@ -913,6 +970,17 @@ window.api.onSpiderProgress((progress) => {
         statusActive.textContent = concurrency > 0
             ? `Активних: ${active}/${concurrency}`
             : `Активних: ${active}`;
+    }
+    if (statusRate) {
+        if (uiState === 'running' && !progress.paused && (progress.pagesPerSecond ?? 0) > 0) {
+            statusRate.textContent = `Швидкість: ${progress.pagesPerSecond} стор./с`;
+        } else if (uiState === 'paused') {
+            statusRate.textContent = 'Швидкість: —';
+        } else if (uiState === 'idle' && (progress.pagesPerSecond ?? 0) > 0) {
+            statusRate.textContent = `Швидкість: ${progress.pagesPerSecond} стор./с`;
+        } else {
+            statusRate.textContent = 'Швидкість: —';
+        }
     }
 });
 
