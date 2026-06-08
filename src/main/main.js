@@ -510,7 +510,7 @@ async function crawl(url, referrer, browserWindow) {
             browserWindow.webContents.send('spider-result', buildResultWithIndexing(robots, robotsText, currentUrl, {
                 status: response.status,
                 url: currentUrl,
-                title: `Редирект на ${redirectUrl || 'невідомо'}`,
+                title: '',
                 referrers: previousUrl === null ? referrers : [previousUrl],
                 redirectUrl: redirectUrl,
                 responseTimeMs,
@@ -555,7 +555,7 @@ async function crawl(url, referrer, browserWindow) {
             browserWindow.webContents.send('spider-result', buildResultWithIndexing(robots, robotsText, currentUrl, {
                 status: response.status,
                 url: currentUrl,
-                title: 'Занадто довгий ланцюжок редиректів',
+                title: '',
                 referrers: previousUrl === null ? referrers : [previousUrl],
                 redirectUrl: resolveRedirectTarget(currentUrl, response.headers.get('location')),
                 responseTimeMs,
