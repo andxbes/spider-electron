@@ -1,4 +1,6 @@
 const SESSION_DUMP_VERSION = 1;
+const WORKSPACE_STORAGE_KEY = 'spider-electron.workspace.v1';
+const WORKSPACE_VERSION = 1;
 
 function cloneResultEntry(data) {
     return {
@@ -63,4 +65,62 @@ function normalizeLoadedDump(dump) {
         insertionOrder,
         results,
     };
+}
+
+function buildWorkspaceSnapshot({
+    scanResults,
+    insertionOrder,
+    startUrl,
+    lastScanProgress,
+    selectedUrl,
+    statusHint,
+    filters,
+}) {
+    const results = insertionOrder
+        .map((url) => scanResults.get(url))
+        .filter(Boolean)
+        .map(cloneResultEntry);
+
+    return {
+        version: WORKSPACE_VERSION,
+        startUrl: startUrl || '',
+        insertionOrder: [...insertionOrder],
+        results,
+        lastScanProgress: lastScanProgress ? { ...lastScanProgress } : null,
+        selectedUrl: selectedUrl || null,
+        statusHint: statusHint || '',
+        filters: filters ? { ...filters } : null,
+    };
+}
+
+function saveWorkspaceToSession(snapshot) {
+    try {
+        sessionStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify(snapshot));
+    } catch (error) {
+        console.error('Не вдалося зберегти стан робочої області:', error);
+    }
+}
+
+function loadWorkspaceFromSession() {
+    try {
+        const raw = sessionStorage.getItem(WORKSPACE_STORAGE_KEY);
+        if (!raw) {
+            return null;
+        }
+        const parsed = JSON.parse(raw);
+        if (!parsed || parsed.version !== WORKSPACE_VERSION || !Array.isArray(parsed.results)) {
+            return null;
+        }
+        return parsed;
+    } catch {
+        return null;
+    }
+}
+
+function clearWorkspaceSession() {
+    try {
+        sessionStorage.removeItem(WORKSPACE_STORAGE_KEY);
+    } catch {
+        // ignore
+    }
 }

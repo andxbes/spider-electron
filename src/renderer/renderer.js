@@ -43,6 +43,8 @@ let knownStatusCodes = new Set();
 let refreshTableTimer = null;
 const REFRESH_TABLE_DELAY_MS = 120;
 let lastScanProgress = null;
+let workspacePersistTimer = null;
+const WORKSPACE_PERSIST_DELAY_MS = 200;
 
 const MEDIA_EXTENSIONS = new Set([
     'jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'ico', 'bmp', 'avif', 'tif', 'tiff',
@@ -449,7 +451,7 @@ function setUIState(state) {
     }
 }
 
-function clearScanResults() {
+function clearScanData() {
     scanResults.clear();
     insertionOrder.length = 0;
     selectedUrl = null;
@@ -461,8 +463,133 @@ function clearScanResults() {
         selectedUrlBar.querySelectorAll('.url-copy, .url-open').forEach((el) => el.remove());
     }
     detailContent.innerHTML = '<p class="p-4 text-zinc-400 italic">Оберіть URL у таблиці вище</p>';
+}
+
+function clearScanResults() {
+    clearScanData();
     resetTableFilters();
     updateExportButton();
+    clearWorkspaceSession();
+}
+
+function collectWorkspaceSnapshot() {
+    return buildWorkspaceSnapshot({
+        scanResults,
+        insertionOrder,
+        startUrl: urlInput.value.trim(),
+        lastScanProgress,
+        selectedUrl,
+        statusHint: statusText.textContent,
+        filters: {
+            content: activeContentFilter,
+            status: activeStatusFilter,
+            indexing: activeIndexingFilter,
+            h1: activeH1Filter,
+        },
+    });
+}
+
+function persistWorkspaceNow() {
+    if (workspacePersistTimer) {
+        clearTimeout(workspacePersistTimer);
+        workspacePersistTimer = null;
+    }
+    if (scanResults.size === 0) {
+        clearWorkspaceSession();
+        return;
+    }
+    saveWorkspaceToSession(collectWorkspaceSnapshot());
+}
+
+function scheduleWorkspacePersist() {
+    if (workspacePersistTimer) {
+        return;
+    }
+    workspacePersistTimer = setTimeout(() => {
+        workspacePersistTimer = null;
+        persistWorkspaceNow();
+    }, WORKSPACE_PERSIST_DELAY_MS);
+}
+
+function applyFilterState(filters) {
+    activeContentFilter = filters.content || 'all';
+    activeStatusFilter = filters.status || 'all';
+    activeIndexingFilter = filters.indexing || 'all';
+    activeH1Filter = filters.h1 || 'all';
+    if (contentTypeFilter) {
+        contentTypeFilter.value = activeContentFilter;
+    }
+    if (statusFilter) {
+        statusFilter.value = activeStatusFilter;
+    }
+    if (indexingFilter) {
+        indexingFilter.value = activeIndexingFilter;
+    }
+    if (h1Filter) {
+        h1Filter.value = activeH1Filter;
+    }
+    updateStatusFilterOptions({ force: true });
+}
+
+function populateScanResults(normalized) {
+    clearScanData();
+    urlInput.value = normalized.startUrl;
+
+    const resultMap = new Map(normalized.results.map((entry) => [entry.url, entry]));
+    for (const url of normalized.insertionOrder) {
+        if (resultMap.has(url)) {
+            insertionOrder.push(url);
+            scanResults.set(url, resultMap.get(url));
+        }
+    }
+    for (const entry of normalized.results) {
+        if (!scanResults.has(entry.url)) {
+            insertionOrder.push(entry.url);
+            scanResults.set(entry.url, entry);
+        }
+    }
+}
+
+function restoreWorkspaceFromSession() {
+    const workspace = loadWorkspaceFromSession();
+    if (!workspace?.results?.length) {
+        return false;
+    }
+
+    const normalized = normalizeLoadedDump({
+        version: SESSION_DUMP_VERSION,
+        startUrl: workspace.startUrl,
+        insertionOrder: workspace.insertionOrder,
+        results: workspace.results,
+        progressAtSave: workspace.lastScanProgress,
+    });
+
+    populateScanResults(normalized);
+    if (workspace.filters) {
+        applyFilterState(workspace.filters);
+    }
+
+    lastScanProgress = workspace.lastScanProgress || null;
+    requestRefreshTable({ immediate: true });
+    updateUrlInputProgress(lastScanProgress);
+    statusScanned.textContent = `Проскановано: ${scanResults.size}`;
+    statusQueue.textContent = 'У черзі: 0';
+    if (statusActive) {
+        statusActive.textContent = 'Активних: 0';
+    }
+    if (statusRate) {
+        statusRate.textContent = 'Швидкість: —';
+    }
+    if (workspace.statusHint) {
+        statusText.textContent = workspace.statusHint;
+    }
+
+    if (workspace.selectedUrl && scanResults.has(workspace.selectedUrl)) {
+        selectRow(workspace.selectedUrl);
+    }
+
+    updateExportButton();
+    return true;
 }
 
 async function beginScan(startUrl, { clearResults = true } = {}) {
@@ -658,6 +785,7 @@ function upsertScanResult(data) {
     }
     scanResults.set(data.url, data);
     requestRefreshTable();
+    scheduleWorkspacePersist();
 
     if (isNew && !selectedUrl) {
         selectedUrl = data.url;
@@ -940,22 +1068,8 @@ async function saveSessionDumpToFile() {
 
 function applySessionDump(dump, filePath = '') {
     const normalized = normalizeLoadedDump({ ...dump, filePath });
-    clearScanResults();
-    urlInput.value = normalized.startUrl;
-
-    const resultMap = new Map(normalized.results.map((entry) => [entry.url, entry]));
-    for (const url of normalized.insertionOrder) {
-        if (resultMap.has(url)) {
-            insertionOrder.push(url);
-            scanResults.set(url, resultMap.get(url));
-        }
-    }
-    for (const entry of normalized.results) {
-        if (!scanResults.has(entry.url)) {
-            insertionOrder.push(entry.url);
-            scanResults.set(entry.url, entry);
-        }
-    }
+    resetTableFilters();
+    populateScanResults(normalized);
 
     selectedUrl = null;
     lastScanProgress = normalized.progressAtSave;
@@ -973,6 +1087,7 @@ function applySessionDump(dump, filePath = '') {
     statusText.textContent = filePath
         ? `Завантажено дамп (${scanResults.size} URL): ${filePath}`
         : `Завантажено дамп: ${scanResults.size} URL`;
+    persistWorkspaceNow();
 }
 
 async function loadSessionDumpFromFile() {
@@ -1065,6 +1180,7 @@ window.api.onSpiderEnd((message) => {
     statusText.textContent = message;
     setUIState('idle');
     requestRefreshTable({ immediate: true });
+    persistWorkspaceNow();
 });
 
 window.api.onSpiderProgress((progress) => {
@@ -1171,4 +1287,9 @@ function initDetailPanelResize() {
 }
 
 initDetailPanelResize();
+restoreWorkspaceFromSession();
 setUIState('idle');
+
+window.addEventListener('pagehide', () => {
+    persistWorkspaceNow();
+});
