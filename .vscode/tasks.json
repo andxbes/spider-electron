@@ -1,0 +1,96 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build: linux",
+      "type": "shell",
+      "command": "npm run make:linux",
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "shell": {
+          "executable": "zsh",
+          "args": ["-ilc"]
+        }
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "presentation": {
+        "reveal": "always",
+        "echo": true,
+        "focus": true,
+        "panel": "new",
+        "showReuseMessage": false,
+        "clear": false,
+        "close": false
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "build: windows",
+      "type": "shell",
+      "command": "npm run make:win",
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "shell": {
+          "executable": "zsh",
+          "args": ["-ilc"]
+        }
+      },
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "echo": true,
+        "focus": true,
+        "panel": "new",
+        "showReuseMessage": false,
+        "clear": false,
+        "close": false
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "build: macos",
+      "type": "shell",
+      "command": "npm run make:mac",
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "shell": {
+          "executable": "zsh",
+          "args": ["-ilc"]
+        }
+      },
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "echo": true,
+        "focus": true,
+        "panel": "new",
+        "showReuseMessage": false,
+        "clear": false,
+        "close": false
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "start",
+      "type": "shell",
+      "command": "npm start",
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "shell": {
+          "executable": "zsh",
+          "args": ["-ilc"]
+        }
+      },
+      "presentation": {
+        "reveal": "always",
+        "focus": true,
+        "panel": "new",
+        "close": false
+      },
+      "problemMatcher": []
+    }
+  ]
+}

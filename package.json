@@ -7,18 +7,21 @@
   "scripts": {
     "postinstall": "node node_modules/electron/install.js",
     "build:css": "postcss ./src/renderer/input.css -o ./src/renderer/styles.css",
-    "start": "npm run build:css && electron-forge start",
-    "package": "electron-forge package",
-    "make": "electron-forge make"
+    "start": "npm run build:css && CI=true electron-forge start",
+    "prepackage": "npm run build:css",
+    "package": "CI=true electron-forge package",
+    "premake": "npm run build:css",
+    "make": "CI=true electron-forge make",
+    "make:linux": "CI=true electron-forge make --platform=linux",
+    "linux": "npm run make:linux",
+    "make:win": "CI=true electron-forge make --platform=win32",
+    "make:mac": "CI=true electron-forge make --platform=darwin"
   },
   "devDependencies": {
     "@electron-forge/cli": "^7.11.2",
-    "@electron-forge/maker-deb": "^7.11.2",
-    "@electron-forge/maker-rpm": "^7.11.2",
+    "@electron-forge/maker-dmg": "^7.11.2",
     "@electron-forge/maker-squirrel": "^7.11.2",
     "@electron-forge/maker-zip": "^7.11.2",
-    "@electron-forge/plugin-auto-unpack-natives": "^7.11.2",
-    "@electron-forge/plugin-fuses": "^7.11.2",
     "@tailwindcss/postcss": "^4.3.0",
     "electron": "42.3.3",
     "postcss": "^8.5.15",
@@ -27,51 +30,6 @@
   },
   "dependencies": {
     "cheerio": "^1.2.0",
-    "cheerio": "^1.2.0",
     "robots-parser": "^3.0.1"
-  },
-  "config": {
-    "forge": {
-      "packagerConfig": {
-        "asar": true
-      },
-      "makers": [
-        {
-          "name": "@electron-forge/maker-squirrel",
-          "config": {
-            "name": "spider_electron"
-          }
-        },
-        {
-          "name": "@electron-forge/maker-zip",
-          "platforms": [
-            "darwin",
-            "linux",
-            "win32"
-          ]
-        }
-      ],
-      "plugins": [
-        {
-          "name": "@electron-forge/plugin-auto-unpack-natives",
-          "config": {}
-        },
-        {
-          "name": "@electron-forge/plugin-fuses",
-          "config": {
-            "version": "v1",
-            "enableMissionControl": false,
-            "enableEmbeddedAsarIntegrityValidation": true,
-            "enableMvsOutgrow": true,
-            "runAsNode": false,
-            "enableCookieEncryption": true,
-            "enableNodeOptionsEnvironmentVariable": false,
-            "enableNodeCliInspectArguments": false,
-            "enableTlsHttps": false,
-            "enableDartAssertion": false
-          }
-        }
-      ]
-    }
   }
 }

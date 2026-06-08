@@ -1,6 +1,6 @@
 # Spider-Electron — внутрішня документація
 
-> Останнє оновлення: 2026-06-08 (sitemap)  
+> Останнє оновлення: 2026-06-08 (forge build)  
 > Короткий довідник для розробки та правок. Детальніше про підтримку — [DOC_MAINTENANCE.md](./DOC_MAINTENANCE.md).
 
 ## Що це
@@ -135,18 +135,22 @@ Renderer
 npm install            # postinstall докачує бінарник Electron
 npm start              # build:css + electron-forge start
 npm run build:css      # input.css → styles.css
-npm run package        # пакування в out/
-npm run make           # дистрибутиви
+npm run package        # пакування в out/ (prepackage → build:css)
+npm run make           # дистрибутиви Linux/Windows (premake → build:css)
+npm run make:linux     # лише Linux (zip)
+npm run make:win       # Windows zip (з Linux); Setup.exe — лише збірка на Windows
+npm run make:mac       # лише macOS (dmg + zip); збирати на Mac
 ```
 
-`styles.css` у `.gitignore` — перед запуском потрібен `build:css`.
+Конфіг збірки — `forge.config.js`. Збірку запускати з **терміналу** або через **Tasks → make (Linux)** (`.vscode/tasks.json`), не через npm Scripts у боковій панелі — Forge зависає без TTY. У скриптах стоїть `CI=true`, щоб обійти це.
+
+`styles.css` у `.gitignore` — `build:css` запускається автоматично перед `start`, `package`, `make`.
 
 **Якщо Forge падає з `ENOENT path.txt`:** завантаження бінарника Electron перервалось (мережа). Виправлення: `node node_modules/electron/install.js` або повторний `npm install`.
 
 ## Відомі обмеження / техборг
 
 - Монолітний `main.js` (~296 рядків) — рефакторинг потрібен для concurrency, multi-domain, sitemap.
-- `forge.config.js` відсутній у репо (є `out/` від минулого package).
 - UI українською.
 - Немає тестів, README, `.env` / config-файлів.
 
