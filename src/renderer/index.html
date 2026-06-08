@@ -70,6 +70,35 @@
 
     <main class="flex-grow flex flex-col min-h-0 p-2 gap-0">
       <div id="resultsPanel" class="flex-grow min-h-[120px] border border-zinc-300 rounded-md bg-white overflow-hidden flex flex-col mb-2">
+        <div class="flex flex-wrap items-center gap-x-3 gap-y-1 px-2 py-1.5 border-b border-zinc-200 bg-zinc-50 text-xs shrink-0">
+          <label class="flex items-center gap-1.5">
+            <span class="text-zinc-500 whitespace-nowrap">Тип:</span>
+            <select
+              id="contentTypeFilter"
+              class="px-2 py-1 border border-zinc-300 rounded bg-white text-zinc-800 min-w-[7rem]"
+            >
+              <option value="all">Усі</option>
+              <option value="html">HTML</option>
+              <option value="media">Медіа</option>
+            </select>
+          </label>
+          <label class="flex items-center gap-1.5">
+            <span class="text-zinc-500 whitespace-nowrap">Статус:</span>
+            <select
+              id="statusFilter"
+              class="px-2 py-1 border border-zinc-300 rounded bg-white text-zinc-800 min-w-[8rem]"
+            >
+              <option value="all">Усі</option>
+              <option value="2xx">2xx</option>
+              <option value="3xx">3xx</option>
+              <option value="4xx">4xx</option>
+              <option value="5xx">5xx</option>
+              <option value="SKIPPED">SKIPPED</option>
+              <option value="ERROR">Помилка мережі</option>
+            </select>
+          </label>
+          <span id="filterCount" class="text-zinc-400 ml-auto whitespace-nowrap"></span>
+        </div>
         <div class="overflow-auto flex-grow min-h-0">
           <table class="w-full text-xs border-collapse">
             <thead class="sticky top-0 bg-zinc-100 border-b border-zinc-300 z-10">

@@ -15,14 +15,31 @@ const statusText = document.getElementById('status-text');
 const statusScanned = document.getElementById('status-scanned');
 const statusQueue = document.getElementById('status-queue');
 const statusActive = document.getElementById('status-active');
+const contentTypeFilter = document.getElementById('contentTypeFilter');
+const statusFilter = document.getElementById('statusFilter');
+const filterCount = document.getElementById('filterCount');
 
 const scanResults = new Map();
 const insertionOrder = [];
 let selectedUrl = null;
 let activeTab = 'details';
 let sortState = { column: null, direction: 'asc' };
+/** @type {'all' | 'html' | 'media'} */
+let activeContentFilter = 'all';
+/** @type {string} */
+let activeStatusFilter = 'all';
 /** @type {'idle' | 'running' | 'paused'} */
 let uiState = 'idle';
+
+const MEDIA_EXTENSIONS = new Set([
+    'jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'ico', 'bmp', 'avif', 'tif', 'tiff',
+    'mp4', 'webm', 'ogv', 'mov', 'avi', 'mkv',
+    'mp3', 'ogg', 'wav', 'flac', 'aac', 'm4a',
+    'pdf', 'zip', 'gz', 'rar', '7z', 'tar',
+    'css', 'js', 'mjs', 'map',
+    'woff', 'woff2', 'ttf', 'eot', 'otf',
+    'xml', 'json', 'txt', 'csv',
+]);
 
 function escapeHtml(str) {
     return String(str ?? '')
@@ -45,6 +62,168 @@ function statusSortValue(status) {
     if (status === 'ERROR') return 10000;
     if (status === 'SKIPPED') return 9999;
     return 5000;
+}
+
+function getUrlExtension(url) {
+    try {
+        const pathname = new URL(url).pathname;
+        const lastSegment = pathname.split('/').pop() || '';
+        const dotIndex = lastSegment.lastIndexOf('.');
+        if (dotIndex <= 0) {
+            return '';
+        }
+        return lastSegment.slice(dotIndex + 1).toLowerCase();
+    } catch {
+        return '';
+    }
+}
+
+function getResourceType(data) {
+    const contentType = (data.contentType || '').toLowerCase();
+
+    if (contentType.includes('text/html') || contentType.includes('application/xhtml')) {
+        return 'html';
+    }
+    if (
+        contentType.startsWith('image/')
+        || contentType.startsWith('video/')
+        || contentType.startsWith('audio/')
+        || contentType.includes('font')
+        || contentType === 'text/css'
+        || contentType.includes('javascript')
+        || contentType === 'application/pdf'
+        || contentType === 'application/json'
+        || contentType.includes('xml')
+    ) {
+        return 'media';
+    }
+
+    const extension = getUrlExtension(data.url);
+    if (MEDIA_EXTENSIONS.has(extension)) {
+        return 'media';
+    }
+
+    if (typeof data.status === 'number' && data.status >= 300 && data.status < 400) {
+        return 'html';
+    }
+
+    if (data.outlinks?.length || data.headings?.length || data.metaDescription) {
+        return 'html';
+    }
+
+    return 'html';
+}
+
+function matchesStatusFilter(status, filter) {
+    if (filter === 'all') {
+        return true;
+    }
+    if (filter === '2xx') {
+        return typeof status === 'number' && status >= 200 && status < 300;
+    }
+    if (filter === '3xx') {
+        return typeof status === 'number' && status >= 300 && status < 400;
+    }
+    if (filter === '4xx') {
+        return typeof status === 'number' && status >= 400 && status < 500;
+    }
+    if (filter === '5xx') {
+        return typeof status === 'number' && status >= 500 && status < 600;
+    }
+    return String(status) === filter;
+}
+
+function passesTableFilters(data) {
+    if (activeContentFilter !== 'all' && getResourceType(data) !== activeContentFilter) {
+        return false;
+    }
+    return matchesStatusFilter(data.status, activeStatusFilter);
+}
+
+function getFilteredResults() {
+    return Array.from(scanResults.values()).filter(passesTableFilters);
+}
+
+function updateStatusFilterOptions() {
+    if (!statusFilter) {
+        return;
+    }
+
+    const current = statusFilter.value;
+    const numericStatuses = new Set();
+    for (const data of scanResults.values()) {
+        if (typeof data.status === 'number') {
+            numericStatuses.add(data.status);
+        }
+    }
+
+    const staticOptions = [
+        { value: 'all', label: 'Усі' },
+        { value: '2xx', label: '2xx' },
+        { value: '3xx', label: '3xx' },
+        { value: '4xx', label: '4xx' },
+        { value: '5xx', label: '5xx' },
+        { value: 'SKIPPED', label: 'SKIPPED' },
+        { value: 'ERROR', label: 'Помилка мережі' },
+    ];
+
+    const exactOptions = [...numericStatuses].sort((a, b) => a - b).map((code) => ({
+        value: String(code),
+        label: String(code),
+    }));
+
+    statusFilter.innerHTML = '';
+
+    const defaultGroup = document.createElement('optgroup');
+    defaultGroup.label = 'Групи';
+    for (const option of staticOptions) {
+        const el = document.createElement('option');
+        el.value = option.value;
+        el.textContent = option.label;
+        defaultGroup.appendChild(el);
+    }
+    statusFilter.appendChild(defaultGroup);
+
+    if (exactOptions.length > 0) {
+        const exactGroup = document.createElement('optgroup');
+        exactGroup.label = 'Точний код';
+        for (const option of exactOptions) {
+            const el = document.createElement('option');
+            el.value = option.value;
+            el.textContent = option.label;
+            exactGroup.appendChild(el);
+        }
+        statusFilter.appendChild(exactGroup);
+    }
+
+    const hasCurrent = [...statusFilter.options].some((opt) => opt.value === current);
+    statusFilter.value = hasCurrent ? current : 'all';
+    if (!hasCurrent) {
+        activeStatusFilter = 'all';
+    }
+}
+
+function updateFilterCount(shown, total) {
+    if (!filterCount) {
+        return;
+    }
+    if (shown === total) {
+        filterCount.textContent = total > 0 ? `Усього: ${total}` : '';
+    } else {
+        filterCount.textContent = `Показано: ${shown} з ${total}`;
+    }
+}
+
+function resetTableFilters() {
+    activeContentFilter = 'all';
+    activeStatusFilter = 'all';
+    if (contentTypeFilter) {
+        contentTypeFilter.value = 'all';
+    }
+    if (statusFilter) {
+        statusFilter.value = 'all';
+    }
+    updateStatusFilterOptions();
 }
 
 function truncate(str, len = 80) {
@@ -123,6 +302,7 @@ function clearScanResults() {
         selectedUrlBar.querySelectorAll('.url-copy, .url-open').forEach((el) => el.remove());
     }
     detailContent.innerHTML = '<p class="p-4 text-zinc-400 italic">Оберіть URL у таблиці вище</p>';
+    resetTableFilters();
     updateExportButton();
 }
 
@@ -236,7 +416,9 @@ function createTableRow(data, displayIndex) {
 }
 
 function refreshTable() {
-    const entries = Array.from(scanResults.values());
+    updateStatusFilterOptions();
+
+    const entries = getFilteredResults();
     if (sortState.column) {
         entries.sort(compareRows);
     } else {
@@ -247,6 +429,14 @@ function refreshTable() {
     entries.forEach((data, i) => {
         resultsTable.appendChild(createTableRow(data, i + 1));
     });
+
+    updateFilterCount(entries.length, scanResults.size);
+
+    if (selectedUrl && !entries.some((row) => row.url === selectedUrl)) {
+        document.querySelectorAll('#resultsTable tr').forEach((tr) => {
+            tr.classList.remove('bg-blue-50');
+        });
+    }
 }
 
 function upsertScanResult(data) {
@@ -281,6 +471,20 @@ function setActiveTab(tab) {
 document.querySelectorAll('.detail-tab').forEach((btn) => {
     btn.addEventListener('click', () => setActiveTab(btn.dataset.tab));
 });
+
+if (contentTypeFilter) {
+    contentTypeFilter.addEventListener('change', () => {
+        activeContentFilter = contentTypeFilter.value;
+        refreshTable();
+    });
+}
+
+if (statusFilter) {
+    statusFilter.addEventListener('change', () => {
+        activeStatusFilter = statusFilter.value;
+        refreshTable();
+    });
+}
 
 document.querySelectorAll('.sortable-th').forEach((th) => {
     th.addEventListener('click', () => {
@@ -360,6 +564,8 @@ function buildDetailRows(data) {
     const rows = [
         ['Address', urlCellHtml(data.url)],
         ['Status Code', escapeHtml(data.status)],
+        ['Content-Type', escapeHtml(data.contentType) || '<span class="text-zinc-400 italic">—</span>'],
+        ['Resource Type', getResourceType(data) === 'html' ? 'HTML' : 'Медіа'],
         ['Title', escapeHtml(data.title)],
         ['Title Length', data.title ? String(data.title.length) : '0'],
         ['Meta Description', escapeHtml(data.metaDescription) || '<span class="text-zinc-400 italic">—</span>'],
@@ -411,15 +617,17 @@ exportButton.addEventListener('click', () => {
     if (scanResults.size === 0) return;
 
     const bom = '\uFEFF';
-    const headers = ['URL', 'Status', 'Title', 'Meta Description', 'Canonical', 'Link Count', 'Redirect URL', 'Referrers', 'Headings'];
+    const headers = ['URL', 'Status', 'Content-Type', 'Resource Type', 'Title', 'Meta Description', 'Canonical', 'Link Count', 'Redirect URL', 'Referrers', 'Headings'];
     const csvRows = [headers.join(',')];
 
-    for (const [, data] of scanResults) {
+    for (const data of getFilteredResults()) {
         const referrers = data.referrers ? data.referrers.join('; ') : '';
         const headings = data.headings ? data.headings.map((h) => `H${h.level}: ${h.text}`).join('; ') : '';
         const row = [
             `"${(data.url || '').replace(/"/g, '""')}"`,
             `"${(data.status || '')}"`,
+            `"${(data.contentType || '').replace(/"/g, '""')}"`,
+            `"${getResourceType(data)}"`,
             `"${(data.title || '').replace(/"/g, '""')}"`,
             `"${(data.metaDescription || '').replace(/"/g, '""')}"`,
             `"${(data.metaCanonical || '').replace(/"/g, '""')}"`,
@@ -462,20 +670,20 @@ startButton.addEventListener('click', async () => {
     }
 });
 
-stopButton.addEventListener('click', () => {
+stopButton.addEventListener('click', async () => {
     if (uiState !== 'running') {
         return;
     }
-    window.api.pauseSpider();
+    await window.api.pauseSpider();
     setUIState('paused');
     statusText.textContent = 'На паузі';
 });
 
-resumeButton.addEventListener('click', () => {
+resumeButton.addEventListener('click', async () => {
     if (uiState !== 'paused') {
         return;
     }
-    window.api.resumeSpider();
+    await window.api.resumeSpider();
     setUIState('running');
 });
 
@@ -509,13 +717,16 @@ window.api.onSpiderEnd((message) => {
 });
 
 window.api.onSpiderProgress((progress) => {
-    if (uiState === 'running' && progress.paused) {
+    // Лише синхронізуємо паузу з бекенду; не відновлюємо running автоматично —
+    // інакше завершення воркерів до обробки pause IPC повертає кнопку «Зупинити».
+    if (progress.paused && uiState === 'running') {
         setUIState('paused');
     }
-    if (uiState === 'paused' && progress.paused === false && progress.status === 'В процесі...') {
-        setUIState('running');
+    if (uiState === 'paused') {
+        statusText.textContent = 'На паузі';
+    } else {
+        statusText.textContent = progress.status || 'В процесі...';
     }
-    statusText.textContent = progress.status || (uiState === 'paused' ? 'На паузі' : 'В процесі...');
     statusScanned.textContent = `Проскановано: ${progress.scanned}`;
     statusQueue.textContent = `У черзі: ${progress.queue}`;
     if (statusActive) {

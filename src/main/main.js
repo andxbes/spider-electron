@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const path = require('node:path');
 const { URL } = require('node:url');
+const { fetch: undiciFetch } = require('undici');
 const cheerio = require('cheerio');
 
 const robotsParser = require('robots-parser');
@@ -45,6 +46,7 @@ app.on('window-all-closed', () => {
 
 const USER_AGENT = 'MyElectronSpider/1.0 (+https://github.com/your-repo)';
 const FETCH_TIMEOUT_MS = 5000;
+const MAX_REDIRECT_HOPS = 10;
 const FALLBACK_SITEMAP_PATHS = ['/sitemap_index.xml', '/sitemap.xml', '/index.xml'];
 
 const visitedUrls = new Set();
@@ -69,11 +71,52 @@ function tryClaimUrl(url) {
 }
 
 function fetchPage(url) {
-    return fetch(url, {
+    // undici (Node fetch), а не global fetch Electron — інакше redirect: 'manual'
+    // повертає opaque-redirect зі status 0 без Location, і 301/302 губляться.
+    return undiciFetch(url, {
         signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
         redirect: 'manual',
         headers: { 'User-Agent': USER_AGENT },
     });
+}
+
+function isRedirectStatus(status) {
+    return status >= 300 && status < 400;
+}
+
+function resolveRedirectTarget(fromUrl, locationHeader) {
+    if (!locationHeader) {
+        return null;
+    }
+    try {
+        return normalizePageUrl(new URL(locationHeader, fromUrl).href);
+    } catch {
+        return null;
+    }
+}
+
+function getContentType(response) {
+    const raw = response.headers.get('content-type');
+    return raw ? raw.split(';')[0].trim().toLowerCase() : '';
+}
+
+function isHtmlContent(contentType) {
+    if (!contentType) {
+        return true;
+    }
+    return contentType.includes('text/html') || contentType.includes('application/xhtml');
+}
+
+function buildSpiderResult(overrides) {
+    return {
+        metaDescription: '',
+        metaCanonical: '',
+        contentType: '',
+        linkCount: 0,
+        outlinks: [],
+        headings: [],
+        ...overrides,
+    };
 }
 
 function normalizePageUrl(url) {
@@ -248,11 +291,20 @@ async function seedQueueFromSitemaps(startUrl, browserWindow) {
  * @param {string} referrer - URL, з якого перейшли на цю сторінку
  * @param {BrowserWindow} browserWindow - Вікно для надсилання результатів
  */
+function isSessionActive(session) {
+    return session && !session.finished && !session.stopped;
+}
+
+function isSessionPaused(session) {
+    return isSessionActive(session) && session.paused;
+}
+
 async function crawl(url, referrer, browserWindow) {
     if (!tryClaimUrl(url)) {
         return;
     }
 
+    const session = scanSession;
     console.log(`Сканую: ${url}`);
 
     const urlObject = new URL(url);
@@ -261,73 +313,103 @@ async function crawl(url, referrer, browserWindow) {
     if (!robots.isAllowed(url, 'MyElectronSpider/1.0')) {
         console.log(`Заблоковано robots.txt: ${url}`);
         const referrers = referrersMap.has(url) ? Array.from(referrersMap.get(url)) : (referrer !== 'N/A' ? [referrer] : []);
-        browserWindow.webContents.send('spider-result', {
+        browserWindow.webContents.send('spider-result', buildSpiderResult({
             status: 'SKIPPED',
             url: url,
             title: 'Заблоковано robots.txt',
             referrers: referrers,
-            linkCount: 0,
-            outlinks: [],
-            headings: []
-        });
+        }));
         return;
     }
 
     try {
-        const response = await fetchPage(url);
-
         const referrers = referrersMap.has(url) ? Array.from(referrersMap.get(url)) : (referrer !== 'N/A' ? [referrer] : []);
 
-        // 1. Обробка редиректів
-        // Якщо статус 3xx, або fetch сам перейшов (redirected), або URL змінився (response.url !== url)
-        // При автоматичному переході fetch повертає 200, тому оригінальний код (301/302) втрачається.
-        if ((response.status >= 300 && response.status < 400) || response.redirected || (response.url && response.url !== url)) {
-            let redirectUrl = null;
-            let status = response.status;
+        let currentUrl = url;
+        let response = await fetchPage(currentUrl);
+        let previousUrl = null;
+        let hop = 0;
 
-            if (response.status >= 300 && response.status < 400) {
-                const locationHeader = response.headers.get('location');
-                redirectUrl = locationHeader ? new URL(locationHeader, url).href : null;
-            } else {
-                // Якщо статус 200, але редирект визначено за прапорцем або URL — ставимо 302
-                redirectUrl = response.url;
-                status = 302; // Умовний код, оскільки оригінал втрачено
-            }
+        while (isRedirectStatus(response.status) && hop < MAX_REDIRECT_HOPS) {
+            const redirectUrl = resolveRedirectTarget(currentUrl, response.headers.get('location'));
 
-            browserWindow.webContents.send('spider-result', {
-                status: status,
-                url: url,
+            browserWindow.webContents.send('spider-result', buildSpiderResult({
+                status: response.status,
+                url: currentUrl,
                 title: `Редирект на ${redirectUrl || 'невідомо'}`,
-                referrers: referrers,
-                metaDescription: '',
-                metaCanonical: '',
-                linkCount: 0,
-                outlinks: [],
-                headings: [],
-                redirectUrl: redirectUrl
-            });
+                referrers: previousUrl === null ? referrers : [previousUrl],
+                redirectUrl: redirectUrl,
+            }));
 
-            // Додаємо ціль редиректу в чергу, якщо вона є
-            if (redirectUrl) {
-                if (!referrersMap.has(redirectUrl)) {
-                    referrersMap.set(redirectUrl, new Set());
-                }
-                referrersMap.get(redirectUrl).add(url);
-
-                if (!visitedUrls.has(redirectUrl) && !queue.some(item => item.url === redirectUrl)) {
-                    try {
-                        if (new URL(redirectUrl).hostname === new URL(url).hostname) {
-                            queue.push({ url: redirectUrl, referrer: url });
-                        }
-                    } catch (e) { }
-                }
+            if (!redirectUrl) {
+                return;
             }
+
+            if (isSessionPaused(session)) {
+                return;
+            }
+
+            try {
+                if (!isSameHost(redirectUrl, urlObject.hostname)) {
+                    return;
+                }
+            } catch {
+                return;
+            }
+
+            previousUrl = currentUrl;
+            currentUrl = redirectUrl;
+            hop++;
+
+            if (visitedUrls.has(currentUrl)) {
+                return;
+            }
+            visitedUrls.add(currentUrl);
+
+            if (!referrersMap.has(currentUrl)) {
+                referrersMap.set(currentUrl, new Set());
+            }
+            referrersMap.get(currentUrl).add(previousUrl);
+
+            response = await fetchPage(currentUrl);
+        }
+
+        if (isRedirectStatus(response.status)) {
+            browserWindow.webContents.send('spider-result', buildSpiderResult({
+                status: response.status,
+                url: currentUrl,
+                title: 'Занадто довгий ланцюжок редиректів',
+                referrers: previousUrl === null ? referrers : [previousUrl],
+                redirectUrl: resolveRedirectTarget(currentUrl, response.headers.get('location')),
+            }));
             return;
         }
 
-        // 2. Обробка помилок клієнта/сервера (4xx, 5xx)
+        const contentType = getContentType(response);
+        const pageReferrers = currentUrl === url
+            ? referrers
+            : (referrersMap.has(currentUrl) ? Array.from(referrersMap.get(currentUrl)) : [previousUrl].filter(Boolean));
+
         if (!response.ok) {
-            throw new Error(`HTTP помилка ${response.status}`);
+            browserWindow.webContents.send('spider-result', buildSpiderResult({
+                status: response.status,
+                url: currentUrl,
+                title: `HTTP ${response.status}`,
+                referrers: pageReferrers,
+                contentType,
+            }));
+            return;
+        }
+
+        if (!isHtmlContent(contentType)) {
+            browserWindow.webContents.send('spider-result', buildSpiderResult({
+                status: response.status,
+                url: currentUrl,
+                title: contentType || 'Медіа / не-HTML',
+                referrers: pageReferrers,
+                contentType,
+            }));
+            return;
         }
 
         const html = await response.text();
@@ -343,7 +425,7 @@ async function crawl(url, referrer, browserWindow) {
                 return;
             }
             try {
-                const absoluteUrl = normalizePageUrl(new URL(href, url).href);
+                const absoluteUrl = normalizePageUrl(new URL(href, currentUrl).href);
                 outlinks.push({
                     href: absoluteUrl,
                     text: $(link).text().trim().slice(0, 200),
@@ -361,38 +443,41 @@ async function crawl(url, referrer, browserWindow) {
             });
         });
 
-        browserWindow.webContents.send('spider-result', {
+        browserWindow.webContents.send('spider-result', buildSpiderResult({
             status: response.status,
-            url: url,
+            url: currentUrl,
             title: title || 'Без заголовка',
-            referrers: referrers,
+            referrers: pageReferrers,
             metaDescription: description,
             metaCanonical: canonical,
+            contentType: contentType || 'text/html',
             linkCount: outlinks.length,
             outlinks: outlinks,
-            headings: headings
-        });
+            headings: headings,
+        }));
 
         const metaRobots = $('meta[name="robots"]').attr('content') || '';
         if (metaRobots.includes('nofollow')) {
-            console.log(`Знайдено nofollow на сторінці: ${url}`);
+            console.log(`Знайдено nofollow на сторінці: ${currentUrl}`);
             return;
         }
 
-        for (const outlink of outlinks) {
-            enqueueUrl(outlink.href, url, urlObject.hostname);
+        if (!isSessionPaused(session) && !session?.stopped) {
+            for (const outlink of outlinks) {
+                enqueueUrl(outlink.href, currentUrl, urlObject.hostname);
+            }
         }
     } catch (error) {
         console.error(`Помилка під час сканування ${url}: ${error.message}`);
-        browserWindow.webContents.send('spider-result', {
+        const errorReferrers = referrersMap.has(url)
+            ? Array.from(referrersMap.get(url))
+            : (referrer !== 'N/A' ? [referrer] : []);
+        browserWindow.webContents.send('spider-result', buildSpiderResult({
             status: 'ERROR',
             url: url,
-            title: error.message || 'Помилка',
-            referrers: [referrer],
-            linkCount: 0,
-            outlinks: [],
-            headings: []
-        });
+            title: error.message || 'Помилка мережі',
+            referrers: errorReferrers,
+        }));
     }
 }
 
@@ -583,19 +668,23 @@ ipcMain.on('start-spider', (event, payload) => {
     }
 });
 
-ipcMain.on('spider-pause', () => {
+ipcMain.handle('spider-pause', () => {
     if (scanSession && !scanSession.finished && !scanSession.stopped) {
         scanSession.paused = true;
         scanSession.sendProgress('На паузі');
+        return { ok: true };
     }
+    return { ok: false };
 });
 
-ipcMain.on('spider-resume', () => {
+ipcMain.handle('spider-resume', () => {
     if (scanSession && !scanSession.finished && !scanSession.stopped && scanSession.paused) {
         scanSession.paused = false;
         scanSession.sendProgress('В процесі...');
         scanSession.pumpQueue();
+        return { ok: true };
     }
+    return { ok: false };
 });
 
 ipcMain.on('spider-stop', () => {
