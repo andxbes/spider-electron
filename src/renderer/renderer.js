@@ -22,6 +22,7 @@ const contentTypeFilter = document.getElementById('contentTypeFilter');
 const statusFilter = document.getElementById('statusFilter');
 const indexingFilter = document.getElementById('indexingFilter');
 const h1Filter = document.getElementById('h1Filter');
+const duplicateFilter = document.getElementById('duplicateFilter');
 const filterCount = document.getElementById('filterCount');
 
 const scanResults = new Map();
@@ -37,6 +38,9 @@ let activeStatusFilter = 'all';
 let activeIndexingFilter = 'all';
 /** @type {'all' | 'multiple'} */
 let activeH1Filter = 'all';
+/** @type {'all' | 'h1' | 'title' | 'description'} */
+let activeDuplicateFilter = 'all';
+let duplicateCountsCache = null;
 /** @type {'idle' | 'running' | 'paused'} */
 let uiState = 'idle';
 let knownStatusCodes = new Set();
@@ -224,6 +228,84 @@ function getH1Count(data) {
     return (data.headings || []).filter((heading) => heading.level === 1).length;
 }
 
+function normalizeDuplicateKey(value) {
+    const text = String(value ?? '').trim();
+    return text ? text.toLowerCase() : '';
+}
+
+function getH1Texts(data) {
+    return (data.headings || [])
+        .filter((heading) => heading.level === 1)
+        .map((heading) => String(heading.text ?? '').trim())
+        .filter(Boolean);
+}
+
+function invalidateDuplicateCounts() {
+    duplicateCountsCache = null;
+}
+
+function buildFieldDuplicateCounts(getValue) {
+    const counts = new Map();
+    for (const data of scanResults.values()) {
+        const key = normalizeDuplicateKey(getValue(data));
+        if (!key) {
+            continue;
+        }
+        counts.set(key, (counts.get(key) || 0) + 1);
+    }
+    return counts;
+}
+
+function buildH1DuplicateCounts() {
+    const counts = new Map();
+    for (const data of scanResults.values()) {
+        const seen = new Set();
+        for (const text of getH1Texts(data)) {
+            const key = normalizeDuplicateKey(text);
+            if (!key || seen.has(key)) {
+                continue;
+            }
+            seen.add(key);
+            counts.set(key, (counts.get(key) || 0) + 1);
+        }
+    }
+    return counts;
+}
+
+function getDuplicateCounts() {
+    if (!duplicateCountsCache) {
+        duplicateCountsCache = {
+            h1: buildH1DuplicateCounts(),
+            title: buildFieldDuplicateCounts((data) => data.title),
+            description: buildFieldDuplicateCounts((data) => data.metaDescription),
+        };
+    }
+    return duplicateCountsCache;
+}
+
+function getTextDuplicateCount(value, counts) {
+    const key = normalizeDuplicateKey(value);
+    if (!key) {
+        return 0;
+    }
+    return counts.get(key) || 0;
+}
+
+function hasDuplicateH1(data, h1Counts) {
+    return getH1Texts(data).some((text) => getTextDuplicateCount(text, h1Counts) > 1);
+}
+
+function hasDuplicateField(value, counts) {
+    return getTextDuplicateCount(value, counts) > 1;
+}
+
+function duplicateCountBadge(count) {
+    if (!count || count <= 1) {
+        return '';
+    }
+    return `<span class="text-amber-600 font-semibold ml-1" title="Таких самих на ${count} сторінках">×${count}</span>`;
+}
+
 function passesTableFilters(data) {
     if (activeContentFilter !== 'all' && getResourceType(data) !== activeContentFilter) {
         return false;
@@ -239,6 +321,18 @@ function passesTableFilters(data) {
     }
     if (activeH1Filter === 'multiple' && getH1Count(data) <= 1) {
         return false;
+    }
+    if (activeDuplicateFilter !== 'all') {
+        const counts = getDuplicateCounts();
+        if (activeDuplicateFilter === 'h1' && !hasDuplicateH1(data, counts.h1)) {
+            return false;
+        }
+        if (activeDuplicateFilter === 'title' && !hasDuplicateField(data.title, counts.title)) {
+            return false;
+        }
+        if (activeDuplicateFilter === 'description' && !hasDuplicateField(data.metaDescription, counts.description)) {
+            return false;
+        }
     }
     return true;
 }
@@ -339,7 +433,9 @@ function resetTableFilters() {
     activeStatusFilter = 'all';
     activeIndexingFilter = 'all';
     activeH1Filter = 'all';
+    activeDuplicateFilter = 'all';
     knownStatusCodes = new Set();
+    invalidateDuplicateCounts();
     if (contentTypeFilter) {
         contentTypeFilter.value = 'all';
     }
@@ -352,12 +448,46 @@ function resetTableFilters() {
     if (h1Filter) {
         h1Filter.value = 'all';
     }
+    if (duplicateFilter) {
+        duplicateFilter.value = 'all';
+    }
     updateStatusFilterOptions({ force: true });
 }
 
 function truncate(str, len = 80) {
     const s = String(str ?? '');
     return s.length > len ? `${s.slice(0, len)}…` : s;
+}
+
+function formatMultiValueDetail(value) {
+    if (!value) {
+        return '<span class="text-zinc-400 italic">—</span>';
+    }
+    const parts = String(value).split(/\s*;\s*/).map((part) => part.trim()).filter(Boolean);
+    if (parts.length <= 1) {
+        return escapeHtml(String(value).trim());
+    }
+    return parts.map((part) => escapeHtml(part)).join('<br>');
+}
+
+function formatRobotsTxtDetail(data) {
+    if (data.robotsAllowed === null && !data.robotsRule) {
+        return '<span class="text-zinc-400 italic">—</span>';
+    }
+    const allowed = data.robotsAllowed !== false;
+    const rule = data.robotsRule || (allowed ? 'Дозволено' : 'Заборонено');
+    const cls = indexingStateClass('robots', null, data.robotsAllowed);
+    return `<span class="${cls} font-medium">${escapeHtml(rule)}</span>`;
+}
+
+function formatMetaRobotsDetail(data) {
+    const status = data.metaRobotsStatus || 'none';
+    if (status === 'none' && !data.metaRobots && !data.metaRobotsLabel) {
+        return '<span class="text-zinc-400 italic">—</span>';
+    }
+    const label = data.metaRobotsLabel || data.metaRobots || 'index, follow';
+    const cls = indexingStateClass('meta', status);
+    return `<span class="${cls} font-medium">${formatMultiValueDetail(label)}</span>`;
 }
 
 function urlActionButtons(url) {
@@ -452,6 +582,7 @@ function setUIState(state) {
 }
 
 function clearScanData() {
+    invalidateDuplicateCounts();
     scanResults.clear();
     insertionOrder.length = 0;
     selectedUrl = null;
@@ -485,6 +616,7 @@ function collectWorkspaceSnapshot() {
             status: activeStatusFilter,
             indexing: activeIndexingFilter,
             h1: activeH1Filter,
+            duplicate: activeDuplicateFilter,
         },
     });
 }
@@ -516,6 +648,7 @@ function applyFilterState(filters) {
     activeStatusFilter = filters.status || 'all';
     activeIndexingFilter = filters.indexing || 'all';
     activeH1Filter = filters.h1 || 'all';
+    activeDuplicateFilter = filters.duplicate || 'all';
     if (contentTypeFilter) {
         contentTypeFilter.value = activeContentFilter;
     }
@@ -527,6 +660,9 @@ function applyFilterState(filters) {
     }
     if (h1Filter) {
         h1Filter.value = activeH1Filter;
+    }
+    if (duplicateFilter) {
+        duplicateFilter.value = activeDuplicateFilter;
     }
     updateStatusFilterOptions({ force: true });
 }
@@ -687,6 +823,9 @@ function updateSortIndicators() {
 
 function createTableRow(data, displayIndex) {
     const { inCount, linkCount } = getRowMetrics(data);
+    const dupCounts = getDuplicateCounts();
+    const titleDup = getTextDuplicateCount(data.title, dupCounts.title);
+    const descDup = getTextDuplicateCount(data.metaDescription, dupCounts.description);
     const tr = document.createElement('tr');
     tr.dataset.url = data.url;
     tr.className = 'border-b border-zinc-100 cursor-pointer hover:bg-zinc-50';
@@ -701,8 +840,8 @@ function createTableRow(data, displayIndex) {
         <td class="p-2 text-right">${formatResponseTimeMs(data.responseTimeMs)}</td>
         <td class="p-2">${metaRobotsCellHtml(data)}</td>
         <td class="p-2">${robotsTxtCellHtml(data)}</td>
-        <td class="p-2" title="${escapeHtml(data.title)}">${escapeHtml(truncate(data.title, 50))}</td>
-        <td class="p-2" title="${escapeHtml(data.metaDescription)}">${escapeHtml(truncate(data.metaDescription, 60))}</td>
+        <td class="p-2" title="${escapeHtml(data.title)}">${escapeHtml(truncate(data.title, 50))}${duplicateCountBadge(titleDup)}</td>
+        <td class="p-2" title="${escapeHtml(data.metaDescription)}">${escapeHtml(truncate(data.metaDescription, 60))}${duplicateCountBadge(descDup)}</td>
         <td class="p-2 text-center">${linkCount}</td>
         <td class="p-2 text-center">${inCount}</td>
     `;
@@ -779,6 +918,7 @@ function upsertScanResult(data) {
     if (!data.outlinks) {
         data.outlinks = [];
     }
+    invalidateDuplicateCounts();
     const isNew = !scanResults.has(data.url);
     if (isNew) {
         insertionOrder.push(data.url);
@@ -835,6 +975,13 @@ if (indexingFilter) {
 if (h1Filter) {
     h1Filter.addEventListener('change', () => {
         activeH1Filter = h1Filter.value;
+        requestRefreshTable({ immediate: true });
+    });
+}
+
+if (duplicateFilter) {
+    duplicateFilter.addEventListener('change', () => {
+        activeDuplicateFilter = duplicateFilter.value;
         requestRefreshTable({ immediate: true });
     });
 }
@@ -918,8 +1065,8 @@ function buildDetailRows(data) {
         ['Meta Description', escapeHtml(data.metaDescription) || '<span class="text-zinc-400 italic">—</span>'],
         ['Meta Description Length', data.metaDescription ? String(data.metaDescription.length) : '0'],
         ['Canonical', data.metaCanonical ? urlCellHtml(data.metaCanonical) : '<span class="text-zinc-400 italic">—</span>'],
-        ['Meta robots', metaRobotsCellHtml(data)],
-        ['Robots.txt', robotsTxtCellHtml(data)],
+        ['Meta robots', formatMetaRobotsDetail(data)],
+        ['Robots.txt', formatRobotsTxtDetail(data)],
         ['H1 Count', String(getH1Count(data))],
         [
             'H1',
@@ -936,6 +1083,30 @@ function buildDetailRows(data) {
         ['Вихідних посилань', String(linkCount)],
         ['Вхідних посилань', String(inCount)],
     ];
+
+    const dupCounts = getDuplicateCounts();
+    const titleDup = getTextDuplicateCount(data.title, dupCounts.title);
+    const descDup = getTextDuplicateCount(data.metaDescription, dupCounts.description);
+    if (titleDup > 1) {
+        rows.push(['Дублікатів Title', `<span class="text-amber-600 font-semibold">${titleDup} сторінок</span>`]);
+    }
+    if (descDup > 1) {
+        rows.push(['Дублікатів Meta Description', `<span class="text-amber-600 font-semibold">${descDup} сторінок</span>`]);
+    }
+    const h1DupEntries = getH1Texts(data)
+        .map((text) => ({
+            text,
+            count: getTextDuplicateCount(text, dupCounts.h1),
+        }))
+        .filter((entry) => entry.count > 1);
+    if (h1DupEntries.length) {
+        rows.push([
+            'Дублікатів H1',
+            h1DupEntries
+                .map((entry) => `${escapeHtml(entry.text)} — ${entry.count} стор.`)
+                .join('<br>'),
+        ]);
+    }
 
     if (data.redirectUrl) {
         rows.push(['Redirect URL', urlCellHtml(data.redirectUrl)]);

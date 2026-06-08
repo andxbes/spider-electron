@@ -131,6 +131,18 @@
               <option value="multiple">Більше 1</option>
             </select>
           </label>
+          <label class="flex items-center gap-1.5">
+            <span class="text-zinc-500 whitespace-nowrap">Дублікати:</span>
+            <select
+              id="duplicateFilter"
+              class="px-2 py-1 border border-zinc-300 rounded bg-white text-zinc-800 min-w-[9rem]"
+            >
+              <option value="all">Усі</option>
+              <option value="h1">H1</option>
+              <option value="title">Title</option>
+              <option value="description">Meta description</option>
+            </select>
+          </label>
           <span id="filterCount" class="text-zinc-400 ml-auto whitespace-nowrap"></span>
         </div>
         <div class="overflow-auto flex-grow min-h-0">

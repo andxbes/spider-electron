@@ -135,6 +135,72 @@ function isHtmlContent(contentType) {
     return contentType.includes('text/html') || contentType.includes('application/xhtml');
 }
 
+const EXTRACT_TEXT_REMOVE_SELECTOR = 'script, style, svg, noscript, template, iframe, [aria-hidden="true"]';
+
+function normalizeExtractedText(text) {
+    return String(text || '').replace(/\s+/g, ' ').trim();
+}
+
+function extractElementText($, el) {
+    const clone = $(el).clone();
+    clone.find(EXTRACT_TEXT_REMOVE_SELECTOR).remove();
+    return normalizeExtractedText(clone.text());
+}
+
+function collectMetaAttributeValues($, selector) {
+    const values = [];
+    const seen = new Set();
+    $(selector).each((_, el) => {
+        const value = ($(el).attr('content') || '').trim();
+        if (!value) {
+            return;
+        }
+        const key = value.toLowerCase();
+        if (seen.has(key)) {
+            return;
+        }
+        seen.add(key);
+        values.push(value);
+    });
+    return values;
+}
+
+function extractPageTitle($) {
+    let titleEl = $('head > title').first();
+    if (!titleEl.length) {
+        // $('title').text() зливає ВСІ <title> на сторінці — беремо лише перший.
+        titleEl = $('title').first();
+    }
+    let title = titleEl.length ? extractElementText($, titleEl.get(0)) : '';
+    if (!title) {
+        title = ($('head meta[property="og:title"]').attr('content')
+            || $('meta[property="og:title"]').attr('content')
+            || $('meta[name="twitter:title"]').attr('content')
+            || '').trim();
+    }
+    return title;
+}
+
+function extractMetaDescription($) {
+    const values = collectMetaAttributeValues($, 'head meta[name="description"]');
+    if (!values.length) {
+        return collectMetaAttributeValues($, 'meta[name="description"]').join('; ');
+    }
+    return values.join('; ');
+}
+
+function extractMetaRobotsRaw($, response) {
+    let values = collectMetaAttributeValues($, 'head meta[name="robots"], head meta[name="googlebot"]');
+    if (!values.length) {
+        values = collectMetaAttributeValues($, 'meta[name="robots"], meta[name="googlebot"]');
+    }
+    const xRobots = getXRobotsTag(response).trim();
+    if (xRobots && !values.some((value) => value.toLowerCase() === xRobots.toLowerCase())) {
+        values.push(xRobots);
+    }
+    return values.join('; ');
+}
+
 function buildSpiderResult(overrides) {
     return {
         metaDescription: '',
@@ -195,7 +261,7 @@ function parseMetaRobotsDirective(content) {
         };
     }
 
-    const tokens = raw.toLowerCase().split(/[,\s]+/).filter(Boolean);
+    const tokens = raw.toLowerCase().split(/[,;\s]+/).filter(Boolean);
     const hasNoindex = tokens.includes('noindex');
     const hasNofollow = tokens.includes('nofollow');
 
@@ -602,8 +668,8 @@ async function crawl(url, referrer, browserWindow) {
         responseTimeMs = timed.getElapsedMs();
         const $ = cheerio.load(html);
 
-        const title = $('title').text().trim();
-        const description = $('meta[name="description"]').attr('content') || '';
+        const title = extractPageTitle($);
+        const description = extractMetaDescription($);
         const canonical = $('link[rel="canonical"]').attr('href') || '';
         const outlinks = [];
         $('a').each((i, link) => {
@@ -615,7 +681,7 @@ async function crawl(url, referrer, browserWindow) {
                 const absoluteUrl = normalizePageUrl(new URL(href, currentUrl).href);
                 outlinks.push({
                     href: absoluteUrl,
-                    text: $(link).text().trim().slice(0, 200),
+                    text: extractElementText($, link).slice(0, 200),
                 });
             } catch (e) {
                 // невалідний href
@@ -624,16 +690,17 @@ async function crawl(url, referrer, browserWindow) {
 
         const headings = [];
         $('h1, h2, h3, h4, h5, h6').each((i, el) => {
+            const text = extractElementText($, el);
+            if (!text) {
+                return;
+            }
             headings.push({
                 level: parseInt(el.tagName.substring(1)),
-                text: $(el).text().trim()
+                text,
             });
         });
 
-        const metaRobotsRaw = $('meta[name="robots"]').attr('content')
-            || $('meta[name="googlebot"]').attr('content')
-            || getXRobotsTag(response)
-            || '';
+        const metaRobotsRaw = extractMetaRobotsRaw($, response);
         const metaRobotsParsed = parseMetaRobotsDirective(metaRobotsRaw);
 
         browserWindow.webContents.send('spider-result', buildResultWithIndexing(
