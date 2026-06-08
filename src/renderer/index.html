@@ -9,69 +9,111 @@
     <title>Electron Web Spider</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
-  <body class="bg-zinc-100 text-zinc-800 font-sans">
-    <div class="container mx-auto p-4 flex flex-col h-screen">
-      <h1 class="text-2xl font-bold text-center text-zinc-700 mb-4">
-        Electron Web Spider
-      </h1>
-      <div class="controls flex flex-col gap-2 mb-4">
-        <div class="flex gap-2">
-          <input
-            type="text"
-            id="urlInput"
-            placeholder="Введите стартовый URL (например, https://www.electronjs.org)"
-            class="flex-grow p-2 border border-zinc-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none"
-          />
-          <button
-            id="startButton"
-            class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-zinc-400 disabled:cursor-not-allowed"
-          >
-            Начать сканирование
-          </button>
-        </div>
-        <div class="flex flex-wrap items-center gap-4 text-sm text-zinc-600">
-          <label class="flex items-center gap-2 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              id="useSitemapCheckbox"
-              class="rounded border-zinc-300 text-blue-600 focus:ring-blue-500"
-            />
-            Сначала из sitemap + обход ссылок на страницах
-          </label>
-          <label class="flex items-center gap-2 select-none">
-            Лимит страниц:
-            <input
-              type="number"
-              id="maxPagesInput"
-              min="0"
-              placeholder="∞"
-              class="w-20 p-1 border border-zinc-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none"
-            />
-            <span class="text-zinc-400">(0 или пусто — без лимита)</span>
-          </label>
-        </div>
+  <body class="bg-zinc-100 text-zinc-800 font-sans h-screen flex flex-col overflow-hidden">
+    <header class="shrink-0 border-b border-zinc-300 bg-white px-4 py-3">
+      <div class="flex items-center gap-3">
+        <h1 class="text-lg font-bold text-zinc-700 shrink-0">Electron Web Spider</h1>
+        <input
+          type="text"
+          id="urlInput"
+          placeholder="Стартовый URL (например, http://localhost/)"
+          class="flex-grow p-2 border border-zinc-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none text-sm"
+        />
+        <button
+          id="startButton"
+          class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-zinc-400 disabled:cursor-not-allowed text-sm shrink-0"
+        >
+          Сканировать
+        </button>
+        <button
+          id="exportButton"
+          disabled
+          class="px-4 py-2 bg-zinc-600 text-white rounded-md hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm shrink-0"
+        >
+          Экспорт CSV
+        </button>
+        <a
+          href="./settings.html"
+          class="px-3 py-2 text-sm text-zinc-600 border border-zinc-300 rounded-md hover:bg-zinc-50 shrink-0"
+          title="Настройки"
+        >
+          ⚙
+        </a>
       </div>
-      <div
-        id="results-container"
-        class="flex-grow border border-zinc-300 rounded-md overflow-y-auto bg-white min-h-[200px]"
-      >
-        <div id="results"></div>
-      </div>
-      <div
-        id="status-bar"
-        class="mt-2 p-2 bg-zinc-200 rounded-md text-xs text-zinc-600 flex justify-between"
-      >
-        <span id="status-text" class="italic">Готов к работе...</span>
-        <div class="flex gap-4">
-          <span id="status-scanned" class="font-semibold"
-            >Просканировано: 0</span
-          >
-          <span id="status-queue" class="font-semibold">В очереди: 0</span>
-        </div>
-      </div>
-    </div>
+    </header>
 
-    <!-- Подключаем скрипт рендерера -->
+    <main class="flex-grow flex flex-col min-h-0 p-2 gap-2">
+      <div class="flex-grow min-h-0 border border-zinc-300 rounded-md bg-white overflow-hidden flex flex-col">
+        <div class="overflow-auto flex-grow min-h-0">
+          <table class="w-full text-xs border-collapse">
+            <thead class="sticky top-0 bg-zinc-100 border-b border-zinc-300 z-10">
+              <tr class="text-left text-zinc-600">
+                <th class="sortable-th p-2 font-semibold w-8 cursor-pointer select-none hover:bg-zinc-200" data-sort="index" title="Сортировать">#</th>
+                <th class="sortable-th p-2 font-semibold min-w-[200px] cursor-pointer select-none hover:bg-zinc-200" data-sort="url" title="Сортировать">Address</th>
+                <th class="sortable-th p-2 font-semibold w-16 cursor-pointer select-none hover:bg-zinc-200" data-sort="status" title="Сортировать">Status</th>
+                <th class="sortable-th p-2 font-semibold min-w-[140px] cursor-pointer select-none hover:bg-zinc-200" data-sort="title" title="Сортировать">Title</th>
+                <th class="sortable-th p-2 font-semibold min-w-[160px] cursor-pointer select-none hover:bg-zinc-200" data-sort="metaDescription" title="Сортировать">Meta Description</th>
+                <th class="sortable-th p-2 font-semibold w-14 cursor-pointer select-none hover:bg-zinc-200" data-sort="links" title="Сортировать">Links</th>
+                <th class="sortable-th p-2 font-semibold w-14 cursor-pointer select-none hover:bg-zinc-200" data-sort="inlinks" title="Сортировать">In</th>
+              </tr>
+            </thead>
+            <tbody id="resultsTable"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div
+        id="detailPanel"
+        class="shrink-0 h-64 border border-zinc-300 rounded-md bg-white flex flex-col overflow-hidden"
+      >
+        <div class="flex border-b border-zinc-300 bg-zinc-50 shrink-0">
+          <button
+            type="button"
+            data-tab="details"
+            class="detail-tab px-4 py-2 text-xs font-medium border-b-2 border-blue-600 text-blue-700 bg-white"
+          >
+            Детали URL
+          </button>
+          <button
+            type="button"
+            data-tab="inlinks"
+            class="detail-tab px-4 py-2 text-xs font-medium border-b-2 border-transparent text-zinc-600 hover:text-zinc-800"
+          >
+            Входящие ссылки
+          </button>
+          <button
+            type="button"
+            data-tab="outlinks"
+            class="detail-tab px-4 py-2 text-xs font-medium border-b-2 border-transparent text-zinc-600 hover:text-zinc-800"
+          >
+            Исходящие ссылки
+          </button>
+          <div class="flex-grow"></div>
+          <span
+            id="selectedUrlHint"
+            class="px-3 py-2 text-xs text-zinc-400 truncate max-w-md italic"
+          >
+            Выберите строку в таблице
+          </span>
+        </div>
+        <div id="detailContent" class="overflow-auto flex-grow p-0 text-xs">
+          <p class="p-4 text-zinc-400 italic">Выберите URL в таблице выше</p>
+        </div>
+      </div>
+    </main>
+
+    <footer
+      id="status-bar"
+      class="shrink-0 px-4 py-2 bg-zinc-200 border-t border-zinc-300 text-xs text-zinc-600 flex justify-between"
+    >
+      <span id="status-text" class="italic">Готов к работе...</span>
+      <div class="flex gap-4">
+        <span id="status-scanned" class="font-semibold">Просканировано: 0</span>
+        <span id="status-queue" class="font-semibold">В очереди: 0</span>
+      </div>
+    </footer>
+
+    <script src="./settings-store.js"></script>
     <script src="./renderer.js"></script>
   </body>
 </html>

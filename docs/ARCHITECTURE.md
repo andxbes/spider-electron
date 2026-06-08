@@ -17,7 +17,10 @@ src/
     ├── index.html        # UI shell, CSP
     ├── input.css         # Tailwind source
     ├── styles.css        # згенерований CSS (gitignored)
-    └── renderer.js       # UI, accordion, CSV export
+    ├── renderer.js       # UI: таблица + панель деталей
+    ├── settings.html     # страница настроек
+    ├── settings.js
+    └── settings-store.js # localStorage для настроек
 ```
 
 | Файл | Відповідальність |
@@ -80,7 +83,8 @@ Renderer
 
 | Напрямок | Канал | Payload |
 |----------|-------|---------|
-| R → M | `start-spider` | `{ startUrl, options: { useSitemap?: boolean, maxPages?: number } }` |
+| R → M | `start-spider` | `{ startUrl, options: { useSitemap?, maxPages? } }` |
+| R ↔ M | `settings:get` / `settings:save` | налаштування (файл у userData) |
 | M → R | `spider-result` | об'єкт сторінки (див. нижче) |
 | M → R | `spider-progress` | `{ scanned, queue, status? }` |
 | M → R | `spider-referrers-update` | `{ [url]: referrers[] }` |
@@ -100,7 +104,8 @@ Renderer
   metaCanonical?: string,
   linkCount?: number,
   headings?: [{ level: number, text: string }],
-  redirectUrl?: string
+  redirectUrl?: string,
+  outlinks?: [{ href: string, text: string }]
 }
 ```
 

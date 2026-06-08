@@ -4,6 +4,7 @@ const { URL } = require('node:url');
 const cheerio = require('cheerio');
 
 const robotsParser = require('robots-parser');
+const { getSettingsPath, loadSettings, saveSettings } = require('./settings-persistence');
 // Функция для создания главного окна приложения
 const createWindow = () => {
     const mainWindow = new BrowserWindow({
@@ -255,13 +256,13 @@ async function crawl(url, referrer, browserWindow) {
             title: 'Заблокировано robots.txt',
             referrers: referrers,
             linkCount: 0,
+            outlinks: [],
             headings: []
         });
         return;
     }
 
     try {
-        // Используем fetch вместо axios
         const response = await fetchPage(url);
 
         const referrers = referrersMap.has(url) ? Array.from(referrersMap.get(url)) : (referrer !== 'N/A' ? [referrer] : []);
@@ -290,6 +291,7 @@ async function crawl(url, referrer, browserWindow) {
                 metaDescription: '',
                 metaCanonical: '',
                 linkCount: 0,
+                outlinks: [],
                 headings: [],
                 redirectUrl: redirectUrl
             });
@@ -327,7 +329,23 @@ async function crawl(url, referrer, browserWindow) {
         const title = $('title').text().trim();
         const description = $('meta[name="description"]').attr('content') || '';
         const canonical = $('link[rel="canonical"]').attr('href') || '';
-        const linkCount = $('a').length;
+        const outlinks = [];
+        $('a').each((i, link) => {
+            const href = $(link).attr('href');
+            if (!href) {
+                return;
+            }
+            try {
+                const absoluteUrl = normalizePageUrl(new URL(href, url).href);
+                outlinks.push({
+                    href: absoluteUrl,
+                    text: $(link).text().trim().slice(0, 200),
+                });
+            } catch (e) {
+                // невалидный href
+            }
+        });
+
         const headings = [];
         $('h1, h2, h3, h4, h5, h6').each((i, el) => {
             headings.push({
@@ -343,23 +361,20 @@ async function crawl(url, referrer, browserWindow) {
             referrers: referrers,
             metaDescription: description,
             metaCanonical: canonical,
-            linkCount: linkCount,
+            linkCount: outlinks.length,
+            outlinks: outlinks,
             headings: headings
         });
 
-        // 2. Проверяем meta-robots на 'nofollow'
         const metaRobots = $('meta[name="robots"]').attr('content') || '';
         if (metaRobots.includes('nofollow')) {
             console.log(`Найден nofollow на странице: ${url}`);
-            return; // Не ищем новые ссылки
+            return;
         }
 
-        $('a').each((i, link) => {
-            const href = $(link).attr('href');
-            if (href) {
-                enqueueUrl(new URL(href, url).href, url, urlObject.hostname);
-            }
-        });
+        for (const outlink of outlinks) {
+            enqueueUrl(outlink.href, url, urlObject.hostname);
+        }
     } catch (error) {
         console.error(`Ошибка при сканировании ${url}: ${error.message}`);
         browserWindow.webContents.send('spider-result', {
@@ -368,6 +383,7 @@ async function crawl(url, referrer, browserWindow) {
             title: error.message || 'Ошибка',
             referrers: [referrer],
             linkCount: 0,
+            outlinks: [],
             headings: []
         });
     }
@@ -440,6 +456,16 @@ async function startSpider(startUrl, options, browserWindow) {
     // Запускаем обработку очереди
     await processQueue();
 }
+
+ipcMain.handle('settings:get', async () => {
+    const settings = await loadSettings();
+    return { settings, filePath: getSettingsPath() };
+});
+
+ipcMain.handle('settings:save', async (_event, settings) => {
+    const saved = await saveSettings(settings);
+    return { settings: saved, filePath: getSettingsPath() };
+});
 
 ipcMain.on('start-spider', (event, payload) => {
     const startUrl = typeof payload === 'string' ? payload : payload.startUrl;
