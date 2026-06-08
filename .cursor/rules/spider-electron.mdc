@@ -23,4 +23,4 @@ If behavior, IPC, constants, data models, deps, or file structure changed — up
 - Network requests only in main process.
 - New IPC channels: update preload whitelist + main + renderer.
 - Match existing style: minimal scope, no over-abstraction.
-- UI text is currently Russian; match unless user requests otherwise.
+- UI text is Ukrainian; match unless user requests otherwise.

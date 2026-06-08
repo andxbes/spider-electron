@@ -1,13 +1,12 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
-// "Белый список" каналов для безопасного взаимодействия
+// Білий список каналів для безпечної взаємодії
 const validSendChannels = ['start-spider'];
-const validInvokeChannels = ['settings:get', 'settings:save'];
 const validReceiveChannels = ['spider-result', 'spider-end', 'spider-progress', 'spider-referrers-update'];
+const validInvokeChannels = ['settings:get', 'settings:save'];
 
-// Предоставляем глобальному объекту window в рендерере доступ к API
+// Надаємо renderer доступ до API через window.api
 contextBridge.exposeInMainWorld('api', {
-    // Функция для отправки данных из Renderer в Main
     startSpider: (startUrl, options = {}) => {
         if (validSendChannels.includes('start-spider')) {
             ipcRenderer.send('start-spider', { startUrl, options });
@@ -25,10 +24,8 @@ contextBridge.exposeInMainWorld('api', {
         }
         return Promise.resolve({ settings, filePath: '' });
     },
-    // Функции для подписки на события от Main в Renderer
     onSpiderResult: (callback) => {
         if (validReceiveChannels.includes('spider-result')) {
-            // Обертка для безопасности, чтобы не передавать весь объект event
             ipcRenderer.on('spider-result', (event, ...args) => callback(...args));
         }
     },

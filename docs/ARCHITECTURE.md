@@ -17,10 +17,10 @@ src/
     ├── index.html        # UI shell, CSP
     ├── input.css         # Tailwind source
     ├── styles.css        # згенерований CSS (gitignored)
-    ├── renderer.js       # UI: таблица + панель деталей
-    ├── settings.html     # страница настроек
+    ├── renderer.js       # UI: таблиця + панель деталей
+    ├── settings.html     # сторінка налаштувань
     ├── settings.js
-    └── settings-store.js # localStorage для настроек
+    └── settings-store.js # IPC → settings.json у userData
 ```
 
 | Файл | Відповідальність |
@@ -144,7 +144,7 @@ npm run make           # дистрибутиви
 
 - Монолітний `main.js` (~296 рядків) — рефакторинг потрібен для concurrency, multi-domain, sitemap.
 - `forge.config.js` відсутній у репо (є `out/` від минулого package).
-- UI російською.
+- UI українською.
 - Немає тестів, README, `.env` / config-файлів.
 
 ## Типові місця для правок

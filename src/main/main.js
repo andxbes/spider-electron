@@ -5,21 +5,22 @@ const cheerio = require('cheerio');
 
 const robotsParser = require('robots-parser');
 const { getSettingsPath, loadSettings, saveSettings } = require('./settings-persistence');
-// Функция для создания главного окна приложения
+
+// Функція створення головного вікна застосунку
 const createWindow = () => {
     const mainWindow = new BrowserWindow({
         width: 800,
         height: 700,
         webPreferences: {
-            // Указываем путь к preload-скрипту для безопасного взаимодействия
+            // Шлях до preload-скрипта для безпечної взаємодії з renderer
             preload: path.join(__dirname, '../preload/preload.js'),
         },
     });
 
-    // Загружаем основной HTML-файл
+    // Завантажуємо основний HTML-файл
     mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
 
-    // Раскомментируйте для открытия инструментов разработчика при старте
+    // Розкоментуйте для відкриття інструментів розробника при старті
     // mainWindow.webContents.openDevTools();
 };
 
@@ -40,7 +41,7 @@ app.on('window-all-closed', () => {
 });
 
 
-// --- ЛОГИКА ВЕБ-ПАУКА ---
+// --- ЛОГІКА ВЕБ-ПАВУКА ---
 
 const USER_AGENT = 'MyElectronSpider/1.0 (+https://github.com/your-repo)';
 const FETCH_TIMEOUT_MS = 5000;
@@ -48,7 +49,7 @@ const FALLBACK_SITEMAP_PATHS = ['/sitemap_index.xml', '/sitemap.xml', '/index.xm
 
 const visitedUrls = new Set();
 let queue = [];
-let maxPagesToVisit = 0; // 0 = без лимита
+let maxPagesToVisit = 0; // 0 = без ліміту
 const robotsCache = new Map(); // host -> { parser, text }
 const referrersMap = new Map();
 
@@ -97,7 +98,7 @@ async function getRobots(urlObject) {
             text = await response.text();
         }
     } catch (e) {
-        // robots.txt отсутствует — считаем всё разрешённым
+        // robots.txt відсутній — вважаємо все дозволеним
     }
 
     const entry = {
@@ -126,7 +127,7 @@ function enqueueUrl(url, referrer, allowedHostname) {
             queue.push({ url: absoluteUrl, referrer });
         }
     } catch (e) {
-        // невалидный URL
+        // невалідний URL
     }
 }
 
@@ -139,7 +140,7 @@ async function fetchSitemapPageUrls(sitemapUrl, allowedHostname, fetchedSitemaps
     try {
         const response = await fetchPage(sitemapUrl);
         if (!response.ok) {
-            console.log(`Sitemap недоступен (${response.status}): ${sitemapUrl}`);
+            console.log(`Sitemap недоступний (${response.status}): ${sitemapUrl}`);
             return [];
         }
 
@@ -174,7 +175,7 @@ async function fetchSitemapPageUrls(sitemapUrl, allowedHostname, fetchedSitemaps
                     pageUrls.push(absoluteUrl);
                 }
             } catch (e) {
-                // пропускаем невалидные URL
+                // пропускаємо невалідні URL
             }
         };
 
@@ -186,7 +187,7 @@ async function fetchSitemapPageUrls(sitemapUrl, allowedHostname, fetchedSitemaps
 
         return pageUrls;
     } catch (error) {
-        console.error(`Ошибка чтения sitemap ${sitemapUrl}: ${error.message}`);
+        console.error(`Помилка читання sitemap ${sitemapUrl}: ${error.message}`);
         return [];
     }
 }
@@ -215,7 +216,7 @@ async function seedQueueFromSitemaps(startUrl, browserWindow) {
     browserWindow.webContents.send('spider-progress', {
         scanned: 0,
         queue: 0,
-        status: `Поиск sitemap (${sitemapUrls.length})...`,
+        status: `Пошук sitemap (${sitemapUrls.length})...`,
     });
 
     for (const sitemapUrl of sitemapUrls) {
@@ -226,34 +227,34 @@ async function seedQueueFromSitemaps(startUrl, browserWindow) {
         }
     }
 
-    console.log(`Из sitemap найдено страниц: ${pageUrls.size}`);
+    console.log(`У sitemap знайдено сторінок: ${pageUrls.size}`);
     return pageUrls.size;
 }
 
 /**
- * Основная функция сканирования одной страницы
- * @param {string} url - URL для сканирования
- * @param {string} referrer - URL, с которого пришли на эту страницу
- * @param {BrowserWindow} browserWindow - Окно для отправки результатов
+ * Основна функція сканування однієї сторінки
+ * @param {string} url - URL для сканування
+ * @param {string} referrer - URL, з якого перейшли на цю сторінку
+ * @param {BrowserWindow} browserWindow - Вікно для надсилання результатів
  */
 async function crawl(url, referrer, browserWindow) {
     if (isPageLimitReached() || visitedUrls.has(url)) {
         return;
     }
 
-    console.log(`Сканирую: ${url}`);
+    console.log(`Сканую: ${url}`);
     visitedUrls.add(url);
 
     const urlObject = new URL(url);
     const { parser: robots } = await getRobots(urlObject);
 
     if (!robots.isAllowed(url, 'MyElectronSpider/1.0')) {
-        console.log(`Заблокировано robots.txt: ${url}`);
+        console.log(`Заблоковано robots.txt: ${url}`);
         const referrers = referrersMap.has(url) ? Array.from(referrersMap.get(url)) : (referrer !== 'N/A' ? [referrer] : []);
         browserWindow.webContents.send('spider-result', {
             status: 'SKIPPED',
             url: url,
-            title: 'Заблокировано robots.txt',
+            title: 'Заблоковано robots.txt',
             referrers: referrers,
             linkCount: 0,
             outlinks: [],
@@ -267,9 +268,9 @@ async function crawl(url, referrer, browserWindow) {
 
         const referrers = referrersMap.has(url) ? Array.from(referrersMap.get(url)) : (referrer !== 'N/A' ? [referrer] : []);
 
-        // 1. Обработка редиректов
-        // Если статус 3xx, или fetch перешел сам (redirected), или URL изменился (response.url !== url)
-        // При автоматическом переходе fetch возвращает 200, поэтому оригинальный код (301/302) теряется.
+        // 1. Обробка редиректів
+        // Якщо статус 3xx, або fetch сам перейшов (redirected), або URL змінився (response.url !== url)
+        // При автоматичному переході fetch повертає 200, тому оригінальний код (301/302) втрачається.
         if ((response.status >= 300 && response.status < 400) || response.redirected || (response.url && response.url !== url)) {
             let redirectUrl = null;
             let status = response.status;
@@ -278,15 +279,15 @@ async function crawl(url, referrer, browserWindow) {
                 const locationHeader = response.headers.get('location');
                 redirectUrl = locationHeader ? new URL(locationHeader, url).href : null;
             } else {
-                // Если статус 200, но мы определили редирект (по флагу или URL), ставим 302
+                // Якщо статус 200, але редирект визначено за прапорцем або URL — ставимо 302
                 redirectUrl = response.url;
-                status = 302; // Условный код, так как оригинал потерян
+                status = 302; // Умовний код, оскільки оригінал втрачено
             }
 
             browserWindow.webContents.send('spider-result', {
                 status: status,
                 url: url,
-                title: `Редирект на ${redirectUrl || 'неизвестно'}`,
+                title: `Редирект на ${redirectUrl || 'невідомо'}`,
                 referrers: referrers,
                 metaDescription: '',
                 metaCanonical: '',
@@ -296,7 +297,7 @@ async function crawl(url, referrer, browserWindow) {
                 redirectUrl: redirectUrl
             });
 
-            // Добавляем цель редиректа в очередь, если она есть
+            // Додаємо ціль редиректу в чергу, якщо вона є
             if (redirectUrl) {
                 if (!referrersMap.has(redirectUrl)) {
                     referrersMap.set(redirectUrl, new Set());
@@ -304,9 +305,7 @@ async function crawl(url, referrer, browserWindow) {
                 referrersMap.get(redirectUrl).add(url);
 
                 if (!visitedUrls.has(redirectUrl) && !queue.some(item => item.url === redirectUrl)) {
-                    // Проверяем, остаемся ли мы в пределах домена (или разрешаем редирект на поддомен/www)
                     try {
-                        // Для редиректов можно использовать ту же логику или чуть мягче. Используем текущую.
                         if (new URL(redirectUrl).hostname === new URL(url).hostname) {
                             queue.push({ url: redirectUrl, referrer: url });
                         }
@@ -316,16 +315,14 @@ async function crawl(url, referrer, browserWindow) {
             return;
         }
 
-        // 2. Обработка ошибок клиента/сервера (4xx, 5xx)
+        // 2. Обробка помилок клієнта/сервера (4xx, 5xx)
         if (!response.ok) {
-            // Вместо выброса ошибки отправляем результат с кодом статуса
-            throw new Error(`HTTP ошибка ${response.status}`);
+            throw new Error(`HTTP помилка ${response.status}`);
         }
 
-        const html = await response.text(); // Получаем HTML как текст
+        const html = await response.text();
         const $ = cheerio.load(html);
 
-        // 1. Извлекаем данные
         const title = $('title').text().trim();
         const description = $('meta[name="description"]').attr('content') || '';
         const canonical = $('link[rel="canonical"]').attr('href') || '';
@@ -342,7 +339,7 @@ async function crawl(url, referrer, browserWindow) {
                     text: $(link).text().trim().slice(0, 200),
                 });
             } catch (e) {
-                // невалидный href
+                // невалідний href
             }
         });
 
@@ -368,7 +365,7 @@ async function crawl(url, referrer, browserWindow) {
 
         const metaRobots = $('meta[name="robots"]').attr('content') || '';
         if (metaRobots.includes('nofollow')) {
-            console.log(`Найден nofollow на странице: ${url}`);
+            console.log(`Знайдено nofollow на сторінці: ${url}`);
             return;
         }
 
@@ -376,11 +373,11 @@ async function crawl(url, referrer, browserWindow) {
             enqueueUrl(outlink.href, url, urlObject.hostname);
         }
     } catch (error) {
-        console.error(`Ошибка при сканировании ${url}: ${error.message}`);
+        console.error(`Помилка під час сканування ${url}: ${error.message}`);
         browserWindow.webContents.send('spider-result', {
             status: 'ERROR',
             url: url,
-            title: error.message || 'Ошибка',
+            title: error.message || 'Помилка',
             referrers: [referrer],
             linkCount: 0,
             outlinks: [],
@@ -390,9 +387,9 @@ async function crawl(url, referrer, browserWindow) {
 }
 
 /**
- * Запускает процесс сканирования
- * @param {string} startUrl - Начальный URL
- * @param {BrowserWindow} browserWindow - Окно для отправки результатов
+ * Запускає процес сканування
+ * @param {string} startUrl - Початковий URL
+ * @param {BrowserWindow} browserWindow - Вікно для надсилання результатів
  */
 async function startSpider(startUrl, options, browserWindow) {
     const useSitemap = options?.useSitemap ?? false;
@@ -415,18 +412,17 @@ async function startSpider(startUrl, options, browserWindow) {
         const sitemapPageCount = await seedQueueFromSitemaps(startUrl, browserWindow);
         sendProgress(
             sitemapPageCount > 0
-                ? `Из sitemap добавлено в очередь: ${sitemapPageCount}`
-                : 'Sitemap не найден, обход по ссылкам'
+                ? `З sitemap додано в чергу: ${sitemapPageCount}`
+                : 'Sitemap не знайдено, обхід за посиланнями'
         );
     }
 
     enqueueUrl(startUrl, 'N/A', new URL(startUrl).hostname);
 
-    // Рекурсивная функция для неблокирующего обхода
     const processQueue = async () => {
         if (queue.length === 0 || isPageLimitReached()) {
             sendProgress();
-            console.log('Сканирование завершено.');
+            console.log('Сканування завершено.');
 
             const allReferrers = {};
             for (const [link, refs] of referrersMap.entries()) {
@@ -434,26 +430,24 @@ async function startSpider(startUrl, options, browserWindow) {
             }
             browserWindow.webContents.send('spider-referrers-update', allReferrers);
 
-            let endMessage = 'Сканирование завершено!';
+            let endMessage = 'Сканування завершено!';
             if (isPageLimitReached() && queue.length > 0) {
-                endMessage = `Достигнут лимит ${maxPagesToVisit} стр. В очереди осталось: ${queue.length}`;
+                endMessage = `Досягнуто ліміт ${maxPagesToVisit} стор. У черзі залишилось: ${queue.length}`;
             }
 
             browserWindow.webContents.send('spider-end', endMessage);
             return;
         }
 
-        const currentItem = queue.shift(); // Берем первый URL из очереди
+        const currentItem = queue.shift();
         if (currentItem) {
             await crawl(currentItem.url, currentItem.referrer, browserWindow);
             sendProgress();
         }
 
-        // Даем основному потоку "передышку" перед следующим URL
         setTimeout(processQueue, 0);
     };
 
-    // Запускаем обработку очереди
     await processQueue();
 }
 
@@ -470,12 +464,12 @@ ipcMain.handle('settings:save', async (_event, settings) => {
 ipcMain.on('start-spider', (event, payload) => {
     const startUrl = typeof payload === 'string' ? payload : payload.startUrl;
     const options = typeof payload === 'string' ? {} : (payload.options || {});
-    console.log(`Получен запрос на сканирование, начиная с: ${startUrl}`, options);
+    console.log(`Отримано запит на сканування, починаючи з: ${startUrl}`, options);
     const browserWindow = BrowserWindow.fromWebContents(event.sender);
     if (browserWindow) {
         startSpider(startUrl, options, browserWindow).catch(err => {
-            console.error('Критическая ошибка в startSpider:', err);
-            browserWindow.webContents.send('spider-end', `Ошибка: ${err.message}`);
+            console.error('Критична помилка в startSpider:', err);
+            browserWindow.webContents.send('spider-end', `Помилка: ${err.message}`);
         });
     }
 });

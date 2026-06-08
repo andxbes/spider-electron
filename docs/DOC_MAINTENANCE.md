@@ -16,7 +16,7 @@
 
 ### Main / краулер (`src/main/main.js`)
 
-- [ ] `MAX_PAGES_TO_VISIT`, timeout, User-Agent, правила домену
+- [ ] `maxPages`, timeout, User-Agent, правила домену
 - [ ] Алгоритм обходу (BFS → інше), черга, ліміти
 - [ ] Обробка robots.txt, redirects, nofollow
 - [ ] Поля в об'єкті `spider-result`

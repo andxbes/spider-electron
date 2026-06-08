@@ -203,7 +203,7 @@ function selectRow(url) {
 
 function renderDetailTable(rows) {
     if (rows.length === 0) {
-        return '<p class="p-4 text-zinc-400 italic">Нет данных</p>';
+        return '<p class="p-4 text-zinc-400 italic">Немає даних</p>';
     }
     const body = rows
         .map(
@@ -234,7 +234,7 @@ function renderLinkTable(links, emptyText) {
         <thead class="bg-zinc-50 sticky top-0">
             <tr class="text-left text-zinc-500">
                 <th class="p-2 font-semibold">URL</th>
-                <th class="p-2 font-semibold w-1/3">Текст ссылки</th>
+                <th class="p-2 font-semibold w-1/3">Текст посилання</th>
             </tr>
         </thead>
         <tbody>${rows}</tbody>
@@ -261,8 +261,8 @@ function buildDetailRows(data) {
                 ? h2List.map((h) => escapeHtml(h.text)).join('<br>')
                 : '<span class="text-zinc-400 italic">—</span>',
         ],
-        ['Исходящих ссылок', String(linkCount)],
-        ['Входящих ссылок', String(inCount)],
+        ['Вихідних посилань', String(linkCount)],
+        ['Вхідних посилань', String(inCount)],
     ];
 
     if (data.redirectUrl) {
@@ -274,7 +274,7 @@ function buildDetailRows(data) {
 
 function renderDetailPanel() {
     if (!selectedUrl || !scanResults.has(selectedUrl)) {
-        detailContent.innerHTML = '<p class="p-4 text-zinc-400 italic">Выберите URL в таблице выше</p>';
+        detailContent.innerHTML = '<p class="p-4 text-zinc-400 italic">Оберіть URL у таблиці вище</p>';
         return;
     }
 
@@ -286,12 +286,12 @@ function renderDetailPanel() {
         const inlinks = (data.referrers || []).map((href) => ({ href, text: '' }));
         detailContent.innerHTML = renderLinkTable(
             inlinks,
-            'Нет входящих ссылок (стартовая или только из sitemap)'
+            'Немає вхідних посилань (стартова або лише з sitemap)'
         );
     } else if (activeTab === 'outlinks') {
         detailContent.innerHTML = renderLinkTable(
             data.outlinks || [],
-            'Нет исходящих ссылок на странице'
+            'Немає вихідних посилань на сторінці'
         );
     }
 }
@@ -337,10 +337,10 @@ startButton.addEventListener('click', async () => {
         sortState = { column: null, direction: 'asc' };
         updateSortIndicators();
         resultsTable.innerHTML = '';
-        selectedUrlHint.textContent = 'Выберите строку в таблице';
-        detailContent.innerHTML = '<p class="p-4 text-zinc-400 italic">Выберите URL в таблице выше</p>';
+        selectedUrlHint.textContent = 'Оберіть рядок у таблиці';
+        detailContent.innerHTML = '<p class="p-4 text-zinc-400 italic">Оберіть URL у таблиці вище</p>';
         exportButton.disabled = true;
-        statusText.textContent = `Начинаю сканирование с ${startUrl}...`;
+        statusText.textContent = `Починаю сканування з ${startUrl}...`;
         startButton.disabled = true;
 
         const settings = await loadSettings();
@@ -354,7 +354,7 @@ startButton.addEventListener('click', async () => {
             maxPages: settings.maxPages,
         });
     } catch {
-        alert('Пожалуйста, введите корректный URL (например, https://example.com).');
+        alert('Будь ласка, введіть коректний URL (наприклад, https://example.com).');
     }
 });
 
@@ -379,9 +379,9 @@ window.api.onSpiderEnd((message) => {
 });
 
 window.api.onSpiderProgress((progress) => {
-    statusText.textContent = progress.status || 'В процессе...';
-    statusScanned.textContent = `Просканировано: ${progress.scanned}`;
-    statusQueue.textContent = `В очереди: ${progress.queue}`;
+    statusText.textContent = progress.status || 'В процесі...';
+    statusScanned.textContent = `Проскановано: ${progress.scanned}`;
+    statusQueue.textContent = `У черзі: ${progress.queue}`;
 });
 
 (async function initMainPage() {

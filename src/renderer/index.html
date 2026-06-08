@@ -1,5 +1,5 @@
 <!doctype html>
-<html>
+<html lang="uk">
   <head>
     <meta charset="UTF-8" />
     <meta
@@ -16,26 +16,26 @@
         <input
           type="text"
           id="urlInput"
-          placeholder="Стартовый URL (например, http://localhost/)"
+          placeholder="Початковий URL (наприклад, http://localhost/)"
           class="flex-grow p-2 border border-zinc-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none text-sm"
         />
         <button
           id="startButton"
           class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-zinc-400 disabled:cursor-not-allowed text-sm shrink-0"
         >
-          Сканировать
+          Сканувати
         </button>
         <button
           id="exportButton"
           disabled
           class="px-4 py-2 bg-zinc-600 text-white rounded-md hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm shrink-0"
         >
-          Экспорт CSV
+          Експорт CSV
         </button>
         <a
           href="./settings.html"
           class="px-3 py-2 text-sm text-zinc-600 border border-zinc-300 rounded-md hover:bg-zinc-50 shrink-0"
-          title="Настройки"
+          title="Налаштування"
         >
           ⚙
         </a>
@@ -48,13 +48,13 @@
           <table class="w-full text-xs border-collapse">
             <thead class="sticky top-0 bg-zinc-100 border-b border-zinc-300 z-10">
               <tr class="text-left text-zinc-600">
-                <th class="sortable-th p-2 font-semibold w-8 cursor-pointer select-none hover:bg-zinc-200" data-sort="index" title="Сортировать">#</th>
-                <th class="sortable-th p-2 font-semibold min-w-[200px] cursor-pointer select-none hover:bg-zinc-200" data-sort="url" title="Сортировать">Address</th>
-                <th class="sortable-th p-2 font-semibold w-16 cursor-pointer select-none hover:bg-zinc-200" data-sort="status" title="Сортировать">Status</th>
-                <th class="sortable-th p-2 font-semibold min-w-[140px] cursor-pointer select-none hover:bg-zinc-200" data-sort="title" title="Сортировать">Title</th>
-                <th class="sortable-th p-2 font-semibold min-w-[160px] cursor-pointer select-none hover:bg-zinc-200" data-sort="metaDescription" title="Сортировать">Meta Description</th>
-                <th class="sortable-th p-2 font-semibold w-14 cursor-pointer select-none hover:bg-zinc-200" data-sort="links" title="Сортировать">Links</th>
-                <th class="sortable-th p-2 font-semibold w-14 cursor-pointer select-none hover:bg-zinc-200" data-sort="inlinks" title="Сортировать">In</th>
+                <th class="sortable-th p-2 font-semibold w-8 cursor-pointer select-none hover:bg-zinc-200" data-sort="index" title="Сортувати">#</th>
+                <th class="sortable-th p-2 font-semibold min-w-[200px] cursor-pointer select-none hover:bg-zinc-200" data-sort="url" title="Сортувати">Address</th>
+                <th class="sortable-th p-2 font-semibold w-16 cursor-pointer select-none hover:bg-zinc-200" data-sort="status" title="Сортувати">Status</th>
+                <th class="sortable-th p-2 font-semibold min-w-[140px] cursor-pointer select-none hover:bg-zinc-200" data-sort="title" title="Сортувати">Title</th>
+                <th class="sortable-th p-2 font-semibold min-w-[160px] cursor-pointer select-none hover:bg-zinc-200" data-sort="metaDescription" title="Сортувати">Meta Description</th>
+                <th class="sortable-th p-2 font-semibold w-14 cursor-pointer select-none hover:bg-zinc-200" data-sort="links" title="Сортувати">Links</th>
+                <th class="sortable-th p-2 font-semibold w-14 cursor-pointer select-none hover:bg-zinc-200" data-sort="inlinks" title="Сортувати">In</th>
               </tr>
             </thead>
             <tbody id="resultsTable"></tbody>
@@ -72,32 +72,32 @@
             data-tab="details"
             class="detail-tab px-4 py-2 text-xs font-medium border-b-2 border-blue-600 text-blue-700 bg-white"
           >
-            Детали URL
+            Деталі URL
           </button>
           <button
             type="button"
             data-tab="inlinks"
             class="detail-tab px-4 py-2 text-xs font-medium border-b-2 border-transparent text-zinc-600 hover:text-zinc-800"
           >
-            Входящие ссылки
+            Вхідні посилання
           </button>
           <button
             type="button"
             data-tab="outlinks"
             class="detail-tab px-4 py-2 text-xs font-medium border-b-2 border-transparent text-zinc-600 hover:text-zinc-800"
           >
-            Исходящие ссылки
+            Вихідні посилання
           </button>
           <div class="flex-grow"></div>
           <span
             id="selectedUrlHint"
             class="px-3 py-2 text-xs text-zinc-400 truncate max-w-md italic"
           >
-            Выберите строку в таблице
+            Оберіть рядок у таблиці
           </span>
         </div>
         <div id="detailContent" class="overflow-auto flex-grow p-0 text-xs">
-          <p class="p-4 text-zinc-400 italic">Выберите URL в таблице выше</p>
+          <p class="p-4 text-zinc-400 italic">Оберіть URL у таблиці вище</p>
         </div>
       </div>
     </main>
@@ -106,10 +106,10 @@
       id="status-bar"
       class="shrink-0 px-4 py-2 bg-zinc-200 border-t border-zinc-300 text-xs text-zinc-600 flex justify-between"
     >
-      <span id="status-text" class="italic">Готов к работе...</span>
+      <span id="status-text" class="italic">Готово до роботи...</span>
       <div class="flex gap-4">
-        <span id="status-scanned" class="font-semibold">Просканировано: 0</span>
-        <span id="status-queue" class="font-semibold">В очереди: 0</span>
+        <span id="status-scanned" class="font-semibold">Проскановано: 0</span>
+        <span id="status-queue" class="font-semibold">У черзі: 0</span>
       </div>
     </footer>
 
