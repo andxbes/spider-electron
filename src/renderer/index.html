@@ -84,6 +84,7 @@
     <main class="flex-grow flex flex-col min-h-0 min-w-0 w-full p-2 gap-0">
       <div id="resultsPanel" class="flex-grow min-h-[120px] w-full min-w-0 border border-zinc-300 rounded-md bg-white overflow-hidden flex flex-col mb-2">
         <div class="flex flex-wrap items-center gap-x-3 gap-y-1 px-2 py-1.5 border-b border-zinc-200 bg-zinc-50 text-xs shrink-0">
+          <div class="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0">
           <label class="flex items-center gap-1.5">
             <span class="text-zinc-500 whitespace-nowrap">Тип:</span>
             <select
@@ -152,7 +153,17 @@
               <option value="external">Зовнішні</option>
             </select>
           </label>
-          <span id="filterCount" class="text-zinc-400 ml-auto whitespace-nowrap"></span>
+          </div>
+          <div class="flex items-center gap-2 ml-auto shrink-0">
+            <input
+              type="search"
+              id="tableSearch"
+              placeholder="Пошук…"
+              autocomplete="off"
+              class="w-44 sm:w-52 px-2 py-1 border border-zinc-300 rounded bg-white text-zinc-800 placeholder:text-zinc-400"
+            />
+            <span id="filterCount" class="text-zinc-400 whitespace-nowrap"></span>
+          </div>
         </div>
         <div class="overflow-auto flex-grow min-h-0">
           <table class="w-full text-xs border-collapse">

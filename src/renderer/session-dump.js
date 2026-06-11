@@ -21,7 +21,7 @@ function cloneResultEntry(data) {
         fetched: data.fetched ?? (data.status !== '' && data.status !== undefined && data.status !== null),
         kind: data.kind ?? '',
         tag: data.tag ?? '',
-        text: data.text ?? data.linkText ?? '',
+        text: data.text ?? data.linkText ?? data.title ?? '',
         referrers: Array.isArray(data.referrers)
             ? data.referrers.map((ref) => (
                 typeof ref === 'string'

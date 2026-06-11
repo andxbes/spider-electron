@@ -859,6 +859,7 @@ function buildDiscoveredLinkResult(link) {
         url: link.url,
         status: '',
         title: link.text || '',
+        text: link.text || '',
         external: Boolean(link.external),
         fetched: false,
         kind: link.kind || '',
@@ -882,7 +883,12 @@ function reportDiscoveredLinks(browserWindow, links, sourceUrl, allowedHostname,
 
         addReferrer(link.url, sourceUrl, link.text);
 
-        if (visitedUrls.has(link.url) || isUrlQueued(link.url) || reportedStubUrls.has(link.url)) {
+        if (reportedStubUrls.has(link.url)) {
+            continue;
+        }
+
+        const crawlableInternal = follow && !link.external && isCrawlableLink(link);
+        if (crawlableInternal && (visitedUrls.has(link.url) || isUrlQueued(link.url))) {
             continue;
         }
 
@@ -1197,8 +1203,6 @@ async function crawl(url, referrer, browserWindow) {
                 contentType: contentType || 'text/html',
                 external: false,
                 fetched: true,
-                kind: 'html',
-                tag: 'a[href]',
                 headings: headings,
                 responseTimeMs,
             },

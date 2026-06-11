@@ -24,6 +24,7 @@ const indexingFilter = document.getElementById('indexingFilter');
 const h1Filter = document.getElementById('h1Filter');
 const duplicateFilter = document.getElementById('duplicateFilter');
 const sourceFilter = document.getElementById('sourceFilter');
+const tableSearch = document.getElementById('tableSearch');
 const filterCount = document.getElementById('filterCount');
 
 const scanResults = new Map();
@@ -43,6 +44,9 @@ let activeH1Filter = 'all';
 let activeDuplicateFilter = 'all';
 /** @type {'all' | 'internal' | 'external'} */
 let activeSourceFilter = 'all';
+let activeSearchQuery = '';
+let searchRefreshTimer = null;
+const SEARCH_REFRESH_DELAY_MS = 200;
 let scanHostname = '';
 
 
@@ -66,7 +70,6 @@ const RESOURCE_TYPE_FILTER_OPTIONS = [
     { value: 'javascript', label: 'JavaScript' },
     { value: 'css', label: 'CSS' },
     { value: 'media', label: 'Media (зображення, відео, аудіо)' },
-    { value: 'other', label: 'Other (інше)' },
 ];
 
 const OUTLINK_IMAGE_EXTENSIONS = new Set([
@@ -194,20 +197,53 @@ function mapKindToFilterKind(kind) {
     if (normalized === 'images') {
         return 'media';
     }
-    if (normalized === 'html' || normalized === 'javascript' || normalized === 'css' || normalized === 'media' || normalized === 'other') {
+    if (normalized === 'html' || normalized === 'javascript' || normalized === 'css' || normalized === 'media') {
         return normalized;
     }
-    return 'other';
+    return null;
 }
 
-function matchesActiveContentFilter(kind) {
+function isJavascriptResource(data) {
+    if (inferLinkKind(data) === 'javascript') {
+        return true;
+    }
+    const contentType = (data.contentType || '').toLowerCase();
+    return contentType.includes('javascript') || contentType.includes('ecmascript');
+}
+
+function isCssResource(data) {
+    if (inferLinkKind(data) === 'css') {
+        return true;
+    }
+    return (data.contentType || '').toLowerCase() === 'text/css';
+}
+
+function isMediaResource(data) {
+    const inferred = inferLinkKind(data);
+    if (inferred === 'images' || inferred === 'media') {
+        return true;
+    }
+    const crawled = getCrawledResourceKind(data);
+    return crawled === 'media';
+}
+
+function matchesResourceTypeFilter(data) {
     if (activeContentFilter === 'all') {
         return true;
     }
-    if (activeContentFilter === 'media') {
-        return kind === 'media' || kind === 'images';
+    if (activeContentFilter === 'html') {
+        return !isDiscoveredOnly(data) && isHtmlContentType(data.contentType || '');
     }
-    return kind === activeContentFilter;
+    if (activeContentFilter === 'javascript') {
+        return isJavascriptResource(data);
+    }
+    if (activeContentFilter === 'css') {
+        return isCssResource(data);
+    }
+    if (activeContentFilter === 'media') {
+        return isMediaResource(data);
+    }
+    return false;
 }
 
 function getCrawledResourceKind(data) {
@@ -243,18 +279,40 @@ function getCrawledResourceKind(data) {
         return 'media';
     }
 
-    return 'other';
+    return null;
 }
 
 function isDiscoveredOnly(data) {
-    return data.fetched === false || (data.status === '' && !data.contentType);
+    if (data.fetched === false) {
+        return true;
+    }
+    if (data.fetched === true) {
+        return false;
+    }
+    return data.status === '' && !data.contentType;
 }
 
 function getResourceKind(data) {
-    if (isDiscoveredOnly(data)) {
-        return mapKindToFilterKind(data.kind || inferLinkKind(data));
+    if (isJavascriptResource(data)) {
+        return 'javascript';
     }
-    return getCrawledResourceKind(data);
+    if (isCssResource(data)) {
+        return 'css';
+    }
+    if (isMediaResource(data)) {
+        return 'media';
+    }
+    if (!isDiscoveredOnly(data) && isHtmlContentType(data.contentType || '')) {
+        return 'html';
+    }
+    const explicit = mapKindToFilterKind(data.kind || '');
+    if (explicit) {
+        return explicit;
+    }
+    if (!isDiscoveredOnly(data)) {
+        return getCrawledResourceKind(data);
+    }
+    return mapKindToFilterKind(inferLinkKind(data));
 }
 
 function getResourceType(data) {
@@ -273,11 +331,11 @@ function isExternalUrl(url) {
     }
 }
 
-function passesSourceFilterForUrl(url) {
+function passesSourceFilterForRow(data) {
     if (activeSourceFilter === 'all') {
         return true;
     }
-    const external = isExternalUrl(url);
+    const external = isExternalLink(data);
     if (activeSourceFilter === 'external') {
         return external;
     }
@@ -327,10 +385,7 @@ function getTableEntries() {
     if (activeContentFilter === 'all') {
         return all;
     }
-    if (activeContentFilter === 'html') {
-        return all.filter((data) => !isDiscoveredOnly(data) && getCrawledResourceKind(data) === 'html');
-    }
-    return all.filter((data) => matchesActiveContentFilter(getResourceKind(data)));
+    return all.filter(matchesResourceTypeFilter);
 }
 
 function getRowData(url) {
@@ -416,6 +471,34 @@ function rebuildLatestReferrersFromResults() {
     }
 }
 
+function materializeDiscoveredFromReferrers() {
+    let changed = false;
+    for (const [url, refs] of latestReferrersByUrl.entries()) {
+        if (scanResults.has(url)) {
+            continue;
+        }
+        const refText = refs[0]?.text || '';
+        if (upsertScanResult({
+            url,
+            status: '',
+            title: refText,
+            text: refText,
+            external: isExternalUrl(url),
+            fetched: false,
+            kind: '',
+            tag: '',
+            referrers: refs,
+        }, { deferUi: true })) {
+            changed = true;
+        }
+    }
+    if (changed) {
+        reinferAllLinkKinds();
+        invalidateOutgoingLinksCache();
+    }
+    return changed;
+}
+
 function applyReferrersUpdate(allReferrers) {
     latestReferrersByUrl = new Map();
     for (const [url, refs] of Object.entries(allReferrers || {})) {
@@ -430,6 +513,7 @@ function applyReferrersUpdate(allReferrers) {
             data.referrers = latestReferrersByUrl.get(url);
         }
     }
+    materializeDiscoveredFromReferrers();
     invalidateOutgoingLinksCache();
 
     if (uiState === 'running') {
@@ -518,8 +602,8 @@ function normalizeContentTypeFilter(value) {
     if (value === 'images') {
         return 'media';
     }
-    if (value === 'unknown') {
-        return 'other';
+    if (value === 'unknown' || value === 'other') {
+        return 'all';
     }
     return value;
 }
@@ -584,13 +668,31 @@ function normalizeLegacyLink(link) {
 function normalizeLinkEntry(data) {
     const url = data.url || data.href;
     const hasStatus = data.status !== '' && data.status !== undefined && data.status !== null;
+    const fetched = data.fetched ?? hasStatus;
+    const external = typeof data.external === 'boolean'
+        ? data.external
+        : isExternalUrl(url);
+    const tag = data.tag || '';
+    let kind = data.kind || '';
+    if (isJavascriptResource({ ...data, url, tag, kind })) {
+        kind = 'javascript';
+    } else if (isCssResource({ ...data, url, tag, kind })) {
+        kind = 'css';
+    } else if (isMediaResource({ ...data, url, tag, kind })) {
+        kind = 'media';
+    } else if (!kind) {
+        const inferred = inferLinkKind({ ...data, url, tag, kind: '' });
+        if (inferred && inferred !== 'html') {
+            kind = inferred === 'images' ? 'media' : inferred;
+        }
+    }
     return {
         ...data,
         url,
-        external: Boolean(data.external),
-        kind: data.kind || '',
-        tag: data.tag || '',
-        fetched: data.fetched ?? hasStatus,
+        external,
+        kind,
+        tag,
+        fetched,
     };
 }
 
@@ -609,6 +711,9 @@ function normalizeLinkKind(kind) {
 }
 
 function formatLinkKindLabel(kind) {
+    if (!kind) {
+        return '—';
+    }
     return OUTLINK_KIND_LABELS[kind] || kind || OUTLINK_KIND_LABELS.unknown;
 }
 
@@ -765,8 +870,7 @@ function collectPresentContentTypes() {
 }
 
 function getContentTypeFilterOptions() {
-    const present = collectPresentContentTypes();
-    return RESOURCE_TYPE_FILTER_OPTIONS.filter((option) => option.value === 'all' || present.has(option.value));
+    return RESOURCE_TYPE_FILTER_OPTIONS;
 }
 
 function appendContentTypeFilterOption(option) {
@@ -780,34 +884,19 @@ function rebuildContentTypeFilterOptions({ preserveValue = true, force = false }
     if (!contentTypeFilter) {
         return;
     }
-    const present = collectPresentContentTypes();
-    const presentKey = [...present].sort().join(',');
-    if (!force && presentKey === knownPresentContentTypesKey && contentTypeFilter.options.length > 0) {
+    if (!force && contentTypeFilter.options.length === RESOURCE_TYPE_FILTER_OPTIONS.length) {
         applyActiveFiltersToDom();
         return;
     }
-    knownPresentContentTypesKey = presentKey;
 
     const retainedSelection = preserveValue ? activeContentFilter : 'all';
-    const options = getContentTypeFilterOptions();
 
     contentTypeFilter.innerHTML = '';
-    for (const option of options) {
+    for (const option of RESOURCE_TYPE_FILTER_OPTIONS) {
         appendContentTypeFilterOption(option);
     }
 
-    let selection = normalizeContentTypeFilter(retainedSelection);
-    if (!preserveValue) {
-        selection = 'all';
-    } else if (selection !== 'all' && !options.some((option) => option.value === selection)) {
-        const staticOption = RESOURCE_TYPE_FILTER_OPTIONS.find((option) => option.value === selection);
-        if (staticOption) {
-            appendContentTypeFilterOption(staticOption);
-        } else {
-            selection = 'all';
-        }
-    }
-    setActiveContentFilter(selection);
+    setActiveContentFilter(preserveValue ? retainedSelection : 'all');
 }
 
 function maybeUpdateContentTypeFilterOptions() {
@@ -1012,8 +1101,43 @@ function isExternalOutlink(entry) {
     return isExternalLink(entry);
 }
 
+function getRowSearchText(data) {
+    const headingText = (data.headings || []).map((heading) => heading.text).join(' ');
+    const referrerText = getReferrersForUrl(data.url).map((ref) => `${ref.href} ${ref.text}`).join(' ');
+    return [
+        data.url,
+        data.status,
+        data.contentType,
+        data.title,
+        data.text,
+        data.metaDescription,
+        data.metaCanonical,
+        data.kind,
+        data.tag,
+        data.rel,
+        data.relLabel,
+        data.metaRobots,
+        data.metaRobotsLabel,
+        data.robotsRule,
+        headingText,
+        referrerText,
+        formatLinkKindLabel(getResourceKind(data)),
+    ].filter(Boolean).join(' ').toLowerCase();
+}
+
+function matchesSearchFilter(data) {
+    const query = activeSearchQuery.trim().toLowerCase();
+    if (!query) {
+        return true;
+    }
+    return getRowSearchText(data).includes(query);
+}
+
 function passesTableFilters(data) {
-    if (!passesSourceFilterForUrl(data.url)) {
+    if (!matchesSearchFilter(data)) {
+        return false;
+    }
+    if (!passesSourceFilterForRow(data)) {
         return false;
     }
     if (!matchesStatusFilter(data.status, activeStatusFilter)) {
@@ -1139,9 +1263,13 @@ function resetTableFilters() {
     activeIndexingFilter = 'all';
     activeH1Filter = 'all';
     activeDuplicateFilter = 'all';
+    activeSearchQuery = '';
     setActiveSourceFilter('all');
     knownStatusCodes = new Set();
     invalidateDuplicateCounts();
+    if (tableSearch) {
+        tableSearch.value = '';
+    }
     if (statusFilter) {
         statusFilter.value = 'all';
     }
@@ -1317,6 +1445,7 @@ function areDefaultTableFiltersActive() {
         && activeIndexingFilter === 'all'
         && activeH1Filter === 'all'
         && activeDuplicateFilter === 'all'
+        && !activeSearchQuery.trim()
         && !sortState.column;
 }
 
@@ -1379,6 +1508,7 @@ function collectWorkspaceSnapshot() {
                 h1: activeH1Filter,
                 duplicate: activeDuplicateFilter,
                 source: activeSourceFilter,
+                search: activeSearchQuery,
             },
         }),
     };
@@ -1416,6 +1546,10 @@ function applyFilterState(filters) {
     activeDuplicateFilter = filters.duplicate || 'all';
     setActiveSourceFilter(filters.source || filters.viewMode || filters.externalLinks || 'all');
     setActiveContentFilter(filters.content || filters.externalType || 'all');
+    activeSearchQuery = filters.search || '';
+    if (tableSearch) {
+        tableSearch.value = activeSearchQuery;
+    }
     if (statusFilter) {
         statusFilter.value = activeStatusFilter;
     }
@@ -1476,7 +1610,14 @@ function populateScanResults(normalized) {
         }
     }
     rebuildLatestReferrersFromResults();
+    reinferAllLinkKinds();
     rebuildContentTypeFilterOptions({ preserveValue: true, force: true });
+}
+
+function reinferAllLinkKinds() {
+    for (const [url, entry] of scanResults.entries()) {
+        scanResults.set(url, normalizeLinkEntry(entry));
+    }
 }
 
 function restoreWorkspaceFromSession() {
@@ -1731,9 +1872,18 @@ function refreshTable() {
         return;
     }
 
+    tableBatchRenderToken += 1;
+    const batchToken = tableBatchRenderToken;
+
+    if (entries.length === 0) {
+        renderedTableUrlSet = new Set();
+        resultsTable.innerHTML = '';
+        finishTableRefresh(entries, poolSize);
+        return;
+    }
+
     if (entries.length >= TABLE_BATCH_RENDER_THRESHOLD) {
-        tableBatchRenderToken += 1;
-        refreshTableBatched(entries, poolSize, 0, tableBatchRenderToken);
+        refreshTableBatched(entries, poolSize, 0, batchToken);
         return;
     }
 
@@ -1785,7 +1935,21 @@ function requestRefreshTable({ immediate = false } = {}) {
 function upsertScanResult(incoming, { deferUi = false } = {}) {
     const data = normalizeLinkEntry(incoming);
     const existing = scanResults.get(data.url);
-    if (existing?.fetched !== false && data.fetched === false) {
+    if (existing && existing.fetched !== false && data.fetched === false) {
+        const enrichesResource = isJavascriptResource(data) || isCssResource(data) || isMediaResource(data);
+        const enrichesCrawledAsset = existing
+            && !isHtmlContentType(existing.contentType || '')
+            && (data.kind || data.tag);
+        if (existing && (enrichesResource || enrichesCrawledAsset)) {
+            scanResults.set(data.url, normalizeLinkEntry({
+                ...existing,
+                kind: data.kind || existing.kind,
+                tag: data.tag || existing.tag,
+                text: data.text || existing.text,
+                title: data.title || existing.title,
+            }));
+            return true;
+        }
         return false;
     }
     const isNew = !existing;
@@ -1824,23 +1988,24 @@ function upsertScanResultsBatch(items) {
         return;
     }
 
-    let added = false;
+    let changed = false;
     for (const incoming of items) {
         if (upsertScanResult(incoming, { deferUi: true })) {
-            added = true;
+            changed = true;
         }
     }
 
-    if (!added) {
-        return;
-    }
-
-    if (uiState === 'running') {
+    if (!changed) {
         return;
     }
 
     invalidateOutgoingLinksCache();
     invalidateDuplicateCounts();
+
+    if (uiState === 'running') {
+        return;
+    }
+
     maybeUpdateContentTypeFilterOptions();
     requestRefreshTable();
 }
@@ -1903,6 +2068,32 @@ if (sourceFilter) {
         setActiveSourceFilter(sourceFilter.value);
         requestRefreshTable({ immediate: true });
         scheduleWorkspacePersist();
+    });
+}
+
+function scheduleSearchRefresh() {
+    if (searchRefreshTimer) {
+        return;
+    }
+    searchRefreshTimer = setTimeout(() => {
+        searchRefreshTimer = null;
+        requestRefreshTable({ immediate: true });
+        scheduleWorkspacePersist();
+    }, SEARCH_REFRESH_DELAY_MS);
+}
+
+if (tableSearch) {
+    tableSearch.addEventListener('input', () => {
+        activeSearchQuery = tableSearch.value;
+        scheduleSearchRefresh();
+    });
+    tableSearch.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+            tableSearch.value = '';
+            activeSearchQuery = '';
+            requestRefreshTable({ immediate: true });
+            scheduleWorkspacePersist();
+        }
     });
 }
 
@@ -2079,17 +2270,12 @@ function buildDetailRows(data) {
 function getFilteredOutgoingLinks(pageUrl) {
     let links = getOutgoingLinksFrom(pageUrl);
     if (activeSourceFilter === 'external') {
-        links = links.filter(isExternalLink);
+        links = links.filter((link) => isExternalLink(link));
     } else if (activeSourceFilter === 'internal') {
         links = links.filter((link) => !isExternalLink(link));
     }
     if (activeContentFilter !== 'all') {
-        links = links.filter((link) => {
-            if (activeContentFilter === 'html') {
-                return !isDiscoveredOnly(link) && getCrawledResourceKind(link) === 'html';
-            }
-            return matchesActiveContentFilter(getResourceKind(link));
-        });
+        links = links.filter(matchesResourceTypeFilter);
     }
     return links;
 }
@@ -2367,6 +2553,8 @@ function finalizeScanUi(message) {
         setUIState('idle');
     }
     requestAnimationFrame(() => {
+        materializeDiscoveredFromReferrers();
+        reinferAllLinkKinds();
         invalidateOutgoingLinksCache();
         invalidateDuplicateCounts();
         maybeUpdateContentTypeFilterOptions();
@@ -2381,24 +2569,6 @@ window.api.onSpiderEnd((message) => {
 
 window.api.onSpiderProgress((progress) => {
     if (progress.finished) {
-        lastScanProgress = progress;
-        statusText.textContent = progress.status || 'Сканування завершено!';
-        statusScanned.textContent = `Проскановано: ${progress.scanned ?? 0}`;
-        statusQueue.textContent = 'У черзі: 0';
-        if (statusActive) {
-            statusActive.textContent = 'Активних: 0';
-        }
-        if (statusRate) {
-            statusRate.textContent = 'Швидкість: —';
-        }
-        if (urlInputProgress) {
-            urlInputProgress.style.width = '100%';
-        }
-        if (urlInputWrap) {
-            urlInputWrap.classList.remove('url-input-scanning');
-        }
-        cancelPendingRefreshTable();
-        setUIState('idle');
         return;
     }
     // Лише синхронізуємо паузу з бекенду; не відновлюємо running автоматично —

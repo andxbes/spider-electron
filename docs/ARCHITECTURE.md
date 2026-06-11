@@ -1,6 +1,6 @@
 # Spider-Electron — внутрішня документація
 
-> Останнє оновлення: 2026-06-11 (layout w-full, відкладений старт, батч-рендер таблиці)  
+> Останнє оновлення: 2026-06-11 (фікс JS/CSS у таблиці, materialize з referrers)  
 > Короткий довідник для розробки та правок. Детальніше про підтримку — [DOC_MAINTENANCE.md](./DOC_MAINTENANCE.md).
 
 ## Що це
@@ -64,9 +64,9 @@ Renderer
 5. **4xx/5xx** — `status: 'ERROR'`.
 6. **200** — cheerio: title, meta description, canonical, headings, link count → `spider-result`.
 7. Якщо `<meta name="robots" content="nofollow">` — не додає нові посилання.
-8. Збір URL з HTML: `<a>`, `<link>`, `<script>`, `<img>`, … — кожен URL одразу потрапляє в **єдиний плоский список** (`spider-result` на renderer). **Завантажуються** лише внутрішні навігаційні: `a[href]`, `area[href]`, `form[action]`, внутрішні `iframe[src]` (HTML). Зовнішні та не-HTML (JS, CSS, медіа) — `fetched: false`, поле `external: true/false`; HTTP-запит не робиться. Кожен завантажений URL — один раз (`visitedUrls`).
+8. Збір URL з HTML: `<a>`, `<link>`, `<script>`, `<img>`, … — завантажені сторінки через `spider-result`; JS/CSS/медіа та зовнішні — пакетом `spider-results-batch` (`fetched: false`). **Завантажуються** лише внутрішні навігаційні: `a[href]`, `area[href]`, `form[action]`, внутрішні `iframe[src]` (HTML). Для не-навігаційних ресурсів (скрипти, стилі, медіа) stub створюється **завжди**, навіть якщо URL у черзі; для навігаційних — лише якщо URL ще не обійдений і не в черзі.
 
-**Завершення:** порожня черга або досягнуто `maxPages` (якщо > 0) → `spider-referrers-update` → `spider-end`.
+**Завершення:** порожня черга або досягнуто `maxPages` (якщо > 0) → `spider-referrers-update` → `spider-end`. На renderer після referrers — `materializeDiscoveredFromReferrers()`: URL з referrers, яких немає в `scanResults`, додаються як знайдені (`fetched: false`).
 
 ## Константи (hardcoded у `main.js`)
 
@@ -127,7 +127,7 @@ Renderer
 
 - **Тип** — класифікація **самого URL** в `scanResults`:
   - `HTML` — завантажені URL з `Content-Type: text/html` / `application/xhtml`;
-  - `JavaScript` / `CSS` / `Media` / `Other` — за `kind`, тегом і розширенням URL;
+  - `JavaScript` / `CSS` / `Media` — за `kind`, тегом (`script[src]`, `link[rel=stylesheet]`) і розширенням URL;
   - `Усі` — усі записи в `scanResults`.
 - **Джерело** — `external: true/false` (або `hostname` URL).
 - Стан фільтрів — `activeContentFilter`, `activeSourceFilter` у пам’яті; не скидається під час сканування.
