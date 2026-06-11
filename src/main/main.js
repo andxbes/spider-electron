@@ -909,8 +909,8 @@ function buildDiscoveredLinkResult(link) {
     return buildSpiderResult({
         url: link.url,
         status: '',
-        title: link.text || '',
-        text: link.text || '',
+        title: '',
+        text: String(link.text || '').trim(),
         external: Boolean(link.external),
         fetched: false,
         kind: link.kind || '',
@@ -1209,7 +1209,7 @@ async function crawl(url, referrer, browserWindow) {
             browserWindow.webContents.send('spider-result', buildResultWithIndexing(robots, robotsText, currentUrl, {
                 status: response.status,
                 url: currentUrl,
-                title: contentType || 'Медіа / не-HTML',
+                title: '',
                 referrers: pageReferrers,
                 contentType,
                 responseTimeMs,

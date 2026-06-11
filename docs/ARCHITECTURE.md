@@ -1,6 +1,6 @@
 # Spider-Electron — внутрішня документація
 
-> Останнє оновлення: 2026-06-11 (rel на ребрах referrer, сортування таблиці посилань)  
+> Останнє оновлення: 2026-06-11 (title лише для HTML; ресурси без title)  
 > Короткий довідник для розробки та правок. Детальніше про підтримку — [DOC_MAINTENANCE.md](./DOC_MAINTENANCE.md).
 
 ## Що це
@@ -107,7 +107,7 @@ Renderer
   kind?: string,
   tag?: string,
   text?: string,
-  title?: string,
+  title?: string,          // лише HTML-сторінки; JS/CSS/media — порожній
   referrers: [{
     href: string,
     text: string,

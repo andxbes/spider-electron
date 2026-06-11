@@ -293,6 +293,27 @@ function isDiscoveredOnly(data) {
     return data.status === '' && !data.contentType;
 }
 
+function shouldHavePageTitle(data) {
+    if (isJavascriptResource(data) || isCssResource(data) || isMediaResource(data)) {
+        return false;
+    }
+    if (isDiscoveredOnly(data)) {
+        return false;
+    }
+    const contentType = data.contentType || '';
+    if (contentType && !isHtmlContentType(contentType)) {
+        return false;
+    }
+    return true;
+}
+
+function getPageTitle(data) {
+    if (!shouldHavePageTitle(data)) {
+        return '';
+    }
+    return String(data.title || '').trim();
+}
+
 function getResourceKind(data) {
     if (isJavascriptResource(data)) {
         return 'javascript';
@@ -519,7 +540,7 @@ function materializeDiscoveredFromReferrers() {
         if (upsertScanResult({
             url,
             status: '',
-            title: refText,
+            title: '',
             text: refText,
             external: isExternalUrl(url),
             fetched: false,
@@ -698,7 +719,7 @@ function normalizeLegacyLink(link) {
         relIndexAllowed: link.relIndexAllowed ?? null,
         relLabel: link.relLabel || '',
         status: '',
-        title: link.text || '',
+        title: '',
         fetched: false,
     };
 }
@@ -724,13 +745,17 @@ function normalizeLinkEntry(data) {
             kind = inferred === 'images' ? 'media' : inferred;
         }
     }
-    return {
+    const entry = {
         ...data,
         url,
         external,
         kind,
         tag,
         fetched,
+    };
+    return {
+        ...entry,
+        title: getPageTitle(entry),
     };
 }
 
@@ -1086,8 +1111,10 @@ function getDuplicateCounts() {
     if (!duplicateCountsCache) {
         duplicateCountsCache = {
             h1: buildH1DuplicateCounts(),
-            title: buildFieldDuplicateCounts((data) => data.title),
-            description: buildFieldDuplicateCounts((data) => data.metaDescription),
+            title: buildFieldDuplicateCounts((data) => getPageTitle(data)),
+            description: buildFieldDuplicateCounts((data) => (
+                shouldHavePageTitle(data) ? String(data.metaDescription || '').trim() : ''
+            )),
         };
     }
     return duplicateCountsCache;
@@ -1114,6 +1141,20 @@ function duplicateCountBadge(count) {
         return '';
     }
     return `<span class="text-amber-600 font-semibold ml-1" title="Таких самих на ${count} сторінках">×${count}</span>`;
+}
+
+function referenceCountBadge(count) {
+    if (!count || count <= 1) {
+        return '';
+    }
+    return `<span class="text-amber-600 font-semibold ml-1" title="Підключено на ${count} сторінках">×${count}</span>`;
+}
+
+function titleCellBadge(data, dupCounts, inCount) {
+    if (!shouldHavePageTitle(data)) {
+        return referenceCountBadge(inCount);
+    }
+    return duplicateCountBadge(getTextDuplicateCount(getPageTitle(data), dupCounts.title));
 }
 
 function setScanHostnameFromUrl(startUrl) {
@@ -1195,7 +1236,7 @@ function passesTableFilters(data) {
         if (activeDuplicateFilter === 'h1' && !hasDuplicateH1(data, counts.h1)) {
             return false;
         }
-        if (activeDuplicateFilter === 'title' && !hasDuplicateField(data.title, counts.title)) {
+        if (activeDuplicateFilter === 'title' && !hasDuplicateField(getPageTitle(data), counts.title)) {
             return false;
         }
         if (activeDuplicateFilter === 'description' && !hasDuplicateField(data.metaDescription, counts.description)) {
@@ -1758,8 +1799,8 @@ function compareRows(a, b) {
             vb = b.responseTimeMs ?? -1;
             break;
         case 'title':
-            va = (a.title || '').toLowerCase();
-            vb = (b.title || '').toLowerCase();
+            va = getPageTitle(a).toLowerCase();
+            vb = getPageTitle(b).toLowerCase();
             break;
         case 'h1':
             va = getPrimaryH1Text(a).toLowerCase();
@@ -1813,8 +1854,8 @@ function createTableRow(data, displayIndex) {
     const { inCount, linkCount, internalCount, externalCount } = getRowMetrics(data);
     const dupCounts = getDuplicateCounts();
     const linksTitle = `Всього: ${linkCount}, внутрішніх: ${internalCount}, зовнішніх: ${externalCount}`;
-    const titleDup = getTextDuplicateCount(data.title, dupCounts.title);
     const descDup = getTextDuplicateCount(data.metaDescription, dupCounts.description);
+    const pageTitle = getPageTitle(data);
     const tr = document.createElement('tr');
     tr.dataset.url = data.url;
     tr.className = 'border-b border-zinc-100 cursor-pointer hover:bg-zinc-50';
@@ -1830,8 +1871,8 @@ function createTableRow(data, displayIndex) {
         <td class="p-2">${metaRobotsCellHtml(data)}</td>
         <td class="p-2">${robotsTxtCellHtml(data)}</td>
         <td class="p-2">${h1CellHtml(data, dupCounts)}</td>
-        <td class="p-2" title="${escapeHtml(data.title)}">${escapeHtml(truncate(data.title, 50))}${duplicateCountBadge(titleDup)}</td>
-        <td class="p-2" title="${escapeHtml(data.metaDescription)}">${escapeHtml(truncate(data.metaDescription, 60))}${duplicateCountBadge(descDup)}</td>
+        <td class="p-2" title="${escapeHtml(pageTitle)}">${pageTitle ? escapeHtml(truncate(pageTitle, 50)) : '<span class="text-zinc-400 italic">—</span>'}${titleCellBadge(data, dupCounts, inCount)}</td>
+        <td class="p-2" title="${escapeHtml(data.metaDescription)}">${data.metaDescription ? escapeHtml(truncate(data.metaDescription, 60)) : '<span class="text-zinc-400 italic">—</span>'}${shouldHavePageTitle(data) ? duplicateCountBadge(descDup) : ''}</td>
         <td class="p-2 text-center" title="${escapeHtml(linksTitle)}">${linkCount}</td>
         <td class="p-2 text-center">${inCount}</td>
         <td class="p-2 text-center text-emerald-700">${internalCount}</td>
@@ -1984,7 +2025,6 @@ function upsertScanResult(incoming, { deferUi = false } = {}) {
                 kind: data.kind || existing.kind,
                 tag: data.tag || existing.tag,
                 text: data.text || existing.text,
-                title: data.title || existing.title,
             }));
             return true;
         }
@@ -2317,8 +2357,8 @@ function buildDetailRows(data) {
         ['Content-Type', escapeHtml(data.contentType) || '<span class="text-zinc-400 italic">—</span>'],
         ['Response Time (ms)', data.responseTimeMs ?? '—'],
         ['Resource Type', escapeHtml(formatLinkKindLabel(getResourceKind(data)))],
-        ['Title', escapeHtml(data.title)],
-        ['Title Length', data.title ? String(data.title.length) : '0'],
+        ['Title', getPageTitle(data) ? escapeHtml(getPageTitle(data)) : '<span class="text-zinc-400 italic">—</span>'],
+        ['Title Length', getPageTitle(data) ? String(getPageTitle(data).length) : '0'],
         ['Meta Description', escapeHtml(data.metaDescription) || '<span class="text-zinc-400 italic">—</span>'],
         ['Meta Description Length', data.metaDescription ? String(data.metaDescription.length) : '0'],
         ['Canonical', data.metaCanonical ? urlCellHtml(data.metaCanonical) : '<span class="text-zinc-400 italic">—</span>'],
@@ -2344,12 +2384,14 @@ function buildDetailRows(data) {
     ];
 
     const dupCounts = getDuplicateCounts();
-    const titleDup = getTextDuplicateCount(data.title, dupCounts.title);
+    const titleDup = getTextDuplicateCount(getPageTitle(data), dupCounts.title);
     const descDup = getTextDuplicateCount(data.metaDescription, dupCounts.description);
-    if (titleDup > 1) {
+    if (!shouldHavePageTitle(data) && inCount > 1) {
+        rows.push(['Підключень', `<span class="text-amber-600 font-semibold">${inCount} сторінок</span>`]);
+    } else if (titleDup > 1) {
         rows.push(['Дублікатів Title', `<span class="text-amber-600 font-semibold">${titleDup} сторінок</span>`]);
     }
-    if (descDup > 1) {
+    if (shouldHavePageTitle(data) && descDup > 1) {
         rows.push(['Дублікатів Meta Description', `<span class="text-amber-600 font-semibold">${descDup} сторінок</span>`]);
     }
     const h1DupEntries = getH1Texts(data)
@@ -2443,7 +2485,7 @@ exportButton.addEventListener('click', () => {
             `"${(data.contentType || '').replace(/"/g, '""')}"`,
             `"${data.responseTimeMs ?? ''}"`,
             `"${getResourceType(data)}"`,
-            `"${(data.title || '').replace(/"/g, '""')}"`,
+            `"${getPageTitle(data).replace(/"/g, '""')}"`,
             `"${(data.metaDescription || '').replace(/"/g, '""')}"`,
             `"${(data.metaCanonical || '').replace(/"/g, '""')}"`,
             `"${metrics.linkCount}"`,
