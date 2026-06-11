@@ -1,6 +1,6 @@
 # Spider-Electron — внутрішня документація
 
-> Останнє оновлення: 2026-06-11 (список зовнішніх посилань)  
+> Останнє оновлення: 2026-06-11 (типи зовнішніх ресурсів)  
 > Короткий довідник для розробки та правок. Детальніше про підтримку — [DOC_MAINTENANCE.md](./DOC_MAINTENANCE.md).
 
 ## Що це
@@ -64,7 +64,7 @@ Renderer
 5. **4xx/5xx** — `status: 'ERROR'`.
 6. **200** — cheerio: title, meta description, canonical, headings, link count → `spider-result`.
 7. Якщо `<meta name="robots" content="nofollow">` — не додає нові посилання.
-8. Збір усіх вихідних посилань (`<a href>`, медіа-ресурси) → `outlinks` з прапорцем `external` (інший `hostname`). У чергу та `referrersMap` потрапляють лише внутрішні.
+8. Збір вихідних URL з HTML: `<a>`, `<link>`, `<script>`, `<img>`, `<video>`, `<audio>`, `<iframe>`, `<embed>`, `<object>`, `<form>`, `<area>`, `<input type="image">` → `outlinks` з полями `external` та `kind` (html, javascript, css, images, media, fonts, xml, pdf, plugins, other, unknown). У чергу потрапляють лише внутрішні.
 
 **Завершення:** порожня черга або досягнуто `maxPages` (якщо > 0) → `spider-referrers-update` → `spider-end`.
 
@@ -108,7 +108,7 @@ Renderer
   linkCount?: number,
   headings?: [{ level: number, text: string }],
   redirectUrl?: string,
-  outlinks?: [{ href: string, text: string, external?: boolean }]
+  outlinks?: [{ href: string, text: string, external?: boolean, kind?: string, tag?: string }]
 }
 ```
 

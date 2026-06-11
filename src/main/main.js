@@ -208,24 +208,204 @@ function isSkippableHref(href) {
         || value === '#';
 }
 
+const OUTLINK_IMAGE_EXTENSIONS = new Set([
+    'jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'ico', 'bmp', 'avif', 'tif', 'tiff',
+]);
+const OUTLINK_MEDIA_EXTENSIONS = new Set([
+    'mp4', 'webm', 'ogv', 'mov', 'avi', 'mkv', 'mp3', 'ogg', 'wav', 'flac', 'aac', 'm4a',
+]);
+const OUTLINK_FONT_EXTENSIONS = new Set(['woff', 'woff2', 'ttf', 'eot', 'otf']);
+const OUTLINK_PLUGIN_EXTENSIONS = new Set(['swf', 'flv']);
+const OUTLINK_HTML_EXTENSIONS = new Set(['html', 'htm', 'php', 'asp', 'aspx', 'jsp', 'shtml']);
+
+function getUrlPathnameLower(href) {
+    try {
+        return new URL(href).pathname.toLowerCase();
+    } catch {
+        return '';
+    }
+}
+
+function looksLikeJavascriptUrl(href, ext, pathLower) {
+    return ext === 'js' || ext === 'mjs' || ext === 'map'
+        || pathLower.endsWith('.js')
+        || pathLower.endsWith('/js')
+        || pathLower.includes('.js/')
+        || pathLower.includes('/js/');
+}
+
+function classifyOutlinkKind(href, { element = '', rel = '', as = '' } = {}) {
+    const ext = getUrlExtension(href);
+    const relLower = String(rel || '').toLowerCase();
+    const elementLower = String(element || '').toLowerCase();
+    const asLower = String(as || '').toLowerCase();
+    const pathLower = getUrlPathnameLower(href);
+
+    if (elementLower === 'script') {
+        return 'javascript';
+    }
+    if (elementLower === 'iframe') {
+        return 'html';
+    }
+    if (elementLower === 'stylesheet') {
+        return 'css';
+    }
+    if (elementLower === 'embed' || elementLower === 'object') {
+        return 'plugins';
+    }
+    if (elementLower === 'video' || elementLower === 'audio') {
+        return 'media';
+    }
+    if (elementLower === 'image' || elementLower === 'icon') {
+        return 'images';
+    }
+
+    if (asLower === 'script' || looksLikeJavascriptUrl(href, ext, pathLower)) {
+        return 'javascript';
+    }
+    if (asLower === 'style' || elementLower === 'stylesheet' || relLower.includes('stylesheet') || ext === 'css') {
+        return 'css';
+    }
+    if (asLower === 'font' || relLower.includes('font') || OUTLINK_FONT_EXTENSIONS.has(ext)) {
+        return 'fonts';
+    }
+    if (asLower === 'image' || relLower.includes('icon') || relLower.includes('apple-touch-icon') || OUTLINK_IMAGE_EXTENSIONS.has(ext)) {
+        return 'images';
+    }
+    if (OUTLINK_MEDIA_EXTENSIONS.has(ext)) {
+        return 'media';
+    }
+    if (ext === 'xml' || ext === 'rss' || ext === 'atom') {
+        return 'xml';
+    }
+    if (ext === 'pdf') {
+        return 'pdf';
+    }
+    if (OUTLINK_PLUGIN_EXTENSIONS.has(ext)) {
+        return 'plugins';
+    }
+    if (relLower.includes('modulepreload') || relLower.includes('preload') || relLower.includes('prefetch')) {
+        if (asLower === 'script' || looksLikeJavascriptUrl(href, ext, pathLower)) {
+            return 'javascript';
+        }
+        if (asLower === 'style' || ext === 'css') {
+            return 'css';
+        }
+        if (asLower === 'font' || OUTLINK_FONT_EXTENSIONS.has(ext)) {
+            return 'fonts';
+        }
+        if (asLower === 'image' || OUTLINK_IMAGE_EXTENSIONS.has(ext)) {
+            return 'images';
+        }
+        if (asLower === 'fetch' || asLower === 'document') {
+            return 'html';
+        }
+        return 'other';
+    }
+    if (elementLower === 'anchor' || elementLower === 'area') {
+        if (!ext || OUTLINK_HTML_EXTENSIONS.has(ext)) {
+            return 'html';
+        }
+    }
+    if (asLower === 'fetch' || asLower === 'document') {
+        return 'html';
+    }
+    if (relLower.includes('alternate') || relLower.includes('canonical') || relLower.includes('manifest')) {
+        return 'html';
+    }
+    if (relLower.includes('preconnect') || relLower.includes('dns-prefetch')) {
+        return 'other';
+    }
+    if (elementLower === 'link' && !ext) {
+        return 'other';
+    }
+    if (!ext) {
+        if (elementLower === 'anchor' || elementLower === 'area') {
+            return 'html';
+        }
+        return 'unknown';
+    }
+    return 'other';
+}
+
+function formatOutlinkTag({ element = '', rel = '', as = '', tag = '' } = {}) {
+    if (tag) {
+        return tag;
+    }
+    const relLower = String(rel || '').toLowerCase().trim();
+    const asValue = String(as || '').trim();
+    switch (element) {
+        case 'anchor':
+            return 'a[href]';
+        case 'area':
+            return 'area[href]';
+        case 'script':
+            return 'script[src]';
+        case 'stylesheet':
+            return 'link[rel=stylesheet]';
+        case 'icon':
+            return 'link[rel=icon]';
+        case 'iframe':
+            return 'iframe[src]';
+        case 'embed':
+            return 'embed[src]';
+        case 'object':
+            return 'object[data]';
+        case 'form':
+            return 'form[action]';
+        case 'image':
+            return 'img[src]';
+        case 'video':
+            return 'video[src]';
+        case 'audio':
+            return 'audio[src]';
+        default:
+            break;
+    }
+    if (relLower.includes('modulepreload')) {
+        return 'link[rel=modulepreload]';
+    }
+    if (relLower.includes('preload')) {
+        return asValue ? `link[rel=preload][as=${asValue}]` : 'link[rel=preload]';
+    }
+    if (relLower.includes('prefetch')) {
+        return 'link[rel=prefetch]';
+    }
+    if (relLower.includes('preconnect')) {
+        return 'link[rel=preconnect]';
+    }
+    if (relLower.includes('dns-prefetch')) {
+        return 'link[rel=dns-prefetch]';
+    }
+    if (relLower) {
+        return `link[rel=${relLower.split(/\s+/)[0]}]`;
+    }
+    return 'link[href]';
+}
+
 function collectPageOutlinks($, currentUrl, allowedHostname) {
     const outlinks = [];
     const seen = new Set();
 
-    const addOutlink = (href, text = '') => {
+    const addOutlink = (href, text = '', context = {}) => {
         if (isSkippableHref(href)) {
             return;
         }
         try {
             const absoluteUrl = normalizePageUrl(new URL(href, currentUrl).href);
-            if (seen.has(absoluteUrl)) {
+            const tag = formatOutlinkTag(context);
+            const kind = classifyOutlinkKind(absoluteUrl, context);
+            const seenKey = `${tag}\0${absoluteUrl}`;
+            if (seen.has(seenKey)) {
                 return;
             }
-            seen.add(absoluteUrl);
+            seen.add(seenKey);
             outlinks.push({
                 href: absoluteUrl,
                 text: String(text || '').trim().slice(0, 200),
                 external: !isSameHost(absoluteUrl, allowedHostname),
+                kind,
+                tag,
             });
         } catch {
             // невалідний URL
@@ -233,39 +413,87 @@ function collectPageOutlinks($, currentUrl, allowedHostname) {
     };
 
     $('a[href]').each((_, link) => {
-        addOutlink($(link).attr('href'), extractElementText($, link));
+        addOutlink($(link).attr('href'), extractElementText($, link), { element: 'anchor' });
+    });
+
+    $('area[href]').each((_, area) => {
+        addOutlink($(area).attr('href'), $(area).attr('alt') || 'area', { element: 'area' });
+    });
+
+    $('link[href]').each((_, link) => {
+        const el = $(link);
+        const rel = el.attr('rel') || '';
+        const relLower = rel.toLowerCase();
+        const as = el.attr('as') || '';
+        let element = 'link';
+        if (relLower.includes('stylesheet')) {
+            element = 'stylesheet';
+        } else if (relLower.includes('icon') || relLower.includes('apple-touch-icon')) {
+            element = 'icon';
+        } else if (relLower.includes('modulepreload')) {
+            element = 'script';
+        } else if (relLower.includes('preload') || relLower.includes('prefetch')) {
+            element = as || 'link';
+        }
+        addOutlink(el.attr('href'), rel || 'link', { element, rel, as });
+    });
+
+    $('script[src]').each((_, script) => {
+        addOutlink($(script).attr('src'), 'script', { element: 'script' });
+    });
+
+    $('iframe[src]').each((_, frame) => {
+        addOutlink($(frame).attr('src'), $(frame).attr('title') || 'iframe', { element: 'iframe' });
+    });
+
+    $('embed[src]').each((_, embed) => {
+        addOutlink($(embed).attr('src'), 'embed', { element: 'embed' });
+    });
+
+    $('object[data]').each((_, object) => {
+        addOutlink($(object).attr('data'), $(object).attr('title') || 'object', { element: 'object' });
+    });
+
+    $('form[action]').each((_, form) => {
+        addOutlink($(form).attr('action'), 'form', { element: 'form' });
+    });
+
+    $('input[type="image"][src]').each((_, input) => {
+        addOutlink($(input).attr('src'), $(input).attr('alt') || 'input', { tag: 'input[type=image][src]' });
     });
 
     $('img[src]').each((_, img) => {
         const el = $(img);
-        addOutlink(el.attr('src'), el.attr('alt') || el.attr('title') || 'image');
+        addOutlink(el.attr('src'), el.attr('alt') || el.attr('title') || 'image', { element: 'image' });
         const srcset = firstSrcsetUrl(el.attr('srcset'));
         if (srcset) {
-            addOutlink(srcset, el.attr('alt') || el.attr('title') || 'image');
+            addOutlink(srcset, el.attr('alt') || el.attr('title') || 'image', { tag: 'img[srcset]' });
         }
     });
 
     $('picture source[srcset], source[src]').each((_, source) => {
         const el = $(source);
-        addOutlink(el.attr('src'), 'media');
         const srcset = firstSrcsetUrl(el.attr('srcset'));
+        if (el.attr('src')) {
+            addOutlink(el.attr('src'), 'media', { tag: 'source[src]' });
+        }
         if (srcset) {
-            addOutlink(srcset, 'media');
+            addOutlink(srcset, 'media', { tag: 'source[srcset]' });
         }
     });
 
     $('video[src]').each((_, video) => {
-        addOutlink($(video).attr('src'), 'video');
+        addOutlink($(video).attr('src'), 'video', { element: 'video' });
     });
     $('video source[src]').each((_, source) => {
-        addOutlink($(source).attr('src'), 'video');
+        addOutlink($(source).attr('src'), 'video', { tag: 'video>source[src]' });
     });
 
     $('audio[src]').each((_, audio) => {
-        addOutlink($(audio).attr('src'), 'audio');
+        addOutlink($(audio).attr('src'), 'audio', { element: 'audio' });
     });
     $('audio source[src]').each((_, source) => {
-        addOutlink($(source).attr('src'), 'audio');
+        addOutlink($(source).attr('src'), 'audio', { tag: 'audio>source[src]' });
     });
 
     return outlinks;

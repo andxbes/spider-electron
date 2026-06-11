@@ -47,6 +47,55 @@ let activeDuplicateFilter = 'all';
 /** @type {'pages' | 'external'} */
 let activeExternalLinksFilter = 'pages';
 let scanHostname = '';
+
+const PAGE_CONTENT_TYPE_OPTIONS = [
+    { value: 'all', label: 'Усі' },
+    { value: 'html', label: 'HTML' },
+    { value: 'media', label: 'Медіа' },
+];
+
+const EXTERNAL_CONTENT_TYPE_OPTIONS = [
+    { value: 'all', label: 'Усі' },
+    { value: 'html', label: 'HTML' },
+    { value: 'javascript', label: 'JavaScript' },
+    { value: 'css', label: 'CSS' },
+    { value: 'images', label: 'Images' },
+    { value: 'media', label: 'Media' },
+    { value: 'fonts', label: 'Fonts' },
+    { value: 'xml', label: 'XML' },
+    { value: 'pdf', label: 'PDF' },
+    { value: 'plugins', label: 'Plugins' },
+    { value: 'other', label: 'Other' },
+    { value: 'unknown', label: 'Unknown' },
+];
+
+const OUTLINK_KIND_PRIORITY = [
+    'javascript', 'css', 'html', 'images', 'media', 'fonts', 'xml', 'pdf', 'plugins', 'other', 'unknown',
+];
+
+const OUTLINK_KIND_LABELS = {
+    html: 'HTML',
+    javascript: 'JavaScript',
+    css: 'CSS',
+    images: 'Images',
+    media: 'Media',
+    fonts: 'Fonts',
+    xml: 'XML',
+    pdf: 'PDF',
+    plugins: 'Plugins',
+    other: 'Other',
+    unknown: 'Unknown',
+};
+
+const OUTLINK_IMAGE_EXTENSIONS = new Set([
+    'jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'ico', 'bmp', 'avif', 'tif', 'tiff',
+]);
+const OUTLINK_MEDIA_EXTENSIONS = new Set([
+    'mp4', 'webm', 'ogv', 'mov', 'avi', 'mkv', 'mp3', 'ogg', 'wav', 'flac', 'aac', 'm4a',
+]);
+const OUTLINK_FONT_EXTENSIONS = new Set(['woff', 'woff2', 'ttf', 'eot', 'otf']);
+const OUTLINK_PLUGIN_EXTENSIONS = new Set(['swf', 'flv']);
+const OUTLINK_HTML_EXTENSIONS = new Set(['html', 'htm', 'php', 'asp', 'aspx', 'jsp', 'shtml']);
 let duplicateCountsCache = null;
 let externalLinksIndexCache = null;
 let latestReferrersByUrl = new Map();
@@ -348,6 +397,167 @@ function getExternalLinkHost(href) {
     }
 }
 
+function formatOutlinkKindLabel(kind) {
+    return OUTLINK_KIND_LABELS[kind] || kind || OUTLINK_KIND_LABELS.unknown;
+}
+
+function getUrlPathnameLower(href) {
+    try {
+        return new URL(href).pathname.toLowerCase();
+    } catch {
+        return '';
+    }
+}
+
+function looksLikeJavascriptUrl(href, ext, pathLower) {
+    return ext === 'js' || ext === 'mjs' || ext === 'map'
+        || pathLower.endsWith('.js')
+        || pathLower.endsWith('/js')
+        || pathLower.includes('.js/')
+        || pathLower.includes('/js/');
+}
+
+function inferOutlinkKind(link) {
+    if (link.kind && OUTLINK_KIND_LABELS[link.kind]) {
+        return link.kind;
+    }
+    const href = link.href || '';
+    const text = String(link.text || '').toLowerCase();
+    const ext = getUrlExtension(href);
+    const pathLower = getUrlPathnameLower(href);
+
+    if (text === 'script') {
+        return 'javascript';
+    }
+    if (text === 'iframe') {
+        return 'html';
+    }
+    if (text === 'embed' || text === 'object') {
+        return 'plugins';
+    }
+    if (text === 'video' || text === 'audio') {
+        return 'media';
+    }
+    if (text === 'image' || text === 'input') {
+        return 'images';
+    }
+    if (looksLikeJavascriptUrl(href, ext, pathLower)) {
+        return 'javascript';
+    }
+    if (text.includes('stylesheet') || ext === 'css') {
+        return 'css';
+    }
+    if (OUTLINK_FONT_EXTENSIONS.has(ext) || text.includes('font')) {
+        return 'fonts';
+    }
+    if (OUTLINK_IMAGE_EXTENSIONS.has(ext)) {
+        return 'images';
+    }
+    if (text === 'media' || OUTLINK_MEDIA_EXTENSIONS.has(ext)) {
+        return 'media';
+    }
+    if (ext === 'xml' || ext === 'rss' || ext === 'atom') {
+        return 'xml';
+    }
+    if (ext === 'pdf') {
+        return 'pdf';
+    }
+    if (OUTLINK_PLUGIN_EXTENSIONS.has(ext)) {
+        return 'plugins';
+    }
+    if (text.includes('preconnect') || text.includes('dns-prefetch')) {
+        return 'other';
+    }
+    if (text === 'form' || text === 'area' || !ext || OUTLINK_HTML_EXTENSIONS.has(ext)) {
+        return 'html';
+    }
+    if (text === 'link') {
+        return 'other';
+    }
+    if (!ext) {
+        return 'unknown';
+    }
+    return 'other';
+}
+
+function resolvePrimaryOutlinkKind(kinds) {
+    for (const kind of OUTLINK_KIND_PRIORITY) {
+        if (kinds.includes(kind)) {
+            return kind;
+        }
+    }
+    return kinds[0] || 'unknown';
+}
+
+function getContentTypeFilterOptions() {
+    return isExternalListView() ? EXTERNAL_CONTENT_TYPE_OPTIONS : PAGE_CONTENT_TYPE_OPTIONS;
+}
+
+function rebuildContentTypeFilterOptions({ preserveValue = true } = {}) {
+    if (!contentTypeFilter) {
+        return;
+    }
+    const options = getContentTypeFilterOptions();
+    const previous = preserveValue ? activeContentFilter : 'all';
+    contentTypeFilter.innerHTML = '';
+    for (const option of options) {
+        const el = document.createElement('option');
+        el.value = option.value;
+        el.textContent = option.label;
+        contentTypeFilter.appendChild(el);
+    }
+    const hasPrevious = options.some((option) => option.value === previous);
+    activeContentFilter = hasPrevious ? previous : 'all';
+    contentTypeFilter.value = activeContentFilter;
+}
+
+function getOutlinkKind(link) {
+    return inferOutlinkKind(link);
+}
+
+function inferOutlinkTag(link) {
+    if (link.tag) {
+        return link.tag;
+    }
+    const text = String(link.text || '').toLowerCase();
+    if (text === 'script') return 'script[src]';
+    if (text === 'iframe') return 'iframe[src]';
+    if (text === 'embed') return 'embed[src]';
+    if (text === 'object') return 'object[data]';
+    if (text === 'form') return 'form[action]';
+    if (text === 'video') return 'video[src]';
+    if (text === 'audio') return 'audio[src]';
+    if (text === 'image' || text === 'input') return 'img[src]';
+    if (text === 'area') return 'area[href]';
+    if (text === 'media') return 'source[src]';
+    if (text.startsWith('link') || text.includes('preload') || text.includes('preconnect') || text.includes('dns-prefetch')) {
+        const rel = text.replace(/^link\s*/i, '').trim();
+        if (rel) {
+            return `link[rel=${rel.split(/\s+/)[0]}]`;
+        }
+        return 'link[href]';
+    }
+    return 'a[href]';
+}
+
+function getOutlinkTag(link) {
+    return inferOutlinkTag(link);
+}
+
+function externalEntryHasKind(entry, kind) {
+    if (entry.kinds?.includes(kind)) {
+        return true;
+    }
+    return entry.sources.some((source) => source.kind === kind);
+}
+
+function passesExternalContentFilter(entry) {
+    if (activeContentFilter === 'all') {
+        return true;
+    }
+    return externalEntryHasKind(entry, activeContentFilter);
+}
+
 function buildExternalLinksIndex() {
     const map = new Map();
     for (const page of scanResults.values()) {
@@ -369,15 +579,25 @@ function buildExternalLinksIndex() {
             map.get(href).sources.push({
                 pageUrl: page.url,
                 text: link.text || '',
+                kind: getOutlinkKind(link),
+                tag: getOutlinkTag(link),
             });
         }
     }
 
-    return [...map.values()].map((entry) => ({
-        ...entry,
-        sourceCount: entry.sources.length,
-        sampleText: entry.sources.find((source) => source.text)?.text || '',
-    }));
+    return [...map.values()].map((entry) => {
+        const kinds = [...new Set(entry.sources.map((source) => source.kind))];
+        const tags = [...new Set(entry.sources.map((source) => source.tag))];
+        return {
+            ...entry,
+            kinds,
+            tags,
+            kind: resolvePrimaryOutlinkKind(kinds),
+            tag: tags[0] || 'a[href]',
+            sourceCount: entry.sources.length,
+            sampleText: entry.sources.find((source) => source.text)?.text || '',
+        };
+    });
 }
 
 function getExternalLinksIndex() {
@@ -392,13 +612,14 @@ function getExternalEntry(href) {
 }
 
 function getDisplayedExternalLinks() {
-    const entries = [...getExternalLinksIndex()];
+    const entries = getExternalLinksIndex().filter(passesExternalContentFilter);
+    const sorted = [...entries];
     if (sortState.column) {
-        entries.sort(compareExternalRows);
+        sorted.sort(compareExternalRows);
     } else {
-        entries.sort((a, b) => a.href.localeCompare(b.href));
+        sorted.sort((a, b) => a.href.localeCompare(b.href));
     }
-    return entries;
+    return sorted;
 }
 
 function compareExternalRows(a, b) {
@@ -415,6 +636,14 @@ function compareExternalRows(a, b) {
         case 'pages':
             va = a.sourceCount;
             vb = b.sourceCount;
+            break;
+        case 'kind':
+            va = formatOutlinkKindLabel(a.kind).toLowerCase();
+            vb = formatOutlinkKindLabel(b.kind).toLowerCase();
+            break;
+        case 'tag':
+            va = a.tag.toLowerCase();
+            vb = b.tag.toLowerCase();
             break;
         case 'text':
             va = a.sampleText.toLowerCase();
@@ -468,12 +697,13 @@ function updateDetailTabsVisibility() {
 
 function updatePageFiltersDisabled() {
     const disabled = isExternalListView();
-    for (const el of [contentTypeFilter, statusFilter, indexingFilter, h1Filter, duplicateFilter]) {
+    for (const el of [statusFilter, indexingFilter, h1Filter, duplicateFilter]) {
         if (el) {
             el.disabled = disabled;
             el.classList.toggle('opacity-50', disabled);
         }
     }
+    rebuildContentTypeFilterOptions();
 }
 
 function buildFieldDuplicateCounts(getValue) {
@@ -709,9 +939,6 @@ function resetTableFilters() {
     knownStatusCodes = new Set();
     invalidateDuplicateCounts();
     invalidateExternalLinksIndex();
-    if (contentTypeFilter) {
-        contentTypeFilter.value = 'all';
-    }
     if (statusFilter) {
         statusFilter.value = 'all';
     }
@@ -727,6 +954,7 @@ function resetTableFilters() {
     if (externalLinksFilter) {
         externalLinksFilter.value = 'pages';
     }
+    rebuildContentTypeFilterOptions({ preserveValue: false });
     updateTableHeadMode();
     updateDetailTabsVisibility();
     updatePageFiltersDisabled();
@@ -952,14 +1180,15 @@ function scheduleWorkspacePersist() {
 }
 
 function applyFilterState(filters) {
-    activeContentFilter = filters.content || 'all';
     activeStatusFilter = filters.status || 'all';
     activeIndexingFilter = filters.indexing || 'all';
     activeH1Filter = filters.h1 || 'all';
     activeDuplicateFilter = filters.duplicate || 'all';
     activeExternalLinksFilter = normalizeTableViewMode(filters.externalLinks);
-    if (contentTypeFilter) {
-        contentTypeFilter.value = activeContentFilter;
+    if (isExternalListView() && filters.externalType) {
+        activeContentFilter = filters.externalType;
+    } else {
+        activeContentFilter = filters.content || 'all';
     }
     if (statusFilter) {
         statusFilter.value = activeStatusFilter;
@@ -976,6 +1205,7 @@ function applyFilterState(filters) {
     if (externalLinksFilter) {
         externalLinksFilter.value = activeExternalLinksFilter;
     }
+    rebuildContentTypeFilterOptions();
     updateTableHeadMode();
     updateDetailTabsVisibility();
     updatePageFiltersDisabled();
@@ -1160,6 +1390,8 @@ function createExternalTableRow(entry, displayIndex) {
         <td class="p-2 text-zinc-400">${displayIndex}</td>
         <td class="p-2">${urlCellHtml(entry.href)}</td>
         <td class="p-2 font-mono text-zinc-600">${entry.host ? escapeHtml(entry.host) : '<span class="text-zinc-400 italic">—</span>'}</td>
+        <td class="p-2 text-zinc-600" title="${escapeHtml(entry.kinds.join(', '))}">${escapeHtml(formatOutlinkKindLabel(entry.kind))}${entry.kinds.length > 1 ? `<span class="text-zinc-400 text-[10px]">+${entry.kinds.length - 1}</span>` : ''}</td>
+        <td class="p-2 font-mono text-zinc-600 text-[11px]" title="${escapeHtml(entry.tags.join(', '))}">${escapeHtml(entry.tag)}${entry.tags.length > 1 ? `<span class="text-zinc-400 text-[10px]">+${entry.tags.length - 1}</span>` : ''}</td>
         <td class="p-2 text-center font-semibold">${entry.sourceCount}</td>
         <td class="p-2 text-zinc-600" title="${escapeHtml(entry.sampleText)}">${entry.sampleText ? escapeHtml(truncate(entry.sampleText, 60)) : '<span class="text-zinc-400 italic">—</span>'}</td>
     `;
@@ -1397,6 +1629,7 @@ if (externalLinksFilter) {
         } else {
             selectedExternalUrl = null;
         }
+        rebuildContentTypeFilterOptions({ preserveValue: false });
         updateTableHeadMode();
         updateDetailTabsVisibility();
         updatePageFiltersDisabled();
@@ -1469,9 +1702,13 @@ function renderLinkTable(links, emptyText, caption = '') {
                 const typeBadge = external
                     ? '<span class="inline-block ml-1 px-1 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-800 whitespace-nowrap" title="Зовнішнє посилання — не обходиться">зовн.</span>'
                     : '';
+                const kind = getOutlinkKind(link);
+                const tag = getOutlinkTag(link);
                 return `
         <tr class="border-b border-zinc-100 hover:bg-zinc-50${external ? ' bg-amber-50/40' : ''}">
             <td class="p-2">${urlCellHtml(link.href || link)}${typeBadge}</td>
+            <td class="p-2 text-zinc-500 whitespace-nowrap">${escapeHtml(formatOutlinkKindLabel(kind))}</td>
+            <td class="p-2 font-mono text-zinc-600 text-[11px] whitespace-nowrap">${escapeHtml(tag)}</td>
             <td class="p-2 text-zinc-600">${link.text ? escapeHtml(link.text) : '<span class="text-zinc-400 italic">—</span>'}</td>
         </tr>`;
             }
@@ -1481,6 +1718,8 @@ function renderLinkTable(links, emptyText, caption = '') {
         <thead class="bg-zinc-50 sticky top-0">
             <tr class="text-left text-zinc-500">
                 <th class="p-2 font-semibold">URL</th>
+                <th class="p-2 font-semibold w-24">Тип</th>
+                <th class="p-2 font-semibold min-w-[110px]">Тег</th>
                 <th class="p-2 font-semibold w-1/3">Текст посилання</th>
             </tr>
         </thead>
@@ -1570,6 +1809,8 @@ function renderSourcePagesTable(sources, emptyText, caption = '') {
             (source) => `
         <tr class="border-b border-zinc-100 hover:bg-zinc-50">
             <td class="p-2">${urlCellHtml(source.pageUrl)}</td>
+            <td class="p-2 text-zinc-500 whitespace-nowrap">${escapeHtml(formatOutlinkKindLabel(source.kind))}</td>
+            <td class="p-2 font-mono text-zinc-600 text-[11px] whitespace-nowrap">${escapeHtml(source.tag || '—')}</td>
             <td class="p-2 text-zinc-600">${source.text ? escapeHtml(source.text) : '<span class="text-zinc-400 italic">—</span>'}</td>
         </tr>`
         )
@@ -1578,6 +1819,8 @@ function renderSourcePagesTable(sources, emptyText, caption = '') {
         <thead class="bg-zinc-50 sticky top-0">
             <tr class="text-left text-zinc-500">
                 <th class="p-2 font-semibold">Сторінка</th>
+                <th class="p-2 font-semibold w-24">Тип</th>
+                <th class="p-2 font-semibold min-w-[110px]">Тег</th>
                 <th class="p-2 font-semibold w-1/3">Текст посилання</th>
             </tr>
         </thead>
@@ -1586,9 +1829,17 @@ function renderSourcePagesTable(sources, emptyText, caption = '') {
 }
 
 function buildExternalDetailRows(entry) {
+    const kindLabel = entry.kinds.length > 1
+        ? entry.kinds.map((kind) => formatOutlinkKindLabel(kind)).join(', ')
+        : formatOutlinkKindLabel(entry.kind);
+    const tagLabel = entry.tags.length > 1
+        ? entry.tags.join(', ')
+        : entry.tag;
     return [
         ['Зовнішній URL', urlCellHtml(entry.href)],
         ['Host', entry.host ? escapeHtml(entry.host) : '<span class="text-zinc-400 italic">—</span>'],
+        ['Тип', escapeHtml(kindLabel)],
+        ['Тег', `<span class="font-mono">${escapeHtml(tagLabel)}</span>`],
         ['Сторінок-джерел', String(entry.sourceCount)],
         ['Текст посилання', entry.sampleText ? escapeHtml(entry.sampleText) : '<span class="text-zinc-400 italic">—</span>'],
     ];
@@ -1650,17 +1901,25 @@ exportButton.addEventListener('click', () => {
             alert('Немає зовнішніх посилань для експорту.');
             return;
         }
-        const headers = ['External URL', 'Host', 'Source Pages Count', 'Source Pages', 'Link Texts'];
+        const headers = ['External URL', 'Host', 'Type', 'Tag', 'Source Pages Count', 'Source Pages', 'Link Texts', 'Source Types', 'Source Tags'];
         const csvRows = [headers.join(',')];
         for (const entry of entries) {
             const pages = entry.sources.map((source) => source.pageUrl).join('; ');
             const texts = entry.sources.map((source) => source.text || '—').join('; ');
+            const sourceTypes = entry.sources.map((source) => formatOutlinkKindLabel(source.kind)).join('; ');
+            const sourceTags = entry.sources.map((source) => source.tag || '—').join('; ');
+            const kindLabel = entry.kinds.map((kind) => formatOutlinkKindLabel(kind)).join('; ');
+            const tagLabel = entry.tags.join('; ');
             csvRows.push([
                 `"${entry.href.replace(/"/g, '""')}"`,
                 `"${entry.host.replace(/"/g, '""')}"`,
+                `"${kindLabel.replace(/"/g, '""')}"`,
+                `"${tagLabel.replace(/"/g, '""')}"`,
                 `"${entry.sourceCount}"`,
                 `"${pages.replace(/"/g, '""')}"`,
                 `"${texts.replace(/"/g, '""')}"`,
+                `"${sourceTypes.replace(/"/g, '""')}"`,
+                `"${sourceTags.replace(/"/g, '""')}"`,
             ].join(','));
         }
         const blob = new Blob([bom + csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
