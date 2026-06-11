@@ -26,7 +26,16 @@ function cloneResultEntry(data) {
             ? data.referrers.map((ref) => (
                 typeof ref === 'string'
                     ? { href: ref, text: '' }
-                    : { href: ref.href ?? '', text: ref.text ?? '' }
+                    : {
+                        href: ref.href ?? '',
+                        text: ref.text ?? '',
+                        rel: ref.rel ?? '',
+                        tag: ref.tag ?? '',
+                        kind: ref.kind ?? '',
+                        relFollowAllowed: ref.relFollowAllowed ?? null,
+                        relIndexAllowed: ref.relIndexAllowed ?? null,
+                        relLabel: ref.relLabel ?? '',
+                    }
             ))
             : [],
         headings: Array.isArray(data.headings) ? data.headings.map((heading) => ({ ...heading })) : [],

@@ -1,6 +1,6 @@
 # Spider-Electron — внутрішня документація
 
-> Останнє оновлення: 2026-06-11 (фікс JS/CSS у таблиці, materialize з referrers)  
+> Останнє оновлення: 2026-06-11 (rel на ребрах referrer, сортування таблиці посилань)  
 > Короткий довідник для розробки та правок. Детальніше про підтримку — [DOC_MAINTENANCE.md](./DOC_MAINTENANCE.md).
 
 ## Що це
@@ -108,7 +108,16 @@ Renderer
   tag?: string,
   text?: string,
   title?: string,
-  referrers: [{ href: string, text: string }],
+  referrers: [{
+    href: string,
+    text: string,
+    rel?: string,
+    tag?: string,
+    kind?: string,
+    relFollowAllowed?: boolean | null,
+    relIndexAllowed?: boolean | null,
+    relLabel?: string,
+  }],
   contentType?: string,
   metaDescription?: string,
   metaCanonical?: string,
@@ -134,6 +143,8 @@ Renderer
 - Інші фільтри: статус HTTP, індексація, H1, дублікати.
 
 Колонки **Внутр.** / **Зовн.** — кількість посилань **з** обраної сторінки (через `referrersMap`: хто посилається **на** URL з цієї сторінки як джерела).
+
+**Вихідні / вхідні посилання (панель деталей):** `rel`, `tag`, `kind` зберігаються на ребрі referrer (сторінка-джерело → цільовий URL), а не лише в stub цілі. Таблиця без колонки «Тип»; усі колонки сортуються (`linkTableSortState`).
 
 ## CSV export (renderer.js)
 

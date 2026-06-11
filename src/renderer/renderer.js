@@ -32,6 +32,7 @@ const insertionOrder = [];
 let selectedUrl = null;
 let activeTab = 'details';
 let sortState = { column: null, direction: 'asc' };
+let linkTableSortState = { column: 'url', direction: 'asc' };
 /** @type {'all' | 'html' | 'media'} */
 let activeContentFilter = 'all';
 /** @type {string} */
@@ -349,6 +350,28 @@ function invalidateOutgoingLinksCache() {
     outgoingLinksByPageCache = null;
 }
 
+function buildOutgoingLink(ref, targetEntry) {
+    const edgeHasRelMeta = Boolean(ref.rel)
+        || ref.relFollowAllowed !== null
+        || ref.relIndexAllowed !== null
+        || Boolean(ref.relLabel);
+    return normalizeLinkEntry({
+        ...targetEntry,
+        url: targetEntry.url,
+        text: ref.text || targetEntry.text || '',
+        tag: ref.tag || targetEntry.tag || '',
+        kind: ref.kind || targetEntry.kind || '',
+        rel: edgeHasRelMeta ? (ref.rel || '') : (targetEntry.rel || ''),
+        relFollowAllowed: edgeHasRelMeta
+            ? (ref.relFollowAllowed ?? null)
+            : (targetEntry.relFollowAllowed ?? null),
+        relIndexAllowed: edgeHasRelMeta
+            ? (ref.relIndexAllowed ?? null)
+            : (targetEntry.relIndexAllowed ?? null),
+        relLabel: edgeHasRelMeta ? (ref.relLabel || '') : (targetEntry.relLabel || ''),
+    });
+}
+
 function rebuildOutgoingLinksCache() {
     const cache = new Map();
     for (const entry of scanResults.values()) {
@@ -359,7 +382,7 @@ function rebuildOutgoingLinksCache() {
             if (!cache.has(ref.href)) {
                 cache.set(ref.href, []);
             }
-            cache.get(ref.href).push(entry);
+            cache.get(ref.href).push(buildOutgoingLink(ref, entry));
         }
     }
     outgoingLinksByPageCache = cache;
@@ -441,11 +464,26 @@ function getH1Count(data) {
 
 function normalizeReferrerEntry(item) {
     if (typeof item === 'string') {
-        return { href: item, text: '' };
+        return {
+            href: item,
+            text: '',
+            rel: '',
+            tag: '',
+            kind: '',
+            relFollowAllowed: null,
+            relIndexAllowed: null,
+            relLabel: '',
+        };
     }
     return {
         href: String(item?.href || '').trim(),
         text: String(item?.text || '').trim(),
+        rel: item?.rel || '',
+        tag: item?.tag || '',
+        kind: item?.kind || '',
+        relFollowAllowed: item?.relFollowAllowed ?? null,
+        relIndexAllowed: item?.relIndexAllowed ?? null,
+        relLabel: item?.relLabel || '',
     };
 }
 
@@ -994,12 +1032,12 @@ function getLinkRelInfo(link) {
         || link.relIndexAllowed !== undefined
         || link.relLabel !== undefined
     ) {
-        const hasRel = Boolean(link.rel);
+        const parsed = parseLinkRel(link.rel || '');
         return {
             rel: link.rel || '',
-            relFollowAllowed: link.relFollowAllowed ?? true,
-            relIndexAllowed: link.relIndexAllowed ?? true,
-            relLabel: link.relLabel || (hasRel ? link.rel : 'follow'),
+            relFollowAllowed: link.relFollowAllowed ?? parsed.relFollowAllowed,
+            relIndexAllowed: link.relIndexAllowed ?? parsed.relIndexAllowed,
+            relLabel: link.relLabel || parsed.relLabel,
             applicable: true,
         };
     }
@@ -2027,6 +2065,24 @@ document.querySelectorAll('.detail-tab').forEach((btn) => {
     btn.addEventListener('click', () => setActiveTab(btn.dataset.tab));
 });
 
+detailContent.addEventListener('click', (event) => {
+    const th = event.target.closest('.sortable-link-th');
+    if (!th) {
+        return;
+    }
+    const col = th.dataset.sort;
+    if (!col) {
+        return;
+    }
+    if (linkTableSortState.column === col) {
+        linkTableSortState.direction = linkTableSortState.direction === 'asc' ? 'desc' : 'asc';
+    } else {
+        linkTableSortState.column = col;
+        linkTableSortState.direction = 'asc';
+    }
+    renderDetailPanel();
+});
+
 if (contentTypeFilter) {
     contentTypeFilter.addEventListener('change', () => {
         setActiveContentFilter(contentTypeFilter.value);
@@ -2136,6 +2192,56 @@ function renderDetailTable(rows) {
     return `<table class="w-full border-collapse"><tbody>${body}</tbody></table>`;
 }
 
+function compareLinkRows(a, b) {
+    const { column, direction } = linkTableSortState;
+    const mul = direction === 'asc' ? 1 : -1;
+    let va;
+    let vb;
+    switch (column) {
+        case 'tag':
+            va = getOutlinkTag(a).toLowerCase();
+            vb = getOutlinkTag(b).toLowerCase();
+            break;
+        case 'rel': {
+            const ra = getLinkRelInfo(a);
+            const rb = getLinkRelInfo(b);
+            va = (ra.rel || ra.relLabel || '').toLowerCase();
+            vb = (rb.rel || rb.relLabel || '').toLowerCase();
+            break;
+        }
+        case 'follow': {
+            const fa = getLinkRelInfo(a).relFollowAllowed;
+            const fb = getLinkRelInfo(b).relFollowAllowed;
+            va = fa === null ? 2 : (fa ? 1 : 0);
+            vb = fb === null ? 2 : (fb ? 1 : 0);
+            break;
+        }
+        case 'text':
+            va = (a.text || '').toLowerCase();
+            vb = (b.text || '').toLowerCase();
+            break;
+        case 'url':
+        default:
+            va = (a.url || a.href || '').toLowerCase();
+            vb = (b.url || b.href || '').toLowerCase();
+            break;
+    }
+    if (va < vb) return -1 * mul;
+    if (va > vb) return 1 * mul;
+    return (a.url || a.href || '').localeCompare(b.url || b.href || '') * mul;
+}
+
+function sortLinkRows(links) {
+    return [...links].sort(compareLinkRows);
+}
+
+function linkTableSortIndicator(column, label) {
+    if (linkTableSortState.column !== column) {
+        return label;
+    }
+    return `${label} ${linkTableSortState.direction === 'asc' ? '▲' : '▼'}`;
+}
+
 function renderLinkTable(links, emptyText, caption = '') {
     if (!links || links.length === 0) {
         return `<p class="p-4 text-zinc-400 italic">${escapeHtml(emptyText)}</p>`;
@@ -2143,14 +2249,13 @@ function renderLinkTable(links, emptyText, caption = '') {
     const captionHtml = caption
         ? `<p class="px-4 py-2 text-xs text-zinc-500 border-b border-zinc-100 bg-zinc-50">${escapeHtml(caption)}</p>`
         : '';
-    const rows = links
+    const rows = sortLinkRows(links)
         .map(
             (link) => {
                 const external = isExternalOutlink(link);
                 const typeBadge = external
                     ? '<span class="inline-block ml-1 px-1 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-800 whitespace-nowrap" title="Зовнішнє посилання — не обходиться">зовн.</span>'
                     : '';
-                const kind = getOutlinkKind(link);
                 const tag = getOutlinkTag(link);
                 const relInfo = getLinkRelInfo(link);
                 const relCell = relInfo.applicable
@@ -2161,7 +2266,6 @@ function renderLinkTable(links, emptyText, caption = '') {
                 return `
         <tr class="border-b border-zinc-100 hover:bg-zinc-50${external ? ' bg-amber-50/40' : ''}">
             <td class="p-2">${urlCellHtml(link.url || link.href || link)}${typeBadge}</td>
-            <td class="p-2 text-zinc-500 whitespace-nowrap">${escapeHtml(formatLinkKindLabel(kind))}</td>
             <td class="p-2 font-mono text-zinc-600 text-[11px] whitespace-nowrap">${escapeHtml(tag)}</td>
             <td class="p-2 text-zinc-600">${relCell}</td>
             <td class="p-2 whitespace-nowrap">${formatRelAllowedStatus(relInfo.relFollowAllowed)}</td>
@@ -2170,15 +2274,18 @@ function renderLinkTable(links, emptyText, caption = '') {
             }
         )
         .join('');
+    const sortThClass = 'sortable-link-th p-2 font-semibold cursor-pointer select-none hover:bg-zinc-200';
+    const activeSortClass = (column) => (
+        linkTableSortState.column === column ? ' bg-zinc-200 text-zinc-800' : ''
+    );
     return `${captionHtml}<table class="w-full border-collapse">
         <thead class="bg-zinc-50 sticky top-0">
             <tr class="text-left text-zinc-500">
-                <th class="p-2 font-semibold">URL</th>
-                <th class="p-2 font-semibold w-24">Тип</th>
-                <th class="p-2 font-semibold min-w-[110px]">Тег</th>
-                <th class="p-2 font-semibold min-w-[90px]">rel</th>
-                <th class="p-2 font-semibold w-24">Перехід</th>
-                <th class="p-2 font-semibold w-1/3">Текст посилання</th>
+                <th class="${sortThClass}${activeSortClass('url')}" data-sort="url" title="Сортувати">${linkTableSortIndicator('url', 'URL')}</th>
+                <th class="${sortThClass} min-w-[110px]${activeSortClass('tag')}" data-sort="tag" title="Сортувати">${linkTableSortIndicator('tag', 'Тег')}</th>
+                <th class="${sortThClass} min-w-[90px]${activeSortClass('rel')}" data-sort="rel" title="Сортувати">${linkTableSortIndicator('rel', 'rel')}</th>
+                <th class="${sortThClass} w-24${activeSortClass('follow')}" data-sort="follow" title="Сортувати">${linkTableSortIndicator('follow', 'Перехід')}</th>
+                <th class="${sortThClass} w-1/3${activeSortClass('text')}" data-sort="text" title="Сортувати">${linkTableSortIndicator('text', 'Текст посилання')}</th>
             </tr>
         </thead>
         <tbody>${rows}</tbody>
