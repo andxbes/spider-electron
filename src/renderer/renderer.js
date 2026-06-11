@@ -10,8 +10,6 @@ const controlsIdle = document.getElementById('controlsIdle');
 const controlsRunning = document.getElementById('controlsRunning');
 const controlsPaused = document.getElementById('controlsPaused');
 const resultsTable = document.getElementById('resultsTable');
-const pagesTableHead = document.getElementById('pagesTableHead');
-const linksTableHead = document.getElementById('linksTableHead');
 const detailContent = document.getElementById('detailContent');
 const selectedUrlHint = document.getElementById('selectedUrlHint');
 const selectedUrlBar = document.getElementById('selectedUrlBar');
@@ -25,13 +23,12 @@ const statusFilter = document.getElementById('statusFilter');
 const indexingFilter = document.getElementById('indexingFilter');
 const h1Filter = document.getElementById('h1Filter');
 const duplicateFilter = document.getElementById('duplicateFilter');
-const externalLinksFilter = document.getElementById('externalLinksFilter');
+const sourceFilter = document.getElementById('sourceFilter');
 const filterCount = document.getElementById('filterCount');
 
 const scanResults = new Map();
 const insertionOrder = [];
 let selectedUrl = null;
-let selectedLinkUrl = null;
 let activeTab = 'details';
 let sortState = { column: null, direction: 'asc' };
 /** @type {'all' | 'html' | 'media'} */
@@ -44,31 +41,32 @@ let activeIndexingFilter = 'all';
 let activeH1Filter = 'all';
 /** @type {'all' | 'h1' | 'title' | 'description'} */
 let activeDuplicateFilter = 'all';
-/** @type {'pages' | 'links-all' | 'links-internal' | 'links-external'} */
-let activeViewMode = 'pages';
+/** @type {'all' | 'internal' | 'external'} */
+let activeSourceFilter = 'all';
 let scanHostname = '';
 
-const OUTLINK_KIND_PRIORITY = [
-    'javascript', 'css', 'html', 'images', 'media', 'fonts', 'xml', 'pdf', 'plugins', 'other', 'unknown',
-];
 
 const OUTLINK_KIND_LABELS = {
     html: 'HTML',
     javascript: 'JavaScript',
     css: 'CSS',
     images: 'Images',
-    media: 'Media',
+    media: 'Media (зображення, відео, аудіо)',
     fonts: 'Fonts',
     xml: 'XML',
     pdf: 'PDF',
     plugins: 'Plugins',
-    other: 'Other',
+    other: 'Other (інше / невідоме)',
     unknown: 'Unknown',
 };
 
-const ALL_CONTENT_TYPE_OPTIONS = [
+const RESOURCE_TYPE_FILTER_OPTIONS = [
     { value: 'all', label: 'Усі' },
-    ...Object.entries(OUTLINK_KIND_LABELS).map(([value, label]) => ({ value, label })),
+    { value: 'html', label: 'HTML' },
+    { value: 'javascript', label: 'JavaScript' },
+    { value: 'css', label: 'CSS' },
+    { value: 'media', label: 'Media (зображення, відео, аудіо)' },
+    { value: 'other', label: 'Other (інше)' },
 ];
 
 const OUTLINK_IMAGE_EXTENSIONS = new Set([
@@ -81,27 +79,22 @@ const OUTLINK_FONT_EXTENSIONS = new Set(['woff', 'woff2', 'ttf', 'eot', 'otf']);
 const OUTLINK_PLUGIN_EXTENSIONS = new Set(['swf', 'flv']);
 const OUTLINK_HTML_EXTENSIONS = new Set(['html', 'htm', 'php', 'asp', 'aspx', 'jsp', 'shtml']);
 let duplicateCountsCache = null;
-let linksIndexCache = null;
 let knownPresentContentTypesKey = '';
 let latestReferrersByUrl = new Map();
 /** @type {'idle' | 'running' | 'paused'} */
 let uiState = 'idle';
 let knownStatusCodes = new Set();
 let refreshTableTimer = null;
-const REFRESH_TABLE_DELAY_MS = 120;
+let scanRefreshTimer = null;
+const REFRESH_TABLE_DELAY_MS = 250;
+const SCAN_REFRESH_DELAY_MS = 400;
+const STATUS_FILTER_REFRESH_EVERY_N_PAGES = 100;
+/** @type {Map<string, object[]> | null} */
+let outgoingLinksByPageCache = null;
 let lastScanProgress = null;
 let workspacePersistTimer = null;
 const WORKSPACE_PERSIST_DELAY_MS = 200;
-
-const MEDIA_EXTENSIONS = new Set([
-    'jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'ico', 'bmp', 'avif', 'tif', 'tiff',
-    'mp4', 'webm', 'ogv', 'mov', 'avi', 'mkv',
-    'mp3', 'ogg', 'wav', 'flac', 'aac', 'm4a',
-    'pdf', 'zip', 'gz', 'rar', '7z', 'tar',
-    'css', 'js', 'mjs', 'map',
-    'woff', 'woff2', 'ttf', 'eot', 'otf',
-    'xml', 'json', 'txt', 'csv',
-]);
+let renderedTableUrlSet = new Set();
 
 function escapeHtml(str) {
     return String(str ?? '')
@@ -188,40 +181,157 @@ function getUrlExtension(url) {
     }
 }
 
-function getResourceType(data) {
-    const contentType = (data.contentType || '').toLowerCase();
+function isHtmlContentType(contentType) {
+    const ct = (contentType || '').toLowerCase();
+    return ct.includes('text/html') || ct.includes('application/xhtml');
+}
 
-    if (contentType.includes('text/html') || contentType.includes('application/xhtml')) {
+function mapKindToFilterKind(kind) {
+    const normalized = normalizeLinkKind(kind);
+    if (normalized === 'images') {
+        return 'media';
+    }
+    if (normalized === 'html' || normalized === 'javascript' || normalized === 'css' || normalized === 'media' || normalized === 'other') {
+        return normalized;
+    }
+    return 'other';
+}
+
+function matchesActiveContentFilter(kind) {
+    if (activeContentFilter === 'all') {
+        return true;
+    }
+    if (activeContentFilter === 'media') {
+        return kind === 'media' || kind === 'images';
+    }
+    return kind === activeContentFilter;
+}
+
+function getCrawledResourceKind(data) {
+    const contentType = (data.contentType || '').toLowerCase();
+    const url = data.url || '';
+    const ext = getUrlExtension(url);
+    const pathLower = getUrlPathnameLower(url);
+
+    if (isHtmlContentType(contentType)) {
         return 'html';
+    }
+    if (contentType.includes('javascript') || contentType.includes('ecmascript')) {
+        return 'javascript';
+    }
+    if (contentType === 'text/css') {
+        return 'css';
     }
     if (
         contentType.startsWith('image/')
         || contentType.startsWith('video/')
         || contentType.startsWith('audio/')
-        || contentType.includes('font')
-        || contentType === 'text/css'
-        || contentType.includes('javascript')
-        || contentType === 'application/pdf'
-        || contentType === 'application/json'
-        || contentType.includes('xml')
     ) {
         return 'media';
     }
 
-    const extension = getUrlExtension(data.url);
-    if (MEDIA_EXTENSIONS.has(extension)) {
+    if (looksLikeJavascriptUrl(url, ext, pathLower)) {
+        return 'javascript';
+    }
+    if (ext === 'css') {
+        return 'css';
+    }
+    if (OUTLINK_IMAGE_EXTENSIONS.has(ext) || OUTLINK_MEDIA_EXTENSIONS.has(ext)) {
         return 'media';
     }
 
-    if (typeof data.status === 'number' && data.status >= 300 && data.status < 400) {
-        return 'html';
-    }
+    return 'other';
+}
 
-    if (data.outlinks?.length || data.headings?.length || data.metaDescription) {
-        return 'html';
-    }
+function isDiscoveredOnly(data) {
+    return data.fetched === false || (data.status === '' && !data.contentType);
+}
 
-    return 'html';
+function getResourceKind(data) {
+    if (isDiscoveredOnly(data)) {
+        return mapKindToFilterKind(data.kind || inferLinkKind(data));
+    }
+    return getCrawledResourceKind(data);
+}
+
+function getResourceType(data) {
+    return getResourceKind(data);
+}
+
+function isExternalUrl(url) {
+    const host = getScanHostname();
+    if (!host) {
+        return false;
+    }
+    try {
+        return new URL(url).hostname !== host;
+    } catch {
+        return false;
+    }
+}
+
+function passesSourceFilterForUrl(url) {
+    if (activeSourceFilter === 'all') {
+        return true;
+    }
+    const external = isExternalUrl(url);
+    if (activeSourceFilter === 'external') {
+        return external;
+    }
+    if (activeSourceFilter === 'internal') {
+        return !external;
+    }
+    return true;
+}
+
+function invalidateOutgoingLinksCache() {
+    outgoingLinksByPageCache = null;
+}
+
+function rebuildOutgoingLinksCache() {
+    const cache = new Map();
+    for (const entry of scanResults.values()) {
+        for (const ref of getReferrersForUrl(entry.url)) {
+            if (!ref.href) {
+                continue;
+            }
+            if (!cache.has(ref.href)) {
+                cache.set(ref.href, []);
+            }
+            cache.get(ref.href).push(entry);
+        }
+    }
+    outgoingLinksByPageCache = cache;
+}
+
+function getOutgoingLinksFrom(pageUrl) {
+    if (!outgoingLinksByPageCache) {
+        rebuildOutgoingLinksCache();
+    }
+    return outgoingLinksByPageCache.get(pageUrl) || [];
+}
+
+function getScannableTablePool() {
+    const all = Array.from(scanResults.values());
+    if (uiState === 'running') {
+        return all.filter((data) => data.fetched !== false);
+    }
+    return all;
+}
+
+function getTableEntries() {
+    const all = getScannableTablePool();
+    if (activeContentFilter === 'all') {
+        return all;
+    }
+    if (activeContentFilter === 'html') {
+        return all.filter((data) => !isDiscoveredOnly(data) && getCrawledResourceKind(data) === 'html');
+    }
+    return all.filter((data) => matchesActiveContentFilter(getResourceKind(data)));
+}
+
+function getRowData(url) {
+    return scanResults.get(url) || null;
 }
 
 function matchesStatusFilter(status, filter) {
@@ -317,7 +427,14 @@ function applyReferrersUpdate(allReferrers) {
             data.referrers = latestReferrersByUrl.get(url);
         }
     }
+    invalidateOutgoingLinksCache();
 
+    if (uiState === 'running') {
+        if (selectedUrl) {
+            renderDetailPanel();
+        }
+        return;
+    }
     requestRefreshTable({ immediate: true });
     scheduleWorkspacePersist();
     if (selectedUrl) {
@@ -359,46 +476,140 @@ function invalidateDuplicateCounts() {
     duplicateCountsCache = null;
 }
 
-function invalidateLinksIndex() {
-    linksIndexCache = null;
-    knownPresentContentTypesKey = '';
-}
-
-function isPagesListView() {
-    return activeViewMode === 'pages';
-}
-
-function isLinksListView() {
-    return !isPagesListView();
-}
-
-function normalizeViewMode(value) {
-    if (value === 'pages') {
-        return 'pages';
+function cancelPendingScanRefresh() {
+    if (scanRefreshTimer) {
+        clearTimeout(scanRefreshTimer);
+        scanRefreshTimer = null;
     }
+}
+
+function scheduleScanRefresh() {
+    if (scanRefreshTimer) {
+        return;
+    }
+    scanRefreshTimer = setTimeout(() => {
+        scanRefreshTimer = null;
+        invalidateOutgoingLinksCache();
+        invalidateDuplicateCounts();
+        requestRefreshTable();
+    }, SCAN_REFRESH_DELAY_MS);
+}
+
+function normalizeSourceFilter(value) {
     if (value === 'external' || value === 'links-external' || value === 'has-external') {
-        return 'links-external';
+        return 'external';
     }
-    if (value === 'links-internal' || value === 'internal' || value === 'no-external') {
-        return 'links-internal';
+    if (value === 'internal' || value === 'links-internal' || value === 'no-external') {
+        return 'internal';
     }
-    if (value === 'links-all' || value === 'all' || value === 'links') {
-        return 'links-all';
+    if (value === 'all' || value === 'pages' || value === 'links-all' || value === 'links') {
+        return 'all';
     }
-    return 'pages';
+    return 'all';
 }
 
-function getLinkHost(href) {
-    try {
-        return new URL(href).hostname;
-    } catch {
-        return '';
+function normalizeContentTypeFilter(value) {
+    if (!value || value === 'all') {
+        return 'all';
+    }
+    if (value === 'images') {
+        return 'media';
+    }
+    if (value === 'unknown') {
+        return 'other';
+    }
+    return value;
+}
+
+function setActiveContentFilter(value) {
+    activeContentFilter = normalizeContentTypeFilter(value);
+    if (contentTypeFilter) {
+        contentTypeFilter.value = activeContentFilter;
     }
 }
 
-function formatOutlinkKindLabel(kind) {
+function setActiveSourceFilter(value) {
+    activeSourceFilter = normalizeSourceFilter(value || 'all');
+    if (sourceFilter) {
+        sourceFilter.value = activeSourceFilter;
+    }
+}
+
+function applyActiveFiltersToDom() {
+    if (contentTypeFilter && contentTypeFilter.value !== activeContentFilter) {
+        contentTypeFilter.value = activeContentFilter;
+    }
+    if (sourceFilter && sourceFilter.value !== activeSourceFilter) {
+        sourceFilter.value = activeSourceFilter;
+    }
+}
+
+function normalizeLegacyLink(link) {
+    if (typeof link === 'string') {
+        return {
+            url: link,
+            text: '',
+            external: false,
+            kind: '',
+            tag: 'a[href]',
+            fetched: false,
+        };
+    }
+    if (!link) {
+        return null;
+    }
+    const url = link.url || link.href;
+    if (!url) {
+        return null;
+    }
+    return {
+        url,
+        text: link.text || '',
+        external: Boolean(link.external),
+        kind: link.kind || '',
+        tag: link.tag || '',
+        rel: link.rel || '',
+        relFollowAllowed: link.relFollowAllowed ?? null,
+        relIndexAllowed: link.relIndexAllowed ?? null,
+        relLabel: link.relLabel || '',
+        status: '',
+        title: link.text || '',
+        fetched: false,
+    };
+}
+
+function normalizeLinkEntry(data) {
+    const url = data.url || data.href;
+    const hasStatus = data.status !== '' && data.status !== undefined && data.status !== null;
+    return {
+        ...data,
+        url,
+        external: Boolean(data.external),
+        kind: data.kind || '',
+        tag: data.tag || '',
+        fetched: data.fetched ?? hasStatus,
+    };
+}
+
+function isExternalLink(entry) {
+    if (typeof entry.external === 'boolean') {
+        return entry.external;
+    }
+    return isExternalUrl(entry.url || entry.href || '');
+}
+
+function normalizeLinkKind(kind) {
+    if (!kind || kind === 'unknown') {
+        return 'other';
+    }
+    return kind;
+}
+
+function formatLinkKindLabel(kind) {
     return OUTLINK_KIND_LABELS[kind] || kind || OUTLINK_KIND_LABELS.unknown;
 }
+
+const formatOutlinkKindLabel = formatLinkKindLabel;
 
 function getUrlPathnameLower(href) {
     try {
@@ -416,43 +627,78 @@ function looksLikeJavascriptUrl(href, ext, pathLower) {
         || pathLower.includes('/js/');
 }
 
-function inferOutlinkKind(link) {
-    if (link.kind && OUTLINK_KIND_LABELS[link.kind]) {
-        return link.kind;
+function inferKindFromTag(tag) {
+    const t = String(tag || '').toLowerCase();
+    if (!t) {
+        return null;
     }
-    const href = link.href || '';
-    const text = String(link.text || '').toLowerCase();
+    if (t === 'script[src]' || t.startsWith('script') || t.includes('modulepreload')) {
+        return 'javascript';
+    }
+    if (t.includes('stylesheet') || t === 'link[rel=stylesheet]') {
+        return 'css';
+    }
+    if (
+        t === 'img[src]'
+        || t === 'img[srcset]'
+        || t === 'input[type=image][src]'
+        || t === 'link[rel=icon]'
+        || t.includes('apple-touch-icon')
+    ) {
+        return 'images';
+    }
+    if (
+        t === 'video[src]'
+        || t === 'audio[src]'
+        || t.startsWith('video>')
+        || t.startsWith('audio>')
+        || t === 'source[src]'
+        || t === 'source[srcset]'
+    ) {
+        return 'media';
+    }
+    if (t === 'a[href]' || t === 'area[href]' || t === 'iframe[src]' || t === 'form[action]') {
+        return 'html';
+    }
+    if (t === 'embed[src]' || t === 'object[data]') {
+        return 'plugins';
+    }
+    if (t.includes('preconnect') || t.includes('dns-prefetch')) {
+        return 'other';
+    }
+    if (t.startsWith('link[rel=')) {
+        if (t.includes('stylesheet')) {
+            return 'css';
+        }
+        if (t.includes('icon') || t.includes('apple-touch-icon')) {
+            return 'images';
+        }
+        if (t.includes('preload') || t.includes('prefetch')) {
+            return null;
+        }
+        return 'other';
+    }
+    return null;
+}
+
+function inferLinkKindFromUrl(entry) {
+    const href = entry.url || entry.href || '';
     const ext = getUrlExtension(href);
     const pathLower = getUrlPathnameLower(href);
 
-    if (text === 'script') {
-        return 'javascript';
-    }
-    if (text === 'iframe') {
-        return 'html';
-    }
-    if (text === 'embed' || text === 'object') {
-        return 'plugins';
-    }
-    if (text === 'video' || text === 'audio') {
-        return 'media';
-    }
-    if (text === 'image' || text === 'input') {
-        return 'images';
-    }
     if (looksLikeJavascriptUrl(href, ext, pathLower)) {
         return 'javascript';
     }
-    if (text.includes('stylesheet') || ext === 'css') {
+    if (ext === 'css') {
         return 'css';
     }
-    if (OUTLINK_FONT_EXTENSIONS.has(ext) || text.includes('font')) {
+    if (OUTLINK_FONT_EXTENSIONS.has(ext)) {
         return 'fonts';
     }
     if (OUTLINK_IMAGE_EXTENSIONS.has(ext)) {
         return 'images';
     }
-    if (text === 'media' || OUTLINK_MEDIA_EXTENSIONS.has(ext)) {
+    if (OUTLINK_MEDIA_EXTENSIONS.has(ext)) {
         return 'media';
     }
     if (ext === 'xml' || ext === 'rss' || ext === 'atom') {
@@ -464,59 +710,67 @@ function inferOutlinkKind(link) {
     if (OUTLINK_PLUGIN_EXTENSIONS.has(ext)) {
         return 'plugins';
     }
-    if (text.includes('preconnect') || text.includes('dns-prefetch')) {
-        return 'other';
-    }
-    if (text === 'form' || text === 'area' || !ext || OUTLINK_HTML_EXTENSIONS.has(ext)) {
+    if (OUTLINK_HTML_EXTENSIONS.has(ext)) {
         return 'html';
     }
-    if (text === 'link') {
-        return 'other';
-    }
     if (!ext) {
-        return 'unknown';
+        return 'other';
     }
     return 'other';
 }
 
-function resolvePrimaryOutlinkKind(kinds) {
-    for (const kind of OUTLINK_KIND_PRIORITY) {
-        if (kinds.includes(kind)) {
-            return kind;
-        }
+function inferLinkKind(entry) {
+    const rawKind = String(entry?.kind || '').toLowerCase();
+    if (rawKind && OUTLINK_KIND_LABELS[rawKind]) {
+        return normalizeLinkKind(rawKind);
     }
-    return kinds[0] || 'unknown';
+
+    const fromTag = inferKindFromTag(entry?.tag);
+    if (fromTag) {
+        return fromTag;
+    }
+
+    const text = String(entry.text || entry.title || '').toLowerCase();
+    if (text === 'script') {
+        return 'javascript';
+    }
+    if (text.includes('stylesheet')) {
+        return 'css';
+    }
+    if (text === 'image' || text === 'input') {
+        return 'images';
+    }
+    if (text === 'video' || text === 'audio' || text === 'media') {
+        return 'media';
+    }
+    if (text === 'iframe' || text === 'form' || text === 'area') {
+        return 'html';
+    }
+    if (text.includes('preconnect') || text.includes('dns-prefetch')) {
+        return 'other';
+    }
+
+    return inferLinkKindFromUrl(entry);
 }
 
 function collectPresentContentTypes() {
     const present = new Set();
-    if (isPagesListView()) {
-        for (const page of scanResults.values()) {
-            const resourceType = getResourceType(page);
-            if (resourceType === 'html' || resourceType === 'media') {
-                present.add(resourceType);
-            }
-            for (const link of page.outlinks || []) {
-                present.add(getOutlinkKind(link));
-            }
-        }
-        return present;
-    }
-
-    for (const entry of getLinksIndex()) {
-        if (!passesLinkScopeFilter(entry)) {
-            continue;
-        }
-        for (const kind of entry.kinds) {
-            present.add(kind);
-        }
+    for (const entry of scanResults.values()) {
+        present.add(getResourceKind(entry));
     }
     return present;
 }
 
 function getContentTypeFilterOptions() {
     const present = collectPresentContentTypes();
-    return ALL_CONTENT_TYPE_OPTIONS.filter((option) => option.value === 'all' || present.has(option.value));
+    return RESOURCE_TYPE_FILTER_OPTIONS.filter((option) => option.value === 'all' || present.has(option.value));
+}
+
+function appendContentTypeFilterOption(option) {
+    const el = document.createElement('option');
+    el.value = option.value;
+    el.textContent = option.label;
+    contentTypeFilter.appendChild(el);
 }
 
 function rebuildContentTypeFilterOptions({ preserveValue = true, force = false } = {}) {
@@ -526,45 +780,53 @@ function rebuildContentTypeFilterOptions({ preserveValue = true, force = false }
     const present = collectPresentContentTypes();
     const presentKey = [...present].sort().join(',');
     if (!force && presentKey === knownPresentContentTypesKey && contentTypeFilter.options.length > 0) {
+        applyActiveFiltersToDom();
         return;
     }
     knownPresentContentTypesKey = presentKey;
 
+    const retainedSelection = preserveValue ? activeContentFilter : 'all';
     const options = getContentTypeFilterOptions();
-    const previous = preserveValue ? activeContentFilter : 'all';
+
     contentTypeFilter.innerHTML = '';
     for (const option of options) {
-        const el = document.createElement('option');
-        el.value = option.value;
-        el.textContent = option.label;
-        contentTypeFilter.appendChild(el);
+        appendContentTypeFilterOption(option);
     }
-    const hasPrevious = options.some((option) => option.value === previous);
-    activeContentFilter = hasPrevious ? previous : 'all';
-    contentTypeFilter.value = activeContentFilter;
+
+    let selection = normalizeContentTypeFilter(retainedSelection);
+    if (!preserveValue) {
+        selection = 'all';
+    } else if (selection !== 'all' && !options.some((option) => option.value === selection)) {
+        const staticOption = RESOURCE_TYPE_FILTER_OPTIONS.find((option) => option.value === selection);
+        if (staticOption) {
+            appendContentTypeFilterOption(staticOption);
+        } else {
+            selection = 'all';
+        }
+    }
+    setActiveContentFilter(selection);
 }
 
-function pageMatchesContentTypeFilter(data, filter) {
-    if (filter === 'html') {
-        return getResourceType(data) === 'html'
-            || (data.outlinks || []).some((link) => getOutlinkKind(link) === 'html');
+function maybeUpdateContentTypeFilterOptions() {
+    const present = collectPresentContentTypes();
+    const presentKey = [...present].sort().join(',');
+    if (presentKey === knownPresentContentTypesKey && contentTypeFilter?.options.length > 0) {
+        return;
     }
-    if (filter === 'media') {
-        return getResourceType(data) === 'media'
-            || (data.outlinks || []).some((link) => getOutlinkKind(link) === 'media');
-    }
-    return (data.outlinks || []).some((link) => getOutlinkKind(link) === filter);
+    rebuildContentTypeFilterOptions({ preserveValue: true });
 }
 
-function getOutlinkKind(link) {
-    return inferOutlinkKind(link);
+function getLinkKind(entry) {
+    return inferLinkKind(entry);
 }
 
-function inferOutlinkTag(link) {
-    if (link.tag) {
-        return link.tag;
+const getOutlinkKind = getLinkKind;
+
+function inferLinkTag(entry) {
+    if (entry.tag) {
+        return entry.tag;
     }
-    const text = String(link.text || '').toLowerCase();
+    const text = String(entry.text || entry.title || '').toLowerCase();
     if (text === 'script') return 'script[src]';
     if (text === 'iframe') return 'iframe[src]';
     if (text === 'embed') return 'embed[src]';
@@ -585,12 +847,14 @@ function inferOutlinkTag(link) {
     return 'a[href]';
 }
 
-function getOutlinkTag(link) {
-    return inferOutlinkTag(link);
+function getLinkTag(entry) {
+    return inferLinkTag(entry);
 }
 
-function isRelApplicableLink(link) {
-    const tag = getOutlinkTag(link);
+const getOutlinkTag = getLinkTag;
+
+function isRelApplicableLink(entry) {
+    const tag = getLinkTag(entry);
     return tag === 'a[href]' || tag === 'area[href]';
 }
 
@@ -658,217 +922,6 @@ function formatRelAllowedStatus(allowed, { naText = '—' } = {}) {
         return '<span class="text-green-700 font-medium">Дозволено</span>';
     }
     return '<span class="text-amber-700 font-medium">Обмежено</span>';
-}
-
-function summarizeEntryRelInfo(sources) {
-    const relSources = sources
-        .map((source) => getLinkRelInfo(source))
-        .filter((info) => info.applicable);
-    if (!relSources.length) {
-        return {
-            applicable: false,
-            rel: '',
-            relLabel: '',
-            relFollowAllowed: null,
-            relIndexAllowed: null,
-            mixed: false,
-        };
-    }
-
-    const relValues = [...new Set(relSources.map((info) => info.rel).filter(Boolean))];
-    const relLabels = [...new Set(relSources.map((info) => info.relLabel).filter(Boolean))];
-    const followValues = [...new Set(relSources.map((info) => info.relFollowAllowed))];
-    const indexValues = [...new Set(relSources.map((info) => info.relIndexAllowed))];
-
-    return {
-        applicable: true,
-        rel: relValues.length === 1 ? relValues[0] : relValues.join('; '),
-        relLabel: relLabels.length === 1 ? relLabels[0] : relLabels.join('; '),
-        relFollowAllowed: followValues.length === 1 ? followValues[0] : null,
-        relIndexAllowed: indexValues.length === 1 ? indexValues[0] : null,
-        mixed: relValues.length > 1 || followValues.length > 1 || indexValues.length > 1,
-    };
-}
-
-function linkEntryHasKind(entry, kind) {
-    if (entry.kinds?.includes(kind)) {
-        return true;
-    }
-    return entry.sources.some((source) => source.kind === kind);
-}
-
-function passesLinkContentFilter(entry) {
-    if (activeContentFilter === 'all') {
-        return true;
-    }
-    return linkEntryHasKind(entry, activeContentFilter);
-}
-
-function passesLinkScopeFilter(entry) {
-    if (activeViewMode === 'links-internal') {
-        return !entry.external;
-    }
-    if (activeViewMode === 'links-external') {
-        return entry.external;
-    }
-    return true;
-}
-
-function buildLinksIndex() {
-    const map = new Map();
-    for (const page of scanResults.values()) {
-        for (const link of page.outlinks || []) {
-            const href = link.href;
-            if (!href) {
-                continue;
-            }
-            if (!map.has(href)) {
-                map.set(href, {
-                    href,
-                    host: getLinkHost(href),
-                    external: isExternalOutlink(link),
-                    sources: [],
-                });
-            }
-            const relInfo = getLinkRelInfo(link);
-            map.get(href).sources.push({
-                pageUrl: page.url,
-                text: link.text || '',
-                kind: getOutlinkKind(link),
-                tag: getOutlinkTag(link),
-                rel: relInfo.rel,
-                relFollowAllowed: relInfo.relFollowAllowed,
-                relIndexAllowed: relInfo.relIndexAllowed,
-                relLabel: relInfo.relLabel,
-            });
-        }
-    }
-
-    return [...map.values()].map((entry) => {
-        const kinds = [...new Set(entry.sources.map((source) => source.kind))];
-        const tags = [...new Set(entry.sources.map((source) => source.tag))];
-        return {
-            ...entry,
-            kinds,
-            tags,
-            kind: resolvePrimaryOutlinkKind(kinds),
-            tag: tags[0] || 'a[href]',
-            sourceCount: entry.sources.length,
-            sampleText: entry.sources.find((source) => source.text)?.text || '',
-        };
-    });
-}
-
-function getLinksIndex() {
-    if (!linksIndexCache) {
-        linksIndexCache = buildLinksIndex();
-    }
-    return linksIndexCache;
-}
-
-function getLinkEntry(href) {
-    return getLinksIndex().find((entry) => entry.href === href) || null;
-}
-
-function getDisplayedLinks() {
-    const entries = getLinksIndex()
-        .filter(passesLinkScopeFilter)
-        .filter(passesLinkContentFilter);
-    const sorted = [...entries];
-    if (sortState.column) {
-        sorted.sort(compareLinkRows);
-    } else {
-        sorted.sort((a, b) => a.href.localeCompare(b.href));
-    }
-    return sorted;
-}
-
-function compareLinkRows(a, b) {
-    const { column, direction } = sortState;
-    const mul = direction === 'asc' ? 1 : -1;
-    let va;
-    let vb;
-
-    switch (column) {
-        case 'scope':
-            va = a.external ? 'зовнішнє' : 'внутрішнє';
-            vb = b.external ? 'зовнішнє' : 'внутрішнє';
-            break;
-        case 'host':
-            va = a.host.toLowerCase();
-            vb = b.host.toLowerCase();
-            break;
-        case 'pages':
-            va = a.sourceCount;
-            vb = b.sourceCount;
-            break;
-        case 'kind':
-            va = formatOutlinkKindLabel(a.kind).toLowerCase();
-            vb = formatOutlinkKindLabel(b.kind).toLowerCase();
-            break;
-        case 'tag':
-            va = a.tag.toLowerCase();
-            vb = b.tag.toLowerCase();
-            break;
-        case 'text':
-            va = a.sampleText.toLowerCase();
-            vb = b.sampleText.toLowerCase();
-            break;
-        case 'url':
-        default:
-            va = a.href;
-            vb = b.href;
-    }
-
-    if (va < vb) return -1 * mul;
-    if (va > vb) return 1 * mul;
-    return a.href.localeCompare(b.href) * mul;
-}
-
-function updateTableHeadMode() {
-    if (pagesTableHead) {
-        pagesTableHead.classList.toggle('hidden', isLinksListView());
-    }
-    if (linksTableHead) {
-        linksTableHead.classList.toggle('hidden', !isLinksListView());
-    }
-}
-
-function updateDetailTabsVisibility() {
-    document.querySelectorAll('.page-view-tab').forEach((el) => {
-        el.classList.toggle('hidden', isLinksListView());
-    });
-    document.querySelectorAll('.link-view-tab').forEach((el) => {
-        el.classList.toggle('hidden', !isLinksListView());
-    });
-
-    if (isLinksListView()) {
-        if (!['link-details', 'link-sources'].includes(activeTab)) {
-            activeTab = 'link-details';
-        }
-    } else if (activeTab === 'link-details' || activeTab === 'link-sources') {
-        activeTab = 'details';
-    }
-
-    document.querySelectorAll('.detail-tab').forEach((btn) => {
-        const isActive = btn.dataset.tab === activeTab;
-        btn.classList.toggle('border-blue-600', isActive);
-        btn.classList.toggle('text-blue-700', isActive);
-        btn.classList.toggle('bg-white', isActive);
-        btn.classList.toggle('border-transparent', !isActive);
-        btn.classList.toggle('text-zinc-600', !isActive);
-    });
-}
-
-function updatePageFiltersDisabled() {
-    const disabled = isLinksListView();
-    for (const el of [statusFilter, indexingFilter, h1Filter, duplicateFilter]) {
-        if (el) {
-            el.disabled = disabled;
-            el.classList.toggle('opacity-50', disabled);
-        }
-    }
-    rebuildContentTypeFilterOptions();
 }
 
 function buildFieldDuplicateCounts(getValue) {
@@ -952,28 +1005,12 @@ function getScanHostname() {
     }
 }
 
-function isExternalOutlink(link) {
-    if (typeof link.external === 'boolean') {
-        return link.external;
-    }
-    const href = link.href || link;
-    const host = getScanHostname();
-    if (!host) {
-        return false;
-    }
-    try {
-        return new URL(href).hostname !== host;
-    } catch {
-        return false;
-    }
-}
-
-function countExternalOutlinks(data) {
-    return (data.outlinks || []).filter(isExternalOutlink).length;
+function isExternalOutlink(entry) {
+    return isExternalLink(entry);
 }
 
 function passesTableFilters(data) {
-    if (activeContentFilter !== 'all' && !pageMatchesContentTypeFilter(data, activeContentFilter)) {
+    if (!passesSourceFilterForUrl(data.url)) {
         return false;
     }
     if (!matchesStatusFilter(data.status, activeStatusFilter)) {
@@ -1004,7 +1041,7 @@ function passesTableFilters(data) {
 }
 
 function getFilteredResults() {
-    return Array.from(scanResults.values()).filter(passesTableFilters);
+    return getTableEntries().filter(passesTableFilters);
 }
 
 function getDisplayedResults() {
@@ -1095,15 +1132,13 @@ function updateFilterCount(shown, total) {
 }
 
 function resetTableFilters() {
-    activeContentFilter = 'all';
     activeStatusFilter = 'all';
     activeIndexingFilter = 'all';
     activeH1Filter = 'all';
     activeDuplicateFilter = 'all';
-    activeViewMode = 'pages';
+    setActiveSourceFilter('all');
     knownStatusCodes = new Set();
     invalidateDuplicateCounts();
-    invalidateLinksIndex();
     if (statusFilter) {
         statusFilter.value = 'all';
     }
@@ -1116,13 +1151,7 @@ function resetTableFilters() {
     if (duplicateFilter) {
         duplicateFilter.value = 'all';
     }
-    if (externalLinksFilter) {
-        externalLinksFilter.value = 'pages';
-    }
     rebuildContentTypeFilterOptions({ preserveValue: false });
-    updateTableHeadMode();
-    updateDetailTabsVisibility();
-    updatePageFiltersDisabled();
     updateStatusFilterOptions({ force: true });
 }
 
@@ -1226,9 +1255,7 @@ async function openUrlInBrowser(url) {
 
 function updateExportButton() {
     const canExport = uiState === 'idle' || uiState === 'paused';
-    const hasVisibleRows = isLinksListView()
-        ? getDisplayedLinks().length > 0
-        : getFilteredResults().length > 0;
+    const hasVisibleRows = getFilteredResults().length > 0;
     exportButton.disabled = !hasVisibleRows;
     exportButton.classList.toggle('hidden', !canExport || scanResults.size === 0);
 }
@@ -1275,14 +1302,40 @@ function setUIState(state) {
     }
 }
 
+function resetTableRenderCache() {
+    renderedTableUrlSet = new Set();
+    invalidateOutgoingLinksCache();
+}
+
+function areDefaultTableFiltersActive() {
+    return activeContentFilter === 'all'
+        && activeSourceFilter === 'all'
+        && activeStatusFilter === 'all'
+        && activeIndexingFilter === 'all'
+        && activeH1Filter === 'all'
+        && activeDuplicateFilter === 'all'
+        && !sortState.column;
+}
+
+function canIncrementallyRefreshTable() {
+    return uiState === 'running' && areDefaultTableFiltersActive();
+}
+
+function cancelPendingRefreshTable() {
+    if (refreshTableTimer) {
+        clearTimeout(refreshTableTimer);
+        refreshTableTimer = null;
+    }
+    cancelPendingScanRefresh();
+}
+
 function clearScanData() {
     invalidateDuplicateCounts();
-    invalidateLinksIndex();
     latestReferrersByUrl = new Map();
     scanResults.clear();
     insertionOrder.length = 0;
+    resetTableRenderCache();
     selectedUrl = null;
-    selectedLinkUrl = null;
     sortState = { column: null, direction: 'asc' };
     updateSortIndicators();
     resultsTable.innerHTML = '';
@@ -1307,7 +1360,7 @@ function collectWorkspaceSnapshot() {
             insertionOrder,
             startUrl: urlInput.value.trim(),
             lastScanProgress,
-            selectedUrl: isLinksListView() ? null : selectedUrl,
+            selectedUrl,
             statusHint: statusText.textContent,
             filters: {
                 content: activeContentFilter,
@@ -1315,10 +1368,9 @@ function collectWorkspaceSnapshot() {
                 indexing: activeIndexingFilter,
                 h1: activeH1Filter,
                 duplicate: activeDuplicateFilter,
-                viewMode: activeViewMode,
+                source: activeSourceFilter,
             },
         }),
-        selectedLinkUrl: isLinksListView() ? selectedLinkUrl : null,
     };
 }
 
@@ -1335,6 +1387,9 @@ function persistWorkspaceNow() {
 }
 
 function scheduleWorkspacePersist() {
+    if (uiState === 'running') {
+        return;
+    }
     if (workspacePersistTimer) {
         return;
     }
@@ -1349,8 +1404,8 @@ function applyFilterState(filters) {
     activeIndexingFilter = filters.indexing || 'all';
     activeH1Filter = filters.h1 || 'all';
     activeDuplicateFilter = filters.duplicate || 'all';
-    activeViewMode = normalizeViewMode(filters.viewMode || filters.externalLinks);
-    activeContentFilter = filters.content || filters.externalType || 'all';
+    setActiveSourceFilter(filters.source || filters.viewMode || filters.externalLinks || 'all');
+    setActiveContentFilter(filters.content || filters.externalType || 'all');
     if (statusFilter) {
         statusFilter.value = activeStatusFilter;
     }
@@ -1363,14 +1418,20 @@ function applyFilterState(filters) {
     if (duplicateFilter) {
         duplicateFilter.value = activeDuplicateFilter;
     }
-    if (externalLinksFilter) {
-        externalLinksFilter.value = activeViewMode;
-    }
-    rebuildContentTypeFilterOptions();
-    updateTableHeadMode();
-    updateDetailTabsVisibility();
-    updatePageFiltersDisabled();
+    rebuildContentTypeFilterOptions({ preserveValue: true });
     updateStatusFilterOptions({ force: true });
+}
+
+function flattenLegacyOutlinks(entry) {
+    const extras = [];
+    for (const link of entry.outlinks || []) {
+        const normalized = normalizeLegacyLink(link);
+        if (normalized) {
+            extras.push(normalizeLinkEntry(normalized));
+        }
+    }
+    const { outlinks, linkCount, ...rest } = entry;
+    return { entry: normalizeLinkEntry(rest), extras };
 }
 
 function populateScanResults(normalized) {
@@ -1378,20 +1439,34 @@ function populateScanResults(normalized) {
     urlInput.value = normalized.startUrl;
     setScanHostnameFromUrl(normalized.startUrl);
 
-    const resultMap = new Map(normalized.results.map((entry) => [entry.url, entry]));
-    for (const url of normalized.insertionOrder) {
-        if (resultMap.has(url)) {
-            insertionOrder.push(url);
-            scanResults.set(url, resultMap.get(url));
+    const resultMap = new Map();
+    for (const rawEntry of normalized.results) {
+        const { entry, extras } = flattenLegacyOutlinks(rawEntry);
+        resultMap.set(entry.url, entry);
+        for (const extra of extras) {
+            if (!resultMap.has(extra.url)) {
+                resultMap.set(extra.url, extra);
+            }
         }
     }
-    for (const entry of normalized.results) {
-        if (!scanResults.has(entry.url)) {
-            insertionOrder.push(entry.url);
-            scanResults.set(entry.url, entry);
+
+    const seen = new Set();
+    for (const url of normalized.insertionOrder) {
+        if (resultMap.has(url) && !seen.has(url)) {
+            insertionOrder.push(url);
+            scanResults.set(url, resultMap.get(url));
+            seen.add(url);
+        }
+    }
+    for (const [url, entry] of resultMap) {
+        if (!seen.has(url)) {
+            insertionOrder.push(url);
+            scanResults.set(url, entry);
+            seen.add(url);
         }
     }
     rebuildLatestReferrersFromResults();
+    rebuildContentTypeFilterOptions({ preserveValue: true, force: true });
 }
 
 function restoreWorkspaceFromSession() {
@@ -1428,12 +1503,7 @@ function restoreWorkspaceFromSession() {
         statusText.textContent = workspace.statusHint;
     }
 
-    if (isLinksListView()) {
-        const linkUrl = workspace.selectedLinkUrl || workspace.selectedExternalUrl;
-        if (linkUrl && getLinkEntry(linkUrl)) {
-            selectLinkRow(linkUrl);
-        }
-    } else if (workspace.selectedUrl && scanResults.has(workspace.selectedUrl)) {
+    if (workspace.selectedUrl && scanResults.has(workspace.selectedUrl)) {
         selectRow(workspace.selectedUrl);
     }
 
@@ -1460,11 +1530,12 @@ async function beginScan(startUrl, { clearResults = true } = {}) {
 }
 
 function getRowMetrics(data) {
-    const outlinks = data.outlinks || [];
+    const outgoing = isDiscoveredOnly(data) ? [] : getOutgoingLinksFrom(data.url);
     return {
         inCount: getReferrersForUrl(data.url).length,
-        linkCount: data.linkCount ?? outlinks.length,
-        externalCount: countExternalOutlinks(data),
+        linkCount: outgoing.length,
+        internalCount: outgoing.filter((link) => !isExternalLink(link)).length,
+        externalCount: outgoing.filter(isExternalLink).length,
     };
 }
 
@@ -1517,6 +1588,14 @@ function compareRows(a, b) {
             va = ma.inCount;
             vb = mb.inCount;
             break;
+        case 'internalLinks':
+            va = ma.internalCount;
+            vb = mb.internalCount;
+            break;
+        case 'externalLinks':
+            va = ma.externalCount;
+            vb = mb.externalCount;
+            break;
         default:
             va = insertionOrder.indexOf(a.url);
             vb = insertionOrder.indexOf(b.url);
@@ -1541,43 +1620,10 @@ function updateSortIndicators() {
     });
 }
 
-function formatLinkScopeLabel(external) {
-    return external ? 'Зовнішнє' : 'Внутрішнє';
-}
-
-function createLinkTableRow(entry, displayIndex) {
-    const tr = document.createElement('tr');
-    tr.dataset.linkUrl = entry.href;
-    tr.className = `border-b border-zinc-100 cursor-pointer hover:bg-zinc-50${entry.external ? ' bg-amber-50/20' : ''}`;
-    if (selectedLinkUrl === entry.href) {
-        tr.classList.add('bg-blue-50');
-    }
-    const scopeClass = entry.external ? 'text-amber-700' : 'text-emerald-700';
-    tr.innerHTML = `
-        <td class="p-2 text-zinc-400">${displayIndex}</td>
-        <td class="p-2">${urlCellHtml(entry.href)}</td>
-        <td class="p-2 whitespace-nowrap ${scopeClass} font-medium">${formatLinkScopeLabel(entry.external)}</td>
-        <td class="p-2 font-mono text-zinc-600">${entry.host ? escapeHtml(entry.host) : '<span class="text-zinc-400 italic">—</span>'}</td>
-        <td class="p-2 text-zinc-600" title="${escapeHtml(entry.kinds.join(', '))}">${escapeHtml(formatOutlinkKindLabel(entry.kind))}${entry.kinds.length > 1 ? `<span class="text-zinc-400 text-[10px]">+${entry.kinds.length - 1}</span>` : ''}</td>
-        <td class="p-2 font-mono text-zinc-600 text-[11px]" title="${escapeHtml(entry.tags.join(', '))}">${escapeHtml(entry.tag)}${entry.tags.length > 1 ? `<span class="text-zinc-400 text-[10px]">+${entry.tags.length - 1}</span>` : ''}</td>
-        <td class="p-2 text-center font-semibold">${entry.sourceCount}</td>
-        <td class="p-2 text-zinc-600" title="${escapeHtml(entry.sampleText)}">${entry.sampleText ? escapeHtml(truncate(entry.sampleText, 60)) : '<span class="text-zinc-400 italic">—</span>'}</td>
-    `;
-    tr.addEventListener('click', (e) => {
-        if (e.target.closest('.url-copy, .url-open')) {
-            return;
-        }
-        selectLinkRow(entry.href);
-    });
-    return tr;
-}
-
 function createTableRow(data, displayIndex) {
-    const { inCount, linkCount, externalCount } = getRowMetrics(data);
+    const { inCount, linkCount, internalCount, externalCount } = getRowMetrics(data);
     const dupCounts = getDuplicateCounts();
-    const linksTitle = externalCount > 0
-        ? `Всього: ${linkCount}, зовнішніх: ${externalCount}`
-        : '';
+    const linksTitle = `Всього: ${linkCount}, внутрішніх: ${internalCount}, зовнішніх: ${externalCount}`;
     const titleDup = getTextDuplicateCount(data.title, dupCounts.title);
     const descDup = getTextDuplicateCount(data.metaDescription, dupCounts.description);
     const tr = document.createElement('tr');
@@ -1597,8 +1643,10 @@ function createTableRow(data, displayIndex) {
         <td class="p-2">${h1CellHtml(data, dupCounts)}</td>
         <td class="p-2" title="${escapeHtml(data.title)}">${escapeHtml(truncate(data.title, 50))}${duplicateCountBadge(titleDup)}</td>
         <td class="p-2" title="${escapeHtml(data.metaDescription)}">${escapeHtml(truncate(data.metaDescription, 60))}${duplicateCountBadge(descDup)}</td>
-        <td class="p-2 text-center"${linksTitle ? ` title="${escapeHtml(linksTitle)}"` : ''}>${linkCount}${externalCount > 0 ? `<span class="text-amber-600 text-[10px] ml-0.5" title="${escapeHtml(linksTitle)}">+${externalCount}</span>` : ''}</td>
+        <td class="p-2 text-center" title="${escapeHtml(linksTitle)}">${linkCount}</td>
         <td class="p-2 text-center">${inCount}</td>
+        <td class="p-2 text-center text-emerald-700">${internalCount}</td>
+        <td class="p-2 text-center${externalCount > 0 ? ' text-amber-700 font-semibold' : ''}">${externalCount}</td>
     `;
     tr.addEventListener('click', (e) => {
         if (e.target.closest('.url-copy, .url-open')) {
@@ -1610,44 +1658,32 @@ function createTableRow(data, displayIndex) {
 }
 
 function refreshTable() {
-    updateTableHeadMode();
-    updateDetailTabsVisibility();
-    updatePageFiltersDisabled();
-
-    if (isLinksListView()) {
-        const allInScope = getLinksIndex().filter(passesLinkScopeFilter);
-        const entries = getDisplayedLinks();
-        resultsTable.innerHTML = '';
-        entries.forEach((entry, i) => {
-            resultsTable.appendChild(createLinkTableRow(entry, i + 1));
-        });
-
-        updateFilterCount(entries.length, allInScope.length);
-        if (uiState === 'idle' || uiState === 'paused') {
-            updateExportButton();
-        }
-
-        if (selectedLinkUrl && !entries.some((row) => row.href === selectedLinkUrl)) {
-            document.querySelectorAll('#resultsTable tr').forEach((tr) => {
-                tr.classList.remove('bg-blue-50');
-            });
-            detailContent.innerHTML = '<p class="p-4 text-zinc-400 italic">Оберіть посилання у таблиці вище</p>';
-        } else if (selectedLinkUrl && getLinkEntry(selectedLinkUrl)) {
-            syncSelectedLinkRowUi();
-        }
-        return;
+    const incremental = canIncrementallyRefreshTable();
+    if (!incremental || scanResults.size % STATUS_FILTER_REFRESH_EVERY_N_PAGES === 0) {
+        updateStatusFilterOptions();
     }
-
-    updateStatusFilterOptions();
 
     const entries = getDisplayedResults();
 
-    resultsTable.innerHTML = '';
-    entries.forEach((data, i) => {
-        resultsTable.appendChild(createTableRow(data, i + 1));
-    });
+    if (incremental) {
+        entries.forEach((data, i) => {
+            if (renderedTableUrlSet.has(data.url)) {
+                return;
+            }
+            resultsTable.appendChild(createTableRow(data, i + 1));
+            renderedTableUrlSet.add(data.url);
+        });
+    } else {
+        renderedTableUrlSet = new Set();
+        resultsTable.innerHTML = '';
+        entries.forEach((data, i) => {
+            resultsTable.appendChild(createTableRow(data, i + 1));
+            renderedTableUrlSet.add(data.url);
+        });
+    }
 
-    updateFilterCount(entries.length, scanResults.size);
+    const poolSize = getTableEntries().length;
+    updateFilterCount(entries.length, poolSize);
     if (uiState === 'idle' || uiState === 'paused') {
         updateExportButton();
     }
@@ -1656,13 +1692,14 @@ function refreshTable() {
         document.querySelectorAll('#resultsTable tr').forEach((tr) => {
             tr.classList.remove('bg-blue-50');
         });
-    } else if (selectedUrl && scanResults.has(selectedUrl)) {
+        detailContent.innerHTML = '<p class="p-4 text-zinc-400 italic">Сторінка не відповідає поточним фільтрам</p>';
+    } else if (selectedUrl && getRowData(selectedUrl) && !incremental) {
         syncSelectedRowUi();
     }
 }
 
 function syncSelectedRowUi() {
-    if (!selectedUrl || !scanResults.has(selectedUrl)) {
+    if (!selectedUrl || !getRowData(selectedUrl)) {
         return;
     }
     selectedUrlHint.textContent = truncate(selectedUrl, 80);
@@ -1671,21 +1708,6 @@ function syncSelectedRowUi() {
         selectedUrlBar.querySelectorAll('.url-copy, .url-open').forEach((el) => el.remove());
         const actions = document.createElement('span');
         actions.innerHTML = urlActionButtons(selectedUrl);
-        selectedUrlBar.appendChild(actions);
-    }
-    renderDetailPanel();
-}
-
-function syncSelectedLinkRowUi() {
-    if (!selectedLinkUrl || !getLinkEntry(selectedLinkUrl)) {
-        return;
-    }
-    selectedUrlHint.textContent = truncate(selectedLinkUrl, 80);
-    selectedUrlHint.title = selectedLinkUrl;
-    if (selectedUrlBar) {
-        selectedUrlBar.querySelectorAll('.url-copy, .url-open').forEach((el) => el.remove());
-        const actions = document.createElement('span');
-        actions.innerHTML = urlActionButtons(selectedLinkUrl);
         selectedUrlBar.appendChild(actions);
     }
     renderDetailPanel();
@@ -1712,27 +1734,67 @@ function requestRefreshTable({ immediate = false } = {}) {
     }, delay);
 }
 
-function upsertScanResult(data) {
-    if (!data.outlinks) {
-        data.outlinks = [];
+function upsertScanResult(incoming, { deferUi = false } = {}) {
+    const data = normalizeLinkEntry(incoming);
+    const existing = scanResults.get(data.url);
+    if (existing?.fetched !== false && data.fetched === false) {
+        return false;
     }
-    invalidateDuplicateCounts();
-    invalidateLinksIndex();
-    const isNew = !scanResults.has(data.url);
+    const isNew = !existing;
     if (isNew) {
         insertionOrder.push(data.url);
     }
     scanResults.set(data.url, data);
-    requestRefreshTable();
-    scheduleWorkspacePersist();
 
-    if (isNew && !selectedUrl && isPagesListView()) {
+    if (uiState === 'running') {
+        if (data.fetched !== false) {
+            scheduleScanRefresh();
+        }
+        if (!deferUi && isNew && !selectedUrl) {
+            selectedUrl = data.url;
+        } else if (!deferUi && selectedUrl === data.url) {
+            renderDetailPanel();
+        }
+        return isNew;
+    }
+
+    invalidateOutgoingLinksCache();
+    invalidateDuplicateCounts();
+    maybeUpdateContentTypeFilterOptions();
+    requestRefreshTable();
+
+    if (isNew && !selectedUrl) {
         selectedUrl = data.url;
     } else if (selectedUrl === data.url) {
         renderDetailPanel();
-    } else if (selectedLinkUrl && isLinksListView()) {
-        renderDetailPanel();
     }
+    return isNew;
+}
+
+function upsertScanResultsBatch(items) {
+    if (!Array.isArray(items) || items.length === 0) {
+        return;
+    }
+
+    let added = false;
+    for (const incoming of items) {
+        if (upsertScanResult(incoming, { deferUi: true })) {
+            added = true;
+        }
+    }
+
+    if (!added) {
+        return;
+    }
+
+    if (uiState === 'running') {
+        return;
+    }
+
+    invalidateOutgoingLinksCache();
+    invalidateDuplicateCounts();
+    maybeUpdateContentTypeFilterOptions();
+    requestRefreshTable();
 }
 
 function setActiveTab(tab) {
@@ -1754,8 +1816,9 @@ document.querySelectorAll('.detail-tab').forEach((btn) => {
 
 if (contentTypeFilter) {
     contentTypeFilter.addEventListener('change', () => {
-        activeContentFilter = contentTypeFilter.value;
+        setActiveContentFilter(contentTypeFilter.value);
         requestRefreshTable({ immediate: true });
+        scheduleWorkspacePersist();
     });
 }
 
@@ -1787,23 +1850,9 @@ if (duplicateFilter) {
     });
 }
 
-if (externalLinksFilter) {
-    externalLinksFilter.addEventListener('change', () => {
-        activeViewMode = normalizeViewMode(externalLinksFilter.value);
-        if (isLinksListView()) {
-            selectedUrl = null;
-            if (!selectedLinkUrl) {
-                sortState = { column: 'url', direction: 'asc' };
-                updateSortIndicators();
-            }
-        } else {
-            selectedLinkUrl = null;
-        }
-        knownPresentContentTypesKey = '';
-        rebuildContentTypeFilterOptions({ preserveValue: true });
-        updateTableHeadMode();
-        updateDetailTabsVisibility();
-        updatePageFiltersDisabled();
+if (sourceFilter) {
+    sourceFilter.addEventListener('change', () => {
+        setActiveSourceFilter(sourceFilter.value);
         requestRefreshTable({ immediate: true });
         scheduleWorkspacePersist();
     });
@@ -1825,21 +1874,10 @@ document.querySelectorAll('.sortable-th').forEach((th) => {
 
 function selectRow(url) {
     selectedUrl = url;
-    selectedLinkUrl = null;
     document.querySelectorAll('#resultsTable tr').forEach((tr) => {
         tr.classList.toggle('bg-blue-50', tr.dataset.url === url);
     });
     syncSelectedRowUi();
-    scheduleWorkspacePersist();
-}
-
-function selectLinkRow(href) {
-    selectedLinkUrl = href;
-    selectedUrl = null;
-    document.querySelectorAll('#resultsTable tr').forEach((tr) => {
-        tr.classList.toggle('bg-blue-50', tr.dataset.linkUrl === href);
-    });
-    syncSelectedLinkRowUi();
     scheduleWorkspacePersist();
 }
 
@@ -1883,8 +1921,8 @@ function renderLinkTable(links, emptyText, caption = '') {
                     : '<span class="text-zinc-400 italic">—</span>';
                 return `
         <tr class="border-b border-zinc-100 hover:bg-zinc-50${external ? ' bg-amber-50/40' : ''}">
-            <td class="p-2">${urlCellHtml(link.href || link)}${typeBadge}</td>
-            <td class="p-2 text-zinc-500 whitespace-nowrap">${escapeHtml(formatOutlinkKindLabel(kind))}</td>
+            <td class="p-2">${urlCellHtml(link.url || link.href || link)}${typeBadge}</td>
+            <td class="p-2 text-zinc-500 whitespace-nowrap">${escapeHtml(formatLinkKindLabel(kind))}</td>
             <td class="p-2 font-mono text-zinc-600 text-[11px] whitespace-nowrap">${escapeHtml(tag)}</td>
             <td class="p-2 text-zinc-600">${relCell}</td>
             <td class="p-2 whitespace-nowrap">${formatRelAllowedStatus(relInfo.relFollowAllowed)}</td>
@@ -1909,6 +1947,18 @@ function renderLinkTable(links, emptyText, caption = '') {
 }
 
 function buildDetailRows(data) {
+    if (isDiscoveredOnly(data)) {
+        return [
+            ['Address', urlCellHtml(data.url)],
+            ['Тип', escapeHtml(formatLinkKindLabel(getResourceKind(data)))],
+            ['Тег', escapeHtml(getLinkTag(data))],
+            ['Текст', data.text ? escapeHtml(data.text) : '<span class="text-zinc-400 italic">—</span>'],
+            ['Джерело', isExternalLink(data) ? 'Зовнішнє' : 'Внутрішнє'],
+            ['Завантажено', '<span class="text-zinc-500 italic">ні (лише знайдено)</span>'],
+            ['Вхідних посилань', String(getReferrersForUrl(data.url).length)],
+        ];
+    }
+
     const h1List = (data.headings || []).filter((h) => h.level === 1);
     const h1 = h1List[0];
     const h2List = (data.headings || []).filter((h) => h.level === 2);
@@ -1920,7 +1970,7 @@ function buildDetailRows(data) {
         ['Status Code', escapeHtml(data.status)],
         ['Content-Type', escapeHtml(data.contentType) || '<span class="text-zinc-400 italic">—</span>'],
         ['Response Time (ms)', data.responseTimeMs ?? '—'],
-        ['Resource Type', getResourceType(data) === 'html' ? 'HTML' : 'Медіа'],
+        ['Resource Type', escapeHtml(formatLinkKindLabel(getResourceKind(data)))],
         ['Title', escapeHtml(data.title)],
         ['Title Length', data.title ? String(data.title.length) : '0'],
         ['Meta Description', escapeHtml(data.metaDescription) || '<span class="text-zinc-400 italic">—</span>'],
@@ -1978,127 +2028,30 @@ function buildDetailRows(data) {
     return rows;
 }
 
-function renderSourcePagesTable(sources, emptyText, caption = '') {
-    if (!sources || sources.length === 0) {
-        return `<p class="p-4 text-zinc-400 italic">${escapeHtml(emptyText)}</p>`;
+function getFilteredOutgoingLinks(pageUrl) {
+    let links = getOutgoingLinksFrom(pageUrl);
+    if (activeSourceFilter === 'external') {
+        links = links.filter(isExternalLink);
+    } else if (activeSourceFilter === 'internal') {
+        links = links.filter((link) => !isExternalLink(link));
     }
-    const captionHtml = caption
-        ? `<p class="px-4 py-2 text-xs text-zinc-500 border-b border-zinc-100 bg-zinc-50">${escapeHtml(caption)}</p>`
-        : '';
-    const rows = sources
-        .map(
-            (source) => {
-                const relInfo = getLinkRelInfo(source);
-                const relCell = relInfo.applicable
-                    ? (relInfo.rel
-                        ? `<span class="font-mono">${escapeHtml(relInfo.rel)}</span>`
-                        : '<span class="text-zinc-500 italic">follow</span>')
-                    : '<span class="text-zinc-400 italic">—</span>';
-                return `
-        <tr class="border-b border-zinc-100 hover:bg-zinc-50">
-            <td class="p-2">${urlCellHtml(source.pageUrl)}</td>
-            <td class="p-2 text-zinc-500 whitespace-nowrap">${escapeHtml(formatOutlinkKindLabel(source.kind))}</td>
-            <td class="p-2 font-mono text-zinc-600 text-[11px] whitespace-nowrap">${escapeHtml(source.tag || '—')}</td>
-            <td class="p-2 text-zinc-600">${relCell}</td>
-            <td class="p-2 whitespace-nowrap">${formatRelAllowedStatus(relInfo.relFollowAllowed)}</td>
-            <td class="p-2 whitespace-nowrap">${formatRelAllowedStatus(relInfo.relIndexAllowed)}</td>
-            <td class="p-2 text-zinc-600">${source.text ? escapeHtml(source.text) : '<span class="text-zinc-400 italic">—</span>'}</td>
-        </tr>`;
+    if (activeContentFilter !== 'all') {
+        links = links.filter((link) => {
+            if (activeContentFilter === 'html') {
+                return !isDiscoveredOnly(link) && getCrawledResourceKind(link) === 'html';
             }
-        )
-        .join('');
-    return `${captionHtml}<table class="w-full border-collapse">
-        <thead class="bg-zinc-50 sticky top-0">
-            <tr class="text-left text-zinc-500">
-                <th class="p-2 font-semibold">Сторінка</th>
-                <th class="p-2 font-semibold w-24">Тип</th>
-                <th class="p-2 font-semibold min-w-[110px]">Тег</th>
-                <th class="p-2 font-semibold min-w-[90px]">rel</th>
-                <th class="p-2 font-semibold w-24">Перехід</th>
-                <th class="p-2 font-semibold w-24">Індексація</th>
-                <th class="p-2 font-semibold w-1/3">Текст посилання</th>
-            </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-    </table>`;
-}
-
-function buildLinkDetailRows(entry) {
-    const kindLabel = entry.kinds.length > 1
-        ? entry.kinds.map((kind) => formatOutlinkKindLabel(kind)).join(', ')
-        : formatOutlinkKindLabel(entry.kind);
-    const tagLabel = entry.tags.length > 1
-        ? entry.tags.join(', ')
-        : entry.tag;
-    const relSummary = summarizeEntryRelInfo(entry.sources);
-    const rows = [
-        ['URL', urlCellHtml(entry.href)],
-        ['Область', escapeHtml(formatLinkScopeLabel(entry.external))],
-        ['Host', entry.host ? escapeHtml(entry.host) : '<span class="text-zinc-400 italic">—</span>'],
-        ['Тип', escapeHtml(kindLabel)],
-        ['Тег', `<span class="font-mono">${escapeHtml(tagLabel)}</span>`],
-        ['Сторінок-джерел', String(entry.sourceCount)],
-        ['Текст посилання', entry.sampleText ? escapeHtml(entry.sampleText) : '<span class="text-zinc-400 italic">—</span>'],
-    ];
-
-    if (relSummary.applicable) {
-        rows.push([
-            'rel',
-            relSummary.rel
-                ? `<span class="font-mono">${escapeHtml(relSummary.rel)}</span>`
-                : '<span class="text-zinc-500 italic">follow (за замовчуванням)</span>',
-        ]);
-        rows.push([
-            'Перехід по посиланню',
-            relSummary.mixed
-                ? '<span class="text-zinc-500 italic">Різні значення на сторінках-джерелах</span>'
-                : formatRelAllowedStatus(relSummary.relFollowAllowed),
-        ]);
-        rows.push([
-            'Індексація (передача сигналу)',
-            relSummary.mixed
-                ? '<span class="text-zinc-500 italic">Різні значення на сторінках-джерелах</span>'
-                : formatRelAllowedStatus(relSummary.relIndexAllowed),
-        ]);
-        if (relSummary.relLabel && relSummary.relLabel !== 'follow') {
-            rows.push(['Маркери rel', escapeHtml(relSummary.relLabel)]);
-        }
-    } else {
-        rows.push(['rel', '<span class="text-zinc-400 italic">Не застосовується для цього тега</span>']);
+            return matchesActiveContentFilter(getResourceKind(link));
+        });
     }
-
-    return rows;
+    return links;
 }
 
 function renderDetailPanel() {
-    if (isLinksListView()) {
-        if (!selectedLinkUrl) {
-            detailContent.innerHTML = '<p class="p-4 text-zinc-400 italic">Оберіть посилання у таблиці вище</p>';
-            return;
-        }
-        const entry = getLinkEntry(selectedLinkUrl);
-        if (!entry) {
-            detailContent.innerHTML = '<p class="p-4 text-zinc-400 italic">Посилання не знайдено</p>';
-            return;
-        }
-        if (activeTab === 'link-sources') {
-            detailContent.innerHTML = renderSourcePagesTable(
-                entry.sources,
-                'Немає сторінок-джерел',
-                `Знайдено на ${entry.sourceCount} стор.`
-            );
-        } else {
-            detailContent.innerHTML = renderDetailTable(buildLinkDetailRows(entry));
-        }
-        return;
-    }
-
-    if (!selectedUrl || !scanResults.has(selectedUrl)) {
+    const data = selectedUrl ? getRowData(selectedUrl) : null;
+    if (!selectedUrl || !data) {
         detailContent.innerHTML = '<p class="p-4 text-zinc-400 italic">Оберіть URL у таблиці вище</p>';
         return;
     }
-
-    const data = scanResults.get(selectedUrl);
 
     if (activeTab === 'details') {
         detailContent.innerHTML = renderDetailTable(buildDetailRows(data));
@@ -2110,70 +2063,34 @@ function renderDetailPanel() {
             inlinks.length ? `Всього вхідних: ${inlinks.length}` : ''
         );
     } else if (activeTab === 'outlinks') {
+        const allOutgoing = getOutgoingLinksFrom(data.url);
+        const outgoing = getFilteredOutgoingLinks(data.url);
+        const caption = activeSourceFilter !== 'all' || activeContentFilter !== 'all'
+            ? `Показано: ${outgoing.length} з ${allOutgoing.length}`
+            : (allOutgoing.length ? `Всього: ${allOutgoing.length}` : '');
         detailContent.innerHTML = renderLinkTable(
-            data.outlinks || [],
-            'Немає вихідних посилань на сторінці'
+            outgoing,
+            'Немає вихідних посилань за поточними фільтрами',
+            caption
         );
     }
 }
 
 exportButton.addEventListener('click', () => {
     const bom = '\uFEFF';
-
-    if (isLinksListView()) {
-        const entries = getDisplayedLinks();
-        if (entries.length === 0) {
-            alert('Немає посилань для експорту за поточними фільтрами.');
-            return;
-        }
-        const headers = ['URL', 'Scope', 'Host', 'Type', 'Tag', 'Rel', 'Follow Allowed', 'Index Allowed', 'Source Pages Count', 'Source Pages', 'Link Texts', 'Source Types', 'Source Tags', 'Source Rels'];
-        const csvRows = [headers.join(',')];
-        for (const entry of entries) {
-            const relSummary = summarizeEntryRelInfo(entry.sources);
-            const pages = entry.sources.map((source) => source.pageUrl).join('; ');
-            const texts = entry.sources.map((source) => source.text || '—').join('; ');
-            const sourceTypes = entry.sources.map((source) => formatOutlinkKindLabel(source.kind)).join('; ');
-            const sourceTags = entry.sources.map((source) => source.tag || '—').join('; ');
-            const sourceRels = entry.sources.map((source) => getLinkRelInfo(source).rel || 'follow').join('; ');
-            const kindLabel = entry.kinds.map((kind) => formatOutlinkKindLabel(kind)).join('; ');
-            const tagLabel = entry.tags.join('; ');
-            csvRows.push([
-                `"${entry.href.replace(/"/g, '""')}"`,
-                `"${formatLinkScopeLabel(entry.external)}"`,
-                `"${entry.host.replace(/"/g, '""')}"`,
-                `"${kindLabel.replace(/"/g, '""')}"`,
-                `"${tagLabel.replace(/"/g, '""')}"`,
-                `"${(relSummary.rel || 'follow').replace(/"/g, '""')}"`,
-                `"${relSummary.relFollowAllowed === false ? 'Обмежено' : (relSummary.relFollowAllowed ? 'Дозволено' : 'Різні')}"`,
-                `"${relSummary.relIndexAllowed === false ? 'Обмежено' : (relSummary.relIndexAllowed ? 'Дозволено' : 'Різні')}"`,
-                `"${entry.sourceCount}"`,
-                `"${pages.replace(/"/g, '""')}"`,
-                `"${texts.replace(/"/g, '""')}"`,
-                `"${sourceTypes.replace(/"/g, '""')}"`,
-                `"${sourceTags.replace(/"/g, '""')}"`,
-                `"${sourceRels.replace(/"/g, '""')}"`,
-            ].join(','));
-        }
-        const blob = new Blob([bom + csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        link.download = `spider_links_${new Date().toISOString().slice(0, 10)}.csv`;
-        link.click();
-        return;
-    }
-
     const entries = getDisplayedResults();
     if (entries.length === 0) {
         alert('Немає рядків для експорту за поточними фільтрами.');
         return;
     }
 
-    const headers = ['URL', 'Status', 'Meta Robots', 'Robots.txt Rule', 'Robots.txt Allowed', 'H1 Count', 'Content-Type', 'Response Time (ms)', 'Resource Type', 'Title', 'Meta Description', 'Canonical', 'Link Count', 'Redirect URL', 'Referrers', 'Outlinks', 'Headings'];
+    const headers = ['URL', 'Status', 'Meta Robots', 'Robots.txt Rule', 'Robots.txt Allowed', 'H1 Count', 'Content-Type', 'Response Time (ms)', 'Resource Type', 'Title', 'Meta Description', 'Canonical', 'Link Count', 'Internal Links', 'External Links', 'Redirect URL', 'Referrers', 'Outlinks', 'Headings'];
     const csvRows = [headers.join(',')];
 
     for (const data of entries) {
+        const metrics = getRowMetrics(data);
         const referrers = formatCsvUrlListPreview(getReferrersForUrl(data.url));
-        const outlinks = formatCsvUrlListPreview(data.outlinks);
+        const outlinks = formatCsvUrlListPreview(getOutgoingLinksFrom(data.url).map((link) => link.url));
         const headings = data.headings ? data.headings.map((h) => `H${h.level}: ${h.text}`).join('; ') : '';
         const row = [
             `"${(data.url || '').replace(/"/g, '""')}"`,
@@ -2188,7 +2105,9 @@ exportButton.addEventListener('click', () => {
             `"${(data.title || '').replace(/"/g, '""')}"`,
             `"${(data.metaDescription || '').replace(/"/g, '""')}"`,
             `"${(data.metaCanonical || '').replace(/"/g, '""')}"`,
-            `"${(data.linkCount || 0)}"`,
+            `"${metrics.linkCount}"`,
+            `"${metrics.internalCount}"`,
+            `"${metrics.externalCount}"`,
             `"${(data.redirectUrl || '').replace(/"/g, '""')}"`,
             `"${referrers.replace(/"/g, '""')}"`,
             `"${outlinks.replace(/"/g, '""')}"`,
@@ -2266,7 +2185,6 @@ function applySessionDump(dump, filePath = '') {
     populateScanResults(normalized);
 
     selectedUrl = null;
-    selectedLinkUrl = null;
     lastScanProgress = normalized.progressAtSave;
     requestRefreshTable({ immediate: true });
     setUIState('idle');
@@ -2331,11 +2249,9 @@ stopButton.addEventListener('click', async () => {
     }
     setUIState('paused');
     statusText.textContent = 'На паузі';
-    if (refreshTableTimer) {
-        clearTimeout(refreshTableTimer);
-        refreshTableTimer = null;
-    }
+    cancelPendingRefreshTable();
     requestRefreshTable({ immediate: true });
+    persistWorkspaceNow();
     await window.api.pauseSpider();
 });
 
@@ -2361,18 +2277,82 @@ window.api.onSpiderResult((data) => {
     upsertScanResult(data);
 });
 
+window.api.onSpiderResultsBatch((items) => {
+    upsertScanResultsBatch(items);
+});
+
 window.api.onSpiderReferrersUpdate((allReferrers) => {
     applyReferrersUpdate(allReferrers);
 });
 
-window.api.onSpiderEnd((message) => {
+function finalizeScanUi(message) {
+    cancelPendingRefreshTable();
+    if (workspacePersistTimer) {
+        clearTimeout(workspacePersistTimer);
+        workspacePersistTimer = null;
+    }
+    lastScanProgress = {
+        ...(lastScanProgress || {}),
+        scanned: lastScanProgress?.scanned ?? scanResults.size,
+        queue: 0,
+        active: 0,
+        finished: true,
+        status: message,
+    };
     statusText.textContent = message;
-    setUIState('idle');
-    requestRefreshTable({ immediate: true });
-    persistWorkspaceNow();
+    const fetchedCount = Array.from(scanResults.values()).filter((row) => row.fetched !== false).length;
+    statusScanned.textContent = `Проскановано: ${fetchedCount}`;
+    statusQueue.textContent = 'У черзі: 0';
+    if (statusActive) {
+        statusActive.textContent = 'Активних: 0';
+    }
+    if (statusRate) {
+        statusRate.textContent = 'Швидкість: —';
+    }
+    if (urlInputProgress) {
+        urlInputProgress.style.width = '100%';
+    }
+    if (urlInputWrap) {
+        urlInputWrap.classList.remove('url-input-scanning');
+    }
+    if (uiState !== 'idle') {
+        setUIState('idle');
+    }
+    requestAnimationFrame(() => {
+        invalidateOutgoingLinksCache();
+        invalidateDuplicateCounts();
+        maybeUpdateContentTypeFilterOptions();
+        refreshTable();
+        persistWorkspaceNow();
+    });
+}
+
+window.api.onSpiderEnd((message) => {
+    finalizeScanUi(message);
 });
 
 window.api.onSpiderProgress((progress) => {
+    if (progress.finished) {
+        lastScanProgress = progress;
+        statusText.textContent = progress.status || 'Сканування завершено!';
+        statusScanned.textContent = `Проскановано: ${progress.scanned ?? 0}`;
+        statusQueue.textContent = 'У черзі: 0';
+        if (statusActive) {
+            statusActive.textContent = 'Активних: 0';
+        }
+        if (statusRate) {
+            statusRate.textContent = 'Швидкість: —';
+        }
+        if (urlInputProgress) {
+            urlInputProgress.style.width = '100%';
+        }
+        if (urlInputWrap) {
+            urlInputWrap.classList.remove('url-input-scanning');
+        }
+        cancelPendingRefreshTable();
+        setUIState('idle');
+        return;
+    }
     // Лише синхронізуємо паузу з бекенду; не відновлюємо running автоматично —
     // інакше завершення воркерів до обробки pause IPC повертає кнопку «Зупинити».
     if (progress.paused && uiState === 'running') {

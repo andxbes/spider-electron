@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 const validSendChannels = ['start-spider', 'spider-stop'];
 const validReceiveChannels = [
     'spider-result',
+    'spider-results-batch',
     'spider-end',
     'spider-progress',
     'spider-referrers-update',
@@ -63,6 +64,11 @@ contextBridge.exposeInMainWorld('api', {
     onSpiderResult: (callback) => {
         if (validReceiveChannels.includes('spider-result')) {
             ipcRenderer.on('spider-result', (event, ...args) => callback(...args));
+        }
+    },
+    onSpiderResultsBatch: (callback) => {
+        if (validReceiveChannels.includes('spider-results-batch')) {
+            ipcRenderer.on('spider-results-batch', (event, ...args) => callback(...args));
         }
     },
     onSpiderEnd: (callback) => {

@@ -1,6 +1,6 @@
 # Spider-Electron — внутрішня документація
 
-> Останнє оновлення: 2026-06-11 (rel на посиланнях)  
+> Останнє оновлення: 2026-06-11 (батч IPC, UI не блокується після crawl)  
 > Короткий довідник для розробки та правок. Детальніше про підтримку — [DOC_MAINTENANCE.md](./DOC_MAINTENANCE.md).
 
 ## Що це
@@ -27,7 +27,7 @@ src/
 |------|------------------|
 | `main.js` | BFS-обхід, fetch, robots.txt, cheerio, IPC events |
 | `preload.js` | Whitelist каналів IPC, `window.api` |
-| `renderer.js` | Валідація URL, рендер, `scanResults` Map, CSV, перегляд зовнішніх посилань |
+| `renderer.js` | Валідація URL, рендер, `scanResults` Map, CSV, фільтри таблиці сторінок |
 | `index.html` | Розмітка, Tailwind класи |
 
 ## Архітектура (Electron)
@@ -64,7 +64,7 @@ Renderer
 5. **4xx/5xx** — `status: 'ERROR'`.
 6. **200** — cheerio: title, meta description, canonical, headings, link count → `spider-result`.
 7. Якщо `<meta name="robots" content="nofollow">` — не додає нові посилання.
-8. Збір вихідних URL з HTML: `<a>`, `<link>`, `<script>`, `<img>`, `<video>`, `<audio>`, `<iframe>`, `<embed>`, `<object>`, `<form>`, `<area>`, `<input type="image">` → `outlinks` з полями `external` та `kind` (html, javascript, css, images, media, fonts, xml, pdf, plugins, other, unknown). У чергу потрапляють лише внутрішні.
+8. Збір URL з HTML: `<a>`, `<link>`, `<script>`, `<img>`, … — кожен URL одразу потрапляє в **єдиний плоский список** (`spider-result` на renderer). **Завантажуються** лише внутрішні навігаційні: `a[href]`, `area[href]`, `form[action]`, внутрішні `iframe[src]` (HTML). Зовнішні та не-HTML (JS, CSS, медіа) — `fetched: false`, поле `external: true/false`; HTTP-запит не робиться. Кожен завантажений URL — один раз (`visitedUrls`).
 
 **Завершення:** порожня черга або досягнуто `maxPages` (якщо > 0) → `spider-referrers-update` → `spider-end`.
 
@@ -73,7 +73,7 @@ Renderer
 | Константа | Значення | Рядок |
 |-----------|----------|-------|
 | `maxPages` (опція UI) | 0 = без ліміту | renderer → main |
-| `concurrency` (опція UI) | 1–20, за замовч. 3 | паралельних `crawl()` |
+| `concurrency` (опція UI) | 1–50, за замовч. 3 | паралельних `crawl()` |
 | HTTP timeout | 5000 ms | ~98 |
 | User-Agent | `MyElectronSpider/1.0` | ~81, ~101 |
 | Область обходу | один `hostname` | ~146, ~210 |
@@ -88,8 +88,9 @@ Renderer
 | R → M | `spider-pause` / `spider-resume` / `spider-stop` | керування скануванням |
 | R → M | `shell:open-external` | відкрити URL у браузері |
 | R ↔ M | `settings:get` / `settings:save` | налаштування (файл у userData) |
-| M → R | `spider-result` | об'єкт сторінки (див. нижче) |
-| M → R | `spider-progress` | `{ scanned, queue, active?, status? }` |
+| M → R | `spider-result` | один об'єкт посилання (завантажене) |
+| M → R | `spider-results-batch` | масив знайдених, не завантажених посилань |
+| M → R | `spider-progress` | `{ scanned, queue, active?, status?, finished? }` |
 | M → R | `spider-referrers-update` | `{ [url]: referrers[] }` |
 | M → R | `spider-end` | `message: string` |
 
@@ -99,26 +100,46 @@ Renderer
 
 ```js
 {
-  status: number | 'ERROR' | 'SKIPPED',
   url: string,
-  title: string,
-  referrers: string[],
+  status: number | 'ERROR' | 'SKIPPED' | '',
+  external: boolean,
+  fetched: boolean,
+  kind?: string,
+  tag?: string,
+  text?: string,
+  title?: string,
+  referrers: [{ href: string, text: string }],
+  contentType?: string,
   metaDescription?: string,
   metaCanonical?: string,
-  linkCount?: number,
   headings?: [{ level: number, text: string }],
   redirectUrl?: string,
-  outlinks?: [{ href: string, text: string, external?: boolean, kind?: string, tag?: string, rel?: string, relFollowAllowed?: boolean | null, relIndexAllowed?: boolean | null, relLabel?: string }]
+  rel?: string,
+  relFollowAllowed?: boolean | null,
+  relIndexAllowed?: boolean | null,
+  relLabel?: string
 }
 ```
 
-**Зберігання:** in-memory only. Main — `visitedUrls`, `queue`, `referrersMap`, `robotsCache`. Renderer — `scanResults: Map`. Персистентності немає.
+**Зберігання:** in-memory only. Main — `visitedUrls`, `reportedStubUrls`, `queue`, `referrersMap`, `robotsCache`. Renderer — `scanResults: Map` (усі посилання в одному масиві за ключем URL). Персистентності немає.
+
+## Фільтри таблиці (renderer.js)
+
+- **Тип** — класифікація **самого URL** в `scanResults`:
+  - `HTML` — завантажені URL з `Content-Type: text/html` / `application/xhtml`;
+  - `JavaScript` / `CSS` / `Media` / `Other` — за `kind`, тегом і розширенням URL;
+  - `Усі` — усі записи в `scanResults`.
+- **Джерело** — `external: true/false` (або `hostname` URL).
+- Стан фільтрів — `activeContentFilter`, `activeSourceFilter` у пам’яті; не скидається під час сканування.
+- Інші фільтри: статус HTTP, індексація, H1, дублікати.
+
+Колонки **Внутр.** / **Зовн.** — кількість посилань **з** обраної сторінки (через `referrersMap`: хто посилається **на** URL з цієї сторінки як джерела).
 
 ## CSV export (renderer.js)
 
 - BOM `\uFEFF` для Excel/кирилиці.
-- Колонки: URL, Status, Title, Meta Description, Canonical, Link Count, Redirect URL, Referrers, Headings.
-- Файл: `spider_results_YYYY-MM-DD.csv`.
+- Експорт відфільтрованих сторінок; колонки включають Internal Links, External Links.
+- Файл: `spider_filtered_YYYY-MM-DD.csv`.
 
 ## Залежності
 

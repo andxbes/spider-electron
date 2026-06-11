@@ -66,6 +66,7 @@ const MEDIA_URL_EXTENSIONS = new Set([
 ]);
 
 const visitedUrls = new Set();
+const reportedStubUrls = new Set();
 let htmlQueue = [];
 let mediaQueue = [];
 let maxPagesToVisit = 0; // 0 = без ліміту
@@ -77,13 +78,19 @@ function isPageLimitReached() {
 }
 
 function tryClaimUrl(url) {
-    if (visitedUrls.has(url)) {
+    let normalized;
+    try {
+        normalized = normalizePageUrl(url);
+    } catch {
+        return false;
+    }
+    if (visitedUrls.has(normalized)) {
         return false;
     }
     if (isPageLimitReached()) {
         return false;
     }
-    visitedUrls.add(url);
+    visitedUrls.add(normalized);
     return true;
 }
 
@@ -323,7 +330,7 @@ function classifyOutlinkKind(href, { element = '', rel = '', as = '' } = {}) {
         if (elementLower === 'anchor' || elementLower === 'area') {
             return 'html';
         }
-        return 'unknown';
+        return 'other';
     }
     return 'other';
 }
@@ -418,11 +425,11 @@ function formatOutlinkTag({ element = '', rel = '', as = '', tag = '' } = {}) {
     return 'link[href]';
 }
 
-function collectPageOutlinks($, currentUrl, allowedHostname) {
-    const outlinks = [];
+function collectPageLinks($, currentUrl, allowedHostname) {
+    const links = [];
     const seen = new Set();
 
-    const addOutlink = (href, text = '', context = {}) => {
+    const addLink = (href, text = '', context = {}) => {
         if (isSkippableHref(href)) {
             return;
         }
@@ -441,8 +448,8 @@ function collectPageOutlinks($, currentUrl, allowedHostname) {
             const relInfo = isAnchorRelContext(context)
                 ? parseAnchorRel(context.rel || '')
                 : { rel: '', relFollowAllowed: null, relIndexAllowed: null, relLabel: '' };
-            outlinks.push({
-                href: absoluteUrl,
+            links.push({
+                url: absoluteUrl,
                 text: String(text || '').trim().slice(0, 200),
                 external: !isSameHost(absoluteUrl, allowedHostname),
                 kind,
@@ -459,7 +466,7 @@ function collectPageOutlinks($, currentUrl, allowedHostname) {
 
     $('a[href]').each((_, link) => {
         const el = $(link);
-        addOutlink(el.attr('href'), extractElementText($, link), {
+        addLink(el.attr('href'), extractElementText($, link), {
             element: 'anchor',
             rel: el.attr('rel') || '',
         });
@@ -467,7 +474,7 @@ function collectPageOutlinks($, currentUrl, allowedHostname) {
 
     $('area[href]').each((_, area) => {
         const el = $(area);
-        addOutlink(el.attr('href'), el.attr('alt') || 'area', {
+        addLink(el.attr('href'), el.attr('alt') || 'area', {
             element: 'area',
             rel: el.attr('rel') || '',
         });
@@ -488,39 +495,39 @@ function collectPageOutlinks($, currentUrl, allowedHostname) {
         } else if (relLower.includes('preload') || relLower.includes('prefetch')) {
             element = as || 'link';
         }
-        addOutlink(el.attr('href'), rel || 'link', { element, rel, as });
+        addLink(el.attr('href'), rel || 'link', { element, rel, as });
     });
 
     $('script[src]').each((_, script) => {
-        addOutlink($(script).attr('src'), 'script', { element: 'script' });
+        addLink($(script).attr('src'), 'script', { element: 'script' });
     });
 
     $('iframe[src]').each((_, frame) => {
-        addOutlink($(frame).attr('src'), $(frame).attr('title') || 'iframe', { element: 'iframe' });
+        addLink($(frame).attr('src'), $(frame).attr('title') || 'iframe', { element: 'iframe' });
     });
 
     $('embed[src]').each((_, embed) => {
-        addOutlink($(embed).attr('src'), 'embed', { element: 'embed' });
+        addLink($(embed).attr('src'), 'embed', { element: 'embed' });
     });
 
     $('object[data]').each((_, object) => {
-        addOutlink($(object).attr('data'), $(object).attr('title') || 'object', { element: 'object' });
+        addLink($(object).attr('data'), $(object).attr('title') || 'object', { element: 'object' });
     });
 
     $('form[action]').each((_, form) => {
-        addOutlink($(form).attr('action'), 'form', { element: 'form' });
+        addLink($(form).attr('action'), 'form', { element: 'form' });
     });
 
     $('input[type="image"][src]').each((_, input) => {
-        addOutlink($(input).attr('src'), $(input).attr('alt') || 'input', { tag: 'input[type=image][src]' });
+        addLink($(input).attr('src'), $(input).attr('alt') || 'input', { tag: 'input[type=image][src]' });
     });
 
     $('img[src]').each((_, img) => {
         const el = $(img);
-        addOutlink(el.attr('src'), el.attr('alt') || el.attr('title') || 'image', { element: 'image' });
+        addLink(el.attr('src'), el.attr('alt') || el.attr('title') || 'image', { element: 'image' });
         const srcset = firstSrcsetUrl(el.attr('srcset'));
         if (srcset) {
-            addOutlink(srcset, el.attr('alt') || el.attr('title') || 'image', { tag: 'img[srcset]' });
+            addLink(srcset, el.attr('alt') || el.attr('title') || 'image', { tag: 'img[srcset]' });
         }
     });
 
@@ -528,28 +535,28 @@ function collectPageOutlinks($, currentUrl, allowedHostname) {
         const el = $(source);
         const srcset = firstSrcsetUrl(el.attr('srcset'));
         if (el.attr('src')) {
-            addOutlink(el.attr('src'), 'media', { tag: 'source[src]' });
+            addLink(el.attr('src'), 'media', { tag: 'source[src]' });
         }
         if (srcset) {
-            addOutlink(srcset, 'media', { tag: 'source[srcset]' });
+            addLink(srcset, 'media', { tag: 'source[srcset]' });
         }
     });
 
     $('video[src]').each((_, video) => {
-        addOutlink($(video).attr('src'), 'video', { element: 'video' });
+        addLink($(video).attr('src'), 'video', { element: 'video' });
     });
     $('video source[src]').each((_, source) => {
-        addOutlink($(source).attr('src'), 'video', { tag: 'video>source[src]' });
+        addLink($(source).attr('src'), 'video', { tag: 'video>source[src]' });
     });
 
     $('audio[src]').each((_, audio) => {
-        addOutlink($(audio).attr('src'), 'audio', { element: 'audio' });
+        addLink($(audio).attr('src'), 'audio', { element: 'audio' });
     });
     $('audio source[src]').each((_, source) => {
-        addOutlink($(source).attr('src'), 'audio', { tag: 'audio>source[src]' });
+        addLink($(source).attr('src'), 'audio', { tag: 'audio>source[src]' });
     });
 
-    return outlinks;
+    return links;
 }
 
 function extractMetaRobotsRaw($, response) {
@@ -575,8 +582,10 @@ function buildSpiderResult(overrides) {
         robotsAllowed: null,
         robotsRule: '',
         responseTimeMs: null,
-        linkCount: 0,
-        outlinks: [],
+        external: false,
+        fetched: true,
+        kind: '',
+        tag: '',
         headings: [],
         ...overrides,
     };
@@ -823,6 +832,61 @@ async function getRobots(urlObject) {
     };
     robotsCache.set(host, entry);
     return entry;
+}
+
+function isCrawlableLink(link) {
+    if (link.external) {
+        return false;
+    }
+    const tag = String(link.tag || '');
+    if (tag === 'a[href]' || tag === 'area[href]' || tag === 'form[action]') {
+        return true;
+    }
+    if (tag === 'iframe[src]' && link.kind === 'html') {
+        return true;
+    }
+    return false;
+}
+
+function buildDiscoveredLinkResult(link) {
+    return buildSpiderResult({
+        url: link.url,
+        status: '',
+        title: link.text || '',
+        external: Boolean(link.external),
+        fetched: false,
+        kind: link.kind || '',
+        tag: link.tag || '',
+        rel: link.rel || '',
+        relFollowAllowed: link.relFollowAllowed,
+        relIndexAllowed: link.relIndexAllowed,
+        relLabel: link.relLabel || '',
+        referrers: getReferrersListForUrl(link.url),
+    });
+}
+
+function reportDiscoveredLinks(browserWindow, links, sourceUrl, allowedHostname, { follow = true } = {}) {
+    const stubs = [];
+
+    for (const link of links) {
+        if (follow && !link.external && isCrawlableLink(link)) {
+            enqueueUrl(link.url, sourceUrl, allowedHostname, link.text);
+            continue;
+        }
+
+        addReferrer(link.url, sourceUrl, link.text);
+
+        if (visitedUrls.has(link.url) || isUrlQueued(link.url) || reportedStubUrls.has(link.url)) {
+            continue;
+        }
+
+        reportedStubUrls.add(link.url);
+        stubs.push(buildDiscoveredLinkResult(link));
+    }
+
+    if (stubs.length > 0) {
+        browserWindow.webContents.send('spider-results-batch', stubs);
+    }
 }
 
 function enqueueUrl(url, referrer, allowedHostname, linkText = '') {
@@ -1096,7 +1160,7 @@ async function crawl(url, referrer, browserWindow) {
         const title = extractPageTitle($);
         const description = extractMetaDescription($);
         const canonical = $('link[rel="canonical"]').attr('href') || '';
-        const outlinks = collectPageOutlinks($, currentUrl, urlObject.hostname);
+        const pageLinks = collectPageLinks($, currentUrl, urlObject.hostname);
 
         const headings = [];
         $('h1, h2, h3, h4, h5, h6').each((i, el) => {
@@ -1125,25 +1189,26 @@ async function crawl(url, referrer, browserWindow) {
                 metaDescription: description,
                 metaCanonical: canonical,
                 contentType: contentType || 'text/html',
-                linkCount: outlinks.length,
-                outlinks: outlinks,
+                external: false,
+                fetched: true,
+                kind: 'html',
+                tag: 'a[href]',
                 headings: headings,
                 responseTimeMs,
             },
             metaRobotsRaw
         ));
 
-        if (metaRobotsParsed.blocksFollow) {
-            console.log(`Знайдено nofollow на сторінці: ${currentUrl}`);
-            return;
-        }
-
         if (!isSessionPaused(session) && !session?.stopped) {
-            for (const outlink of outlinks) {
-                if (outlink.external) {
-                    continue;
-                }
-                enqueueUrl(outlink.href, currentUrl, urlObject.hostname, outlink.text);
+            reportDiscoveredLinks(
+                browserWindow,
+                pageLinks,
+                currentUrl,
+                urlObject.hostname,
+                { follow: !metaRobotsParsed.blocksFollow }
+            );
+            if (metaRobotsParsed.blocksFollow) {
+                console.log(`Знайдено nofollow на сторінці: ${currentUrl}`);
             }
         }
     } catch (error) {
@@ -1165,20 +1230,35 @@ async function crawl(url, referrer, browserWindow) {
 
 let scanSession = null;
 
+function sendFinalProgress(session, endMessage) {
+    session.browserWindow.webContents.send('spider-progress', {
+        scanned: visitedUrls.size,
+        queue: 0,
+        queueHtml: 0,
+        queueMedia: 0,
+        active: 0,
+        concurrency: session.concurrency,
+        paused: false,
+        pagesPerSecond: Math.round(session.getPagesPerSecond() * 10) / 10,
+        status: endMessage,
+        finished: true,
+    });
+}
+
 function completeScan(session, endMessage) {
     if (session.finished) {
         return;
     }
+    sendFinalProgress(session, endMessage);
     session.finished = true;
     if (scanSession === session) {
         scanSession = null;
     }
 
-    session.sendProgress();
     console.log(endMessage);
 
-    session.browserWindow.webContents.send('spider-referrers-update', buildAllReferrersPayload());
     session.browserWindow.webContents.send('spider-end', endMessage);
+    session.browserWindow.webContents.send('spider-referrers-update', buildAllReferrersPayload());
 }
 
 async function startSpider(startUrl, options, browserWindow) {
@@ -1343,6 +1423,7 @@ async function startSpider(startUrl, options, browserWindow) {
     scanSession = session;
 
     visitedUrls.clear();
+    reportedStubUrls.clear();
     clearQueues();
     referrersMap.clear();
     robotsCache.clear();

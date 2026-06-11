@@ -17,7 +17,11 @@ function cloneResultEntry(data) {
         robotsRule: data.robotsRule ?? '',
         responseTimeMs: data.responseTimeMs ?? null,
         redirectUrl: data.redirectUrl ?? '',
-        linkCount: data.linkCount ?? 0,
+        external: Boolean(data.external),
+        fetched: data.fetched ?? (data.status !== '' && data.status !== undefined && data.status !== null),
+        kind: data.kind ?? '',
+        tag: data.tag ?? '',
+        text: data.text ?? data.linkText ?? '',
         referrers: Array.isArray(data.referrers)
             ? data.referrers.map((ref) => (
                 typeof ref === 'string'
@@ -25,7 +29,6 @@ function cloneResultEntry(data) {
                     : { href: ref.href ?? '', text: ref.text ?? '' }
             ))
             : [],
-        outlinks: Array.isArray(data.outlinks) ? data.outlinks.map((link) => ({ ...link })) : [],
         headings: Array.isArray(data.headings) ? data.headings.map((heading) => ({ ...heading })) : [],
     };
 }

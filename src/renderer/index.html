@@ -142,15 +142,14 @@
             </select>
           </label>
           <label class="flex items-center gap-1.5">
-            <span class="text-zinc-500 whitespace-nowrap">Перегляд:</span>
+            <span class="text-zinc-500 whitespace-nowrap">Джерело:</span>
             <select
-              id="externalLinksFilter"
-              class="px-2 py-1 border border-zinc-300 rounded bg-white text-zinc-800 min-w-[10rem]"
+              id="sourceFilter"
+              class="px-2 py-1 border border-zinc-300 rounded bg-white text-zinc-800 min-w-[8rem]"
             >
-              <option value="pages">Сторінки</option>
-              <option value="links-all">Усі посилання</option>
-              <option value="links-internal">Внутрішні</option>
-              <option value="links-external">Зовнішні</option>
+              <option value="all">Усі</option>
+              <option value="internal">Внутрішні</option>
+              <option value="external">Зовнішні</option>
             </select>
           </label>
           <span id="filterCount" class="text-zinc-400 ml-auto whitespace-nowrap"></span>
@@ -171,18 +170,8 @@
                 <th class="sortable-th p-2 font-semibold min-w-[160px] cursor-pointer select-none hover:bg-zinc-200" data-sort="metaDescription" title="Сортувати">Meta Description</th>
                 <th class="sortable-th p-2 font-semibold w-14 cursor-pointer select-none hover:bg-zinc-200" data-sort="links" title="Сортувати">Links</th>
                 <th class="sortable-th p-2 font-semibold w-14 cursor-pointer select-none hover:bg-zinc-200" data-sort="inlinks" title="Сортувати">In</th>
-              </tr>
-            </thead>
-            <thead id="linksTableHead" class="sticky top-0 bg-zinc-100 border-b border-zinc-300 z-10 hidden">
-              <tr class="text-left text-zinc-600">
-                <th class="sortable-th p-2 font-semibold w-8 cursor-pointer select-none hover:bg-zinc-200" data-sort="index" title="Сортувати">#</th>
-                <th class="sortable-th p-2 font-semibold min-w-[220px] cursor-pointer select-none hover:bg-zinc-200" data-sort="url" title="Сортувати">URL</th>
-                <th class="sortable-th p-2 font-semibold w-20 cursor-pointer select-none hover:bg-zinc-200" data-sort="scope" title="Сортувати">Область</th>
-                <th class="sortable-th p-2 font-semibold min-w-[120px] cursor-pointer select-none hover:bg-zinc-200" data-sort="host" title="Сортувати">Host</th>
-                <th class="sortable-th p-2 font-semibold w-24 cursor-pointer select-none hover:bg-zinc-200" data-sort="kind" title="Сортувати">Тип</th>
-                <th class="sortable-th p-2 font-semibold min-w-[110px] cursor-pointer select-none hover:bg-zinc-200" data-sort="tag" title="Сортувати">Тег</th>
-                <th class="sortable-th p-2 font-semibold w-20 cursor-pointer select-none hover:bg-zinc-200" data-sort="pages" title="Сортувати">Сторінок</th>
-                <th class="sortable-th p-2 font-semibold min-w-[160px] cursor-pointer select-none hover:bg-zinc-200" data-sort="text" title="Сортувати">Текст</th>
+                <th class="sortable-th p-2 font-semibold w-14 cursor-pointer select-none hover:bg-zinc-200" data-sort="internalLinks" title="Сортувати">Внутр.</th>
+                <th class="sortable-th p-2 font-semibold w-14 cursor-pointer select-none hover:bg-zinc-200" data-sort="externalLinks" title="Сортувати">Зовн.</th>
               </tr>
             </thead>
             <tbody id="resultsTable"></tbody>
@@ -224,20 +213,6 @@
             class="detail-tab page-view-tab px-4 py-2 text-xs font-medium border-b-2 border-transparent text-zinc-600 hover:text-zinc-800"
           >
             Вихідні посилання
-          </button>
-          <button
-            type="button"
-            data-tab="link-details"
-            class="detail-tab link-view-tab hidden px-4 py-2 text-xs font-medium border-b-2 border-transparent text-zinc-600 hover:text-zinc-800"
-          >
-            Деталі посилання
-          </button>
-          <button
-            type="button"
-            data-tab="link-sources"
-            class="detail-tab link-view-tab hidden px-4 py-2 text-xs font-medium border-b-2 border-transparent text-zinc-600 hover:text-zinc-800"
-          >
-            Сторінки-джерела
           </button>
           <div class="flex-grow"></div>
           <div id="selectedUrlBar" class="flex items-center gap-1 px-2 py-1 max-w-lg min-w-0">
@@ -317,12 +292,12 @@
                 type="number"
                 id="concurrency"
                 min="1"
-                max="20"
+                max="50"
                 placeholder="3"
                 class="w-32 p-2 border border-zinc-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none"
               />
               <p class="text-sm text-zinc-500 mt-1">
-                Скільки сторінок сканувати одночасно (1–20). Більше — швидше, але вище навантаження на сайт.
+                Скільки сторінок сканувати одночасно (1–50). Більше — швидше, але вище навантаження на сайт і UI.
               </p>
             </section>
 

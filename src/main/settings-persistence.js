@@ -3,7 +3,7 @@ const path = require('node:path');
 const { app } = require('electron');
 
 const DEFAULT_CONCURRENCY = 3;
-const MAX_CONCURRENCY = 20;
+const MAX_CONCURRENCY = 50;
 
 const DEFAULT_SETTINGS = {
     useSitemap: false,
