@@ -1,6 +1,6 @@
 # Spider-Electron — внутрішня документація
 
-> Останнє оновлення: 2026-06-11 (title лише для HTML; ресурси без title)  
+> Останнє оновлення: 2026-06-11 (ленива таблиця: 100 рядків + scroll)  
 > Короткий довідник для розробки та правок. Детальніше про підтримку — [DOC_MAINTENANCE.md](./DOC_MAINTENANCE.md).
 
 ## Що це
@@ -131,6 +131,12 @@ Renderer
 ```
 
 **Зберігання:** in-memory only. Main — `visitedUrls`, `reportedStubUrls`, `queue`, `referrersMap`, `robotsCache`. Renderer — `scanResults: Map` (усі посилання в одному масиві за ключем URL). Персистентності немає.
+
+## Таблиця сторінок (renderer.js)
+
+- Спочатку рендериться **100** рядків (`TABLE_VISIBLE_INITIAL`); решта — по **50** при прокрутці вниз (`TABLE_LAZY_LOAD_SIZE`).
+- Лічильник «У таблиці: N з M» — скільки рядків у DOM vs скільки пройшло фільтри.
+- **CSV export** використовує `getDisplayedResults()` повністю, без обмеження таблиці.
 
 ## Фільтри таблиці (renderer.js)
 

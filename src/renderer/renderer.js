@@ -10,6 +10,7 @@ const controlsIdle = document.getElementById('controlsIdle');
 const controlsRunning = document.getElementById('controlsRunning');
 const controlsPaused = document.getElementById('controlsPaused');
 const resultsTable = document.getElementById('resultsTable');
+const pagesTableScroll = document.getElementById('pagesTableScroll');
 const detailContent = document.getElementById('detailContent');
 const selectedUrlHint = document.getElementById('selectedUrlHint');
 const selectedUrlBar = document.getElementById('selectedUrlBar');
@@ -93,9 +94,13 @@ let scanRefreshTimer = null;
 const REFRESH_TABLE_DELAY_MS = 250;
 const SCAN_REFRESH_DELAY_MS = 400;
 const STATUS_FILTER_REFRESH_EVERY_N_PAGES = 100;
-const TABLE_BATCH_RENDER_SIZE = 80;
-const TABLE_BATCH_RENDER_THRESHOLD = 200;
-let tableBatchRenderToken = 0;
+const TABLE_VISIBLE_INITIAL = 100;
+const TABLE_LAZY_LOAD_SIZE = 50;
+const TABLE_LAZY_SCROLL_THRESHOLD_PX = 160;
+let tableDisplayEntries = [];
+let tableRenderedCount = 0;
+let tableLazyLoadToken = 0;
+let tableScrollRaf = null;
 /** @type {Map<string, object[]> | null} */
 let outgoingLinksByPageCache = null;
 let lastScanProgress = null;
@@ -1143,18 +1148,12 @@ function duplicateCountBadge(count) {
     return `<span class="text-amber-600 font-semibold ml-1" title="Таких самих на ${count} сторінках">×${count}</span>`;
 }
 
-function referenceCountBadge(count) {
-    if (!count || count <= 1) {
+function titleCellBadge(data, dupCounts) {
+    const pageTitle = getPageTitle(data);
+    if (!pageTitle) {
         return '';
     }
-    return `<span class="text-amber-600 font-semibold ml-1" title="Підключено на ${count} сторінках">×${count}</span>`;
-}
-
-function titleCellBadge(data, dupCounts, inCount) {
-    if (!shouldHavePageTitle(data)) {
-        return referenceCountBadge(inCount);
-    }
-    return duplicateCountBadge(getTextDuplicateCount(getPageTitle(data), dupCounts.title));
+    return duplicateCountBadge(getTextDuplicateCount(pageTitle, dupCounts.title));
 }
 
 function setScanHostnameFromUrl(startUrl) {
@@ -1326,14 +1325,23 @@ function updateStatusFilterOptions({ force = false } = {}) {
     statusFilter.value = activeStatusFilter;
 }
 
-function updateFilterCount(shown, total) {
+function updateFilterCount(filteredCount, poolSize, renderedCount = filteredCount) {
     if (!filterCount) {
         return;
     }
-    if (shown === total) {
-        filterCount.textContent = total > 0 ? `Усього: ${total}` : '';
+    const inTable = Math.min(renderedCount, filteredCount);
+    if (inTable < filteredCount) {
+        if (filteredCount === poolSize) {
+            filterCount.textContent = `У таблиці: ${inTable} з ${filteredCount}`;
+        } else {
+            filterCount.textContent = `У таблиці: ${inTable} з ${filteredCount} (усього ${poolSize})`;
+        }
+        return;
+    }
+    if (filteredCount === poolSize) {
+        filterCount.textContent = poolSize > 0 ? `Усього: ${poolSize}` : '';
     } else {
-        filterCount.textContent = `Показано: ${shown} з ${total}`;
+        filterCount.textContent = `Показано: ${filteredCount} з ${poolSize}`;
     }
 }
 
@@ -1514,6 +1522,9 @@ function setUIState(state) {
 
 function resetTableRenderCache() {
     renderedTableUrlSet = new Set();
+    tableDisplayEntries = [];
+    tableRenderedCount = 0;
+    tableLazyLoadToken += 1;
     invalidateOutgoingLinksCache();
 }
 
@@ -1538,7 +1549,7 @@ function cancelPendingRefreshTable() {
         refreshTableTimer = null;
     }
     cancelPendingScanRefresh();
-    tableBatchRenderToken += 1;
+    tableLazyLoadToken += 1;
 }
 
 function scheduleStartupTableRefresh() {
@@ -1871,7 +1882,7 @@ function createTableRow(data, displayIndex) {
         <td class="p-2">${metaRobotsCellHtml(data)}</td>
         <td class="p-2">${robotsTxtCellHtml(data)}</td>
         <td class="p-2">${h1CellHtml(data, dupCounts)}</td>
-        <td class="p-2" title="${escapeHtml(pageTitle)}">${pageTitle ? escapeHtml(truncate(pageTitle, 50)) : '<span class="text-zinc-400 italic">—</span>'}${titleCellBadge(data, dupCounts, inCount)}</td>
+        <td class="p-2" title="${escapeHtml(pageTitle)}">${pageTitle ? escapeHtml(truncate(pageTitle, 50)) : '<span class="text-zinc-400 italic">—</span>'}${titleCellBadge(data, dupCounts)}</td>
         <td class="p-2" title="${escapeHtml(data.metaDescription)}">${data.metaDescription ? escapeHtml(truncate(data.metaDescription, 60)) : '<span class="text-zinc-400 italic">—</span>'}${shouldHavePageTitle(data) ? duplicateCountBadge(descDup) : ''}</td>
         <td class="p-2 text-center" title="${escapeHtml(linksTitle)}">${linkCount}</td>
         <td class="p-2 text-center">${inCount}</td>
@@ -1888,7 +1899,7 @@ function createTableRow(data, displayIndex) {
 }
 
 function finishTableRefresh(entries, poolSize, { incremental = false } = {}) {
-    updateFilterCount(entries.length, poolSize);
+    updateFilterCount(entries.length, poolSize, tableRenderedCount);
     if (uiState === 'idle' || uiState === 'paused') {
         updateExportButton();
     }
@@ -1903,31 +1914,70 @@ function finishTableRefresh(entries, poolSize, { incremental = false } = {}) {
     }
 }
 
-function refreshTableBatched(entries, poolSize, startIndex = 0, token = tableBatchRenderToken) {
-    if (token !== tableBatchRenderToken) {
-        return;
-    }
-
-    if (startIndex === 0) {
-        renderedTableUrlSet = new Set();
-        resultsTable.innerHTML = '';
-    }
-
-    const endIndex = Math.min(startIndex + TABLE_BATCH_RENDER_SIZE, entries.length);
+function appendTableRows(entries, startIndex, endIndex) {
     for (let i = startIndex; i < endIndex; i++) {
         const data = entries[i];
+        if (renderedTableUrlSet.has(data.url)) {
+            continue;
+        }
         resultsTable.appendChild(createTableRow(data, i + 1));
         renderedTableUrlSet.add(data.url);
     }
+}
 
-    if (endIndex < entries.length) {
-        requestAnimationFrame(() => {
-            refreshTableBatched(entries, poolSize, endIndex, token);
-        });
+function loadMoreTableRows() {
+    if (tableRenderedCount >= tableDisplayEntries.length) {
         return;
     }
+    const start = tableRenderedCount;
+    const end = Math.min(start + TABLE_LAZY_LOAD_SIZE, tableDisplayEntries.length);
+    if (start >= end) {
+        return;
+    }
+    appendTableRows(tableDisplayEntries, start, end);
+    tableRenderedCount = end;
+    updateFilterCount(
+        tableDisplayEntries.length,
+        getTableEntries().length,
+        tableRenderedCount
+    );
+}
 
-    finishTableRefresh(entries, poolSize);
+function maybeLoadMoreTableRows() {
+    if (!pagesTableScroll || tableRenderedCount >= tableDisplayEntries.length) {
+        return;
+    }
+    const { scrollTop, clientHeight, scrollHeight } = pagesTableScroll;
+    if (scrollTop + clientHeight < scrollHeight - TABLE_LAZY_SCROLL_THRESHOLD_PX) {
+        return;
+    }
+    loadMoreTableRows();
+}
+
+function renderTableInitialChunk(entries) {
+    tableLazyLoadToken += 1;
+    tableDisplayEntries = entries;
+    renderedTableUrlSet = new Set();
+    resultsTable.innerHTML = '';
+    tableRenderedCount = Math.min(TABLE_VISIBLE_INITIAL, entries.length);
+    if (tableRenderedCount > 0) {
+        appendTableRows(entries, 0, tableRenderedCount);
+    }
+    if (pagesTableScroll) {
+        pagesTableScroll.scrollTop = 0;
+    }
+}
+
+function refreshTableIncremental(entries, poolSize) {
+    tableDisplayEntries = entries;
+
+    if (tableRenderedCount < TABLE_VISIBLE_INITIAL) {
+        const target = Math.min(TABLE_VISIBLE_INITIAL, entries.length);
+        appendTableRows(entries, tableRenderedCount, target);
+        tableRenderedCount = target;
+    }
+
+    finishTableRefresh(entries, poolSize, { incremental: true });
 }
 
 function refreshTable() {
@@ -1940,39 +1990,33 @@ function refreshTable() {
     const poolSize = getTableEntries().length;
 
     if (incremental) {
-        entries.forEach((data, i) => {
-            if (renderedTableUrlSet.has(data.url)) {
-                return;
-            }
-            resultsTable.appendChild(createTableRow(data, i + 1));
-            renderedTableUrlSet.add(data.url);
-        });
-        finishTableRefresh(entries, poolSize, { incremental: true });
+        refreshTableIncremental(entries, poolSize);
         return;
     }
 
-    tableBatchRenderToken += 1;
-    const batchToken = tableBatchRenderToken;
-
     if (entries.length === 0) {
+        tableDisplayEntries = [];
+        tableRenderedCount = 0;
         renderedTableUrlSet = new Set();
         resultsTable.innerHTML = '';
         finishTableRefresh(entries, poolSize);
         return;
     }
 
-    if (entries.length >= TABLE_BATCH_RENDER_THRESHOLD) {
-        refreshTableBatched(entries, poolSize, 0, batchToken);
-        return;
-    }
-
-    renderedTableUrlSet = new Set();
-    resultsTable.innerHTML = '';
-    entries.forEach((data, i) => {
-        resultsTable.appendChild(createTableRow(data, i + 1));
-        renderedTableUrlSet.add(data.url);
-    });
+    renderTableInitialChunk(entries);
     finishTableRefresh(entries, poolSize);
+}
+
+if (pagesTableScroll) {
+    pagesTableScroll.addEventListener('scroll', () => {
+        if (tableScrollRaf) {
+            return;
+        }
+        tableScrollRaf = requestAnimationFrame(() => {
+            tableScrollRaf = null;
+            maybeLoadMoreTableRows();
+        });
+    });
 }
 
 function syncSelectedRowUi() {
@@ -2386,9 +2430,7 @@ function buildDetailRows(data) {
     const dupCounts = getDuplicateCounts();
     const titleDup = getTextDuplicateCount(getPageTitle(data), dupCounts.title);
     const descDup = getTextDuplicateCount(data.metaDescription, dupCounts.description);
-    if (!shouldHavePageTitle(data) && inCount > 1) {
-        rows.push(['Підключень', `<span class="text-amber-600 font-semibold">${inCount} сторінок</span>`]);
-    } else if (titleDup > 1) {
+    if (titleDup > 1) {
         rows.push(['Дублікатів Title', `<span class="text-amber-600 font-semibold">${titleDup} сторінок</span>`]);
     }
     if (shouldHavePageTitle(data) && descDup > 1) {
