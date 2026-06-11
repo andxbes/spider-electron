@@ -1,5 +1,12 @@
 @import "tailwindcss";
 
+@layer base {
+  html,
+  body {
+    @apply h-full w-full min-w-0;
+  }
+}
+
 @layer components {
   .panel-resize-handle {
     @apply shrink-0 h-2 cursor-ns-resize rounded-sm bg-zinc-200 hover:bg-blue-300 active:bg-blue-400 transition-colors relative;

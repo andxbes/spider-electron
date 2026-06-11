@@ -13,12 +13,18 @@ let mainWindow = null;
 // Функція створення головного вікна застосунку
 const createWindow = () => {
     mainWindow = new BrowserWindow({
-        width: 800,
-        height: 700,
+        width: 1280,
+        height: 800,
+        show: false,
+        backgroundColor: '#f4f4f5',
         webPreferences: {
             // Шлях до preload-скрипта для безпечної взаємодії з renderer
             preload: path.join(__dirname, '../preload/preload.js'),
         },
+    });
+
+    mainWindow.once('ready-to-show', () => {
+        mainWindow.show();
     });
 
     // Завантажуємо основний HTML-файл

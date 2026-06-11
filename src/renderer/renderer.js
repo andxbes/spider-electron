@@ -89,6 +89,9 @@ let scanRefreshTimer = null;
 const REFRESH_TABLE_DELAY_MS = 250;
 const SCAN_REFRESH_DELAY_MS = 400;
 const STATUS_FILTER_REFRESH_EVERY_N_PAGES = 100;
+const TABLE_BATCH_RENDER_SIZE = 80;
+const TABLE_BATCH_RENDER_THRESHOLD = 200;
+let tableBatchRenderToken = 0;
 /** @type {Map<string, object[]> | null} */
 let outgoingLinksByPageCache = null;
 let lastScanProgress = null;
@@ -1327,6 +1330,13 @@ function cancelPendingRefreshTable() {
         refreshTableTimer = null;
     }
     cancelPendingScanRefresh();
+    tableBatchRenderToken += 1;
+}
+
+function scheduleStartupTableRefresh() {
+    requestAnimationFrame(() => {
+        requestRefreshTable({ immediate: true });
+    });
 }
 
 function clearScanData() {
@@ -1489,7 +1499,7 @@ function restoreWorkspaceFromSession() {
     }
 
     lastScanProgress = workspace.lastScanProgress || null;
-    requestRefreshTable({ immediate: true });
+    scheduleStartupTableRefresh();
     updateUrlInputProgress(lastScanProgress);
     statusScanned.textContent = `Проскановано: ${scanResults.size}`;
     statusQueue.textContent = 'У черзі: 0';
@@ -1657,32 +1667,7 @@ function createTableRow(data, displayIndex) {
     return tr;
 }
 
-function refreshTable() {
-    const incremental = canIncrementallyRefreshTable();
-    if (!incremental || scanResults.size % STATUS_FILTER_REFRESH_EVERY_N_PAGES === 0) {
-        updateStatusFilterOptions();
-    }
-
-    const entries = getDisplayedResults();
-
-    if (incremental) {
-        entries.forEach((data, i) => {
-            if (renderedTableUrlSet.has(data.url)) {
-                return;
-            }
-            resultsTable.appendChild(createTableRow(data, i + 1));
-            renderedTableUrlSet.add(data.url);
-        });
-    } else {
-        renderedTableUrlSet = new Set();
-        resultsTable.innerHTML = '';
-        entries.forEach((data, i) => {
-            resultsTable.appendChild(createTableRow(data, i + 1));
-            renderedTableUrlSet.add(data.url);
-        });
-    }
-
-    const poolSize = getTableEntries().length;
+function finishTableRefresh(entries, poolSize, { incremental = false } = {}) {
     updateFilterCount(entries.length, poolSize);
     if (uiState === 'idle' || uiState === 'paused') {
         updateExportButton();
@@ -1696,6 +1681,69 @@ function refreshTable() {
     } else if (selectedUrl && getRowData(selectedUrl) && !incremental) {
         syncSelectedRowUi();
     }
+}
+
+function refreshTableBatched(entries, poolSize, startIndex = 0, token = tableBatchRenderToken) {
+    if (token !== tableBatchRenderToken) {
+        return;
+    }
+
+    if (startIndex === 0) {
+        renderedTableUrlSet = new Set();
+        resultsTable.innerHTML = '';
+    }
+
+    const endIndex = Math.min(startIndex + TABLE_BATCH_RENDER_SIZE, entries.length);
+    for (let i = startIndex; i < endIndex; i++) {
+        const data = entries[i];
+        resultsTable.appendChild(createTableRow(data, i + 1));
+        renderedTableUrlSet.add(data.url);
+    }
+
+    if (endIndex < entries.length) {
+        requestAnimationFrame(() => {
+            refreshTableBatched(entries, poolSize, endIndex, token);
+        });
+        return;
+    }
+
+    finishTableRefresh(entries, poolSize);
+}
+
+function refreshTable() {
+    const incremental = canIncrementallyRefreshTable();
+    if (!incremental || scanResults.size % STATUS_FILTER_REFRESH_EVERY_N_PAGES === 0) {
+        updateStatusFilterOptions();
+    }
+
+    const entries = getDisplayedResults();
+    const poolSize = getTableEntries().length;
+
+    if (incremental) {
+        entries.forEach((data, i) => {
+            if (renderedTableUrlSet.has(data.url)) {
+                return;
+            }
+            resultsTable.appendChild(createTableRow(data, i + 1));
+            renderedTableUrlSet.add(data.url);
+        });
+        finishTableRefresh(entries, poolSize, { incremental: true });
+        return;
+    }
+
+    if (entries.length >= TABLE_BATCH_RENDER_THRESHOLD) {
+        tableBatchRenderToken += 1;
+        refreshTableBatched(entries, poolSize, 0, tableBatchRenderToken);
+        return;
+    }
+
+    renderedTableUrlSet = new Set();
+    resultsTable.innerHTML = '';
+    entries.forEach((data, i) => {
+        resultsTable.appendChild(createTableRow(data, i + 1));
+        renderedTableUrlSet.add(data.url);
+    });
+    finishTableRefresh(entries, poolSize);
 }
 
 function syncSelectedRowUi() {
@@ -2450,15 +2498,33 @@ function initDetailPanelResize() {
         localStorage.removeItem(DETAIL_PANEL_HEIGHT_KEY);
     });
 
+    let resizeRaf = null;
     window.addEventListener('resize', () => {
-        setPanelHeight(panel.getBoundingClientRect().height);
+        if (resizeRaf) {
+            cancelAnimationFrame(resizeRaf);
+        }
+        resizeRaf = requestAnimationFrame(() => {
+            resizeRaf = null;
+            setPanelHeight(panel.getBoundingClientRect().height);
+        });
     });
 }
 
-initDetailPanelResize();
-restoreWorkspaceFromSession();
-rebuildContentTypeFilterOptions({ force: true });
-setUIState('idle');
+function runStartup() {
+    initDetailPanelResize();
+    setUIState('idle');
+
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+            const restored = restoreWorkspaceFromSession();
+            if (!restored) {
+                rebuildContentTypeFilterOptions({ force: true });
+            }
+        });
+    });
+}
+
+runStartup();
 
 window.addEventListener('pagehide', () => {
     persistWorkspaceNow();
