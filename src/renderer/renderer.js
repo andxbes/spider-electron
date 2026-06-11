@@ -11,7 +11,7 @@ const controlsRunning = document.getElementById('controlsRunning');
 const controlsPaused = document.getElementById('controlsPaused');
 const resultsTable = document.getElementById('resultsTable');
 const pagesTableHead = document.getElementById('pagesTableHead');
-const externalTableHead = document.getElementById('externalTableHead');
+const linksTableHead = document.getElementById('linksTableHead');
 const detailContent = document.getElementById('detailContent');
 const selectedUrlHint = document.getElementById('selectedUrlHint');
 const selectedUrlBar = document.getElementById('selectedUrlBar');
@@ -31,7 +31,7 @@ const filterCount = document.getElementById('filterCount');
 const scanResults = new Map();
 const insertionOrder = [];
 let selectedUrl = null;
-let selectedExternalUrl = null;
+let selectedLinkUrl = null;
 let activeTab = 'details';
 let sortState = { column: null, direction: 'asc' };
 /** @type {'all' | 'html' | 'media'} */
@@ -44,30 +44,9 @@ let activeIndexingFilter = 'all';
 let activeH1Filter = 'all';
 /** @type {'all' | 'h1' | 'title' | 'description'} */
 let activeDuplicateFilter = 'all';
-/** @type {'pages' | 'external'} */
-let activeExternalLinksFilter = 'pages';
+/** @type {'pages' | 'links-all' | 'links-internal' | 'links-external'} */
+let activeViewMode = 'pages';
 let scanHostname = '';
-
-const PAGE_CONTENT_TYPE_OPTIONS = [
-    { value: 'all', label: 'Усі' },
-    { value: 'html', label: 'HTML' },
-    { value: 'media', label: 'Медіа' },
-];
-
-const EXTERNAL_CONTENT_TYPE_OPTIONS = [
-    { value: 'all', label: 'Усі' },
-    { value: 'html', label: 'HTML' },
-    { value: 'javascript', label: 'JavaScript' },
-    { value: 'css', label: 'CSS' },
-    { value: 'images', label: 'Images' },
-    { value: 'media', label: 'Media' },
-    { value: 'fonts', label: 'Fonts' },
-    { value: 'xml', label: 'XML' },
-    { value: 'pdf', label: 'PDF' },
-    { value: 'plugins', label: 'Plugins' },
-    { value: 'other', label: 'Other' },
-    { value: 'unknown', label: 'Unknown' },
-];
 
 const OUTLINK_KIND_PRIORITY = [
     'javascript', 'css', 'html', 'images', 'media', 'fonts', 'xml', 'pdf', 'plugins', 'other', 'unknown',
@@ -87,6 +66,11 @@ const OUTLINK_KIND_LABELS = {
     unknown: 'Unknown',
 };
 
+const ALL_CONTENT_TYPE_OPTIONS = [
+    { value: 'all', label: 'Усі' },
+    ...Object.entries(OUTLINK_KIND_LABELS).map(([value, label]) => ({ value, label })),
+];
+
 const OUTLINK_IMAGE_EXTENSIONS = new Set([
     'jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'ico', 'bmp', 'avif', 'tif', 'tiff',
 ]);
@@ -97,7 +81,8 @@ const OUTLINK_FONT_EXTENSIONS = new Set(['woff', 'woff2', 'ttf', 'eot', 'otf']);
 const OUTLINK_PLUGIN_EXTENSIONS = new Set(['swf', 'flv']);
 const OUTLINK_HTML_EXTENSIONS = new Set(['html', 'htm', 'php', 'asp', 'aspx', 'jsp', 'shtml']);
 let duplicateCountsCache = null;
-let externalLinksIndexCache = null;
+let linksIndexCache = null;
+let knownPresentContentTypesKey = '';
 let latestReferrersByUrl = new Map();
 /** @type {'idle' | 'running' | 'paused'} */
 let uiState = 'idle';
@@ -374,22 +359,36 @@ function invalidateDuplicateCounts() {
     duplicateCountsCache = null;
 }
 
-function invalidateExternalLinksIndex() {
-    externalLinksIndexCache = null;
+function invalidateLinksIndex() {
+    linksIndexCache = null;
+    knownPresentContentTypesKey = '';
 }
 
-function isExternalListView() {
-    return activeExternalLinksFilter === 'external';
+function isPagesListView() {
+    return activeViewMode === 'pages';
 }
 
-function normalizeTableViewMode(value) {
-    if (value === 'external' || value === 'has-external') {
-        return 'external';
+function isLinksListView() {
+    return !isPagesListView();
+}
+
+function normalizeViewMode(value) {
+    if (value === 'pages') {
+        return 'pages';
+    }
+    if (value === 'external' || value === 'links-external' || value === 'has-external') {
+        return 'links-external';
+    }
+    if (value === 'links-internal' || value === 'internal' || value === 'no-external') {
+        return 'links-internal';
+    }
+    if (value === 'links-all' || value === 'all' || value === 'links') {
+        return 'links-all';
     }
     return 'pages';
 }
 
-function getExternalLinkHost(href) {
+function getLinkHost(href) {
     try {
         return new URL(href).hostname;
     } catch {
@@ -489,14 +488,48 @@ function resolvePrimaryOutlinkKind(kinds) {
     return kinds[0] || 'unknown';
 }
 
-function getContentTypeFilterOptions() {
-    return isExternalListView() ? EXTERNAL_CONTENT_TYPE_OPTIONS : PAGE_CONTENT_TYPE_OPTIONS;
+function collectPresentContentTypes() {
+    const present = new Set();
+    if (isPagesListView()) {
+        for (const page of scanResults.values()) {
+            const resourceType = getResourceType(page);
+            if (resourceType === 'html' || resourceType === 'media') {
+                present.add(resourceType);
+            }
+            for (const link of page.outlinks || []) {
+                present.add(getOutlinkKind(link));
+            }
+        }
+        return present;
+    }
+
+    for (const entry of getLinksIndex()) {
+        if (!passesLinkScopeFilter(entry)) {
+            continue;
+        }
+        for (const kind of entry.kinds) {
+            present.add(kind);
+        }
+    }
+    return present;
 }
 
-function rebuildContentTypeFilterOptions({ preserveValue = true } = {}) {
+function getContentTypeFilterOptions() {
+    const present = collectPresentContentTypes();
+    return ALL_CONTENT_TYPE_OPTIONS.filter((option) => option.value === 'all' || present.has(option.value));
+}
+
+function rebuildContentTypeFilterOptions({ preserveValue = true, force = false } = {}) {
     if (!contentTypeFilter) {
         return;
     }
+    const present = collectPresentContentTypes();
+    const presentKey = [...present].sort().join(',');
+    if (!force && presentKey === knownPresentContentTypesKey && contentTypeFilter.options.length > 0) {
+        return;
+    }
+    knownPresentContentTypesKey = presentKey;
+
     const options = getContentTypeFilterOptions();
     const previous = preserveValue ? activeContentFilter : 'all';
     contentTypeFilter.innerHTML = '';
@@ -509,6 +542,18 @@ function rebuildContentTypeFilterOptions({ preserveValue = true } = {}) {
     const hasPrevious = options.some((option) => option.value === previous);
     activeContentFilter = hasPrevious ? previous : 'all';
     contentTypeFilter.value = activeContentFilter;
+}
+
+function pageMatchesContentTypeFilter(data, filter) {
+    if (filter === 'html') {
+        return getResourceType(data) === 'html'
+            || (data.outlinks || []).some((link) => getOutlinkKind(link) === 'html');
+    }
+    if (filter === 'media') {
+        return getResourceType(data) === 'media'
+            || (data.outlinks || []).some((link) => getOutlinkKind(link) === 'media');
+    }
+    return (data.outlinks || []).some((link) => getOutlinkKind(link) === filter);
 }
 
 function getOutlinkKind(link) {
@@ -544,27 +589,135 @@ function getOutlinkTag(link) {
     return inferOutlinkTag(link);
 }
 
-function externalEntryHasKind(entry, kind) {
+function isRelApplicableLink(link) {
+    const tag = getOutlinkTag(link);
+    return tag === 'a[href]' || tag === 'area[href]';
+}
+
+function parseLinkRel(rel) {
+    const raw = String(rel || '').trim();
+    if (!raw) {
+        return {
+            rel: '',
+            relFollowAllowed: true,
+            relIndexAllowed: true,
+            relLabel: 'follow',
+        };
+    }
+    const tokens = raw.toLowerCase().split(/[\s,]+/).filter(Boolean);
+    const hasNofollow = tokens.includes('nofollow');
+    const hasSponsored = tokens.includes('sponsored');
+    const hasUgc = tokens.includes('ugc');
+    const restricted = hasNofollow || hasSponsored || hasUgc;
+    const markers = [
+        hasNofollow ? 'nofollow' : '',
+        hasSponsored ? 'sponsored' : '',
+        hasUgc ? 'ugc' : '',
+    ].filter(Boolean);
+    return {
+        rel: raw,
+        relFollowAllowed: !restricted,
+        relIndexAllowed: !restricted,
+        relLabel: markers.length ? markers.join(', ') : raw,
+    };
+}
+
+function getLinkRelInfo(link) {
+    if (!isRelApplicableLink(link)) {
+        return {
+            rel: '',
+            relFollowAllowed: null,
+            relIndexAllowed: null,
+            relLabel: '',
+            applicable: false,
+        };
+    }
+    if (
+        link.rel !== undefined
+        || link.relFollowAllowed !== undefined
+        || link.relIndexAllowed !== undefined
+        || link.relLabel !== undefined
+    ) {
+        const hasRel = Boolean(link.rel);
+        return {
+            rel: link.rel || '',
+            relFollowAllowed: link.relFollowAllowed ?? true,
+            relIndexAllowed: link.relIndexAllowed ?? true,
+            relLabel: link.relLabel || (hasRel ? link.rel : 'follow'),
+            applicable: true,
+        };
+    }
+    return { ...parseLinkRel(''), applicable: true };
+}
+
+function formatRelAllowedStatus(allowed, { naText = '—' } = {}) {
+    if (allowed === null || allowed === undefined) {
+        return `<span class="text-zinc-400 italic">${naText}</span>`;
+    }
+    if (allowed) {
+        return '<span class="text-green-700 font-medium">Дозволено</span>';
+    }
+    return '<span class="text-amber-700 font-medium">Обмежено</span>';
+}
+
+function summarizeEntryRelInfo(sources) {
+    const relSources = sources
+        .map((source) => getLinkRelInfo(source))
+        .filter((info) => info.applicable);
+    if (!relSources.length) {
+        return {
+            applicable: false,
+            rel: '',
+            relLabel: '',
+            relFollowAllowed: null,
+            relIndexAllowed: null,
+            mixed: false,
+        };
+    }
+
+    const relValues = [...new Set(relSources.map((info) => info.rel).filter(Boolean))];
+    const relLabels = [...new Set(relSources.map((info) => info.relLabel).filter(Boolean))];
+    const followValues = [...new Set(relSources.map((info) => info.relFollowAllowed))];
+    const indexValues = [...new Set(relSources.map((info) => info.relIndexAllowed))];
+
+    return {
+        applicable: true,
+        rel: relValues.length === 1 ? relValues[0] : relValues.join('; '),
+        relLabel: relLabels.length === 1 ? relLabels[0] : relLabels.join('; '),
+        relFollowAllowed: followValues.length === 1 ? followValues[0] : null,
+        relIndexAllowed: indexValues.length === 1 ? indexValues[0] : null,
+        mixed: relValues.length > 1 || followValues.length > 1 || indexValues.length > 1,
+    };
+}
+
+function linkEntryHasKind(entry, kind) {
     if (entry.kinds?.includes(kind)) {
         return true;
     }
     return entry.sources.some((source) => source.kind === kind);
 }
 
-function passesExternalContentFilter(entry) {
+function passesLinkContentFilter(entry) {
     if (activeContentFilter === 'all') {
         return true;
     }
-    return externalEntryHasKind(entry, activeContentFilter);
+    return linkEntryHasKind(entry, activeContentFilter);
 }
 
-function buildExternalLinksIndex() {
+function passesLinkScopeFilter(entry) {
+    if (activeViewMode === 'links-internal') {
+        return !entry.external;
+    }
+    if (activeViewMode === 'links-external') {
+        return entry.external;
+    }
+    return true;
+}
+
+function buildLinksIndex() {
     const map = new Map();
     for (const page of scanResults.values()) {
         for (const link of page.outlinks || []) {
-            if (!isExternalOutlink(link)) {
-                continue;
-            }
             const href = link.href;
             if (!href) {
                 continue;
@@ -572,15 +725,21 @@ function buildExternalLinksIndex() {
             if (!map.has(href)) {
                 map.set(href, {
                     href,
-                    host: getExternalLinkHost(href),
+                    host: getLinkHost(href),
+                    external: isExternalOutlink(link),
                     sources: [],
                 });
             }
+            const relInfo = getLinkRelInfo(link);
             map.get(href).sources.push({
                 pageUrl: page.url,
                 text: link.text || '',
                 kind: getOutlinkKind(link),
                 tag: getOutlinkTag(link),
+                rel: relInfo.rel,
+                relFollowAllowed: relInfo.relFollowAllowed,
+                relIndexAllowed: relInfo.relIndexAllowed,
+                relLabel: relInfo.relLabel,
             });
         }
     }
@@ -600,35 +759,41 @@ function buildExternalLinksIndex() {
     });
 }
 
-function getExternalLinksIndex() {
-    if (!externalLinksIndexCache) {
-        externalLinksIndexCache = buildExternalLinksIndex();
+function getLinksIndex() {
+    if (!linksIndexCache) {
+        linksIndexCache = buildLinksIndex();
     }
-    return externalLinksIndexCache;
+    return linksIndexCache;
 }
 
-function getExternalEntry(href) {
-    return getExternalLinksIndex().find((entry) => entry.href === href) || null;
+function getLinkEntry(href) {
+    return getLinksIndex().find((entry) => entry.href === href) || null;
 }
 
-function getDisplayedExternalLinks() {
-    const entries = getExternalLinksIndex().filter(passesExternalContentFilter);
+function getDisplayedLinks() {
+    const entries = getLinksIndex()
+        .filter(passesLinkScopeFilter)
+        .filter(passesLinkContentFilter);
     const sorted = [...entries];
     if (sortState.column) {
-        sorted.sort(compareExternalRows);
+        sorted.sort(compareLinkRows);
     } else {
         sorted.sort((a, b) => a.href.localeCompare(b.href));
     }
     return sorted;
 }
 
-function compareExternalRows(a, b) {
+function compareLinkRows(a, b) {
     const { column, direction } = sortState;
     const mul = direction === 'asc' ? 1 : -1;
     let va;
     let vb;
 
     switch (column) {
+        case 'scope':
+            va = a.external ? 'зовнішнє' : 'внутрішнє';
+            vb = b.external ? 'зовнішнє' : 'внутрішнє';
+            break;
         case 'host':
             va = a.host.toLowerCase();
             vb = b.host.toLowerCase();
@@ -662,26 +827,26 @@ function compareExternalRows(a, b) {
 
 function updateTableHeadMode() {
     if (pagesTableHead) {
-        pagesTableHead.classList.toggle('hidden', isExternalListView());
+        pagesTableHead.classList.toggle('hidden', isLinksListView());
     }
-    if (externalTableHead) {
-        externalTableHead.classList.toggle('hidden', !isExternalListView());
+    if (linksTableHead) {
+        linksTableHead.classList.toggle('hidden', !isLinksListView());
     }
 }
 
 function updateDetailTabsVisibility() {
     document.querySelectorAll('.page-view-tab').forEach((el) => {
-        el.classList.toggle('hidden', isExternalListView());
+        el.classList.toggle('hidden', isLinksListView());
     });
-    document.querySelectorAll('.external-view-tab').forEach((el) => {
-        el.classList.toggle('hidden', !isExternalListView());
+    document.querySelectorAll('.link-view-tab').forEach((el) => {
+        el.classList.toggle('hidden', !isLinksListView());
     });
 
-    if (isExternalListView()) {
-        if (!['external-details', 'external-sources'].includes(activeTab)) {
-            activeTab = 'external-details';
+    if (isLinksListView()) {
+        if (!['link-details', 'link-sources'].includes(activeTab)) {
+            activeTab = 'link-details';
         }
-    } else if (activeTab === 'external-details' || activeTab === 'external-sources') {
+    } else if (activeTab === 'link-details' || activeTab === 'link-sources') {
         activeTab = 'details';
     }
 
@@ -696,7 +861,7 @@ function updateDetailTabsVisibility() {
 }
 
 function updatePageFiltersDisabled() {
-    const disabled = isExternalListView();
+    const disabled = isLinksListView();
     for (const el of [statusFilter, indexingFilter, h1Filter, duplicateFilter]) {
         if (el) {
             el.disabled = disabled;
@@ -808,7 +973,7 @@ function countExternalOutlinks(data) {
 }
 
 function passesTableFilters(data) {
-    if (activeContentFilter !== 'all' && getResourceType(data) !== activeContentFilter) {
+    if (activeContentFilter !== 'all' && !pageMatchesContentTypeFilter(data, activeContentFilter)) {
         return false;
     }
     if (!matchesStatusFilter(data.status, activeStatusFilter)) {
@@ -935,10 +1100,10 @@ function resetTableFilters() {
     activeIndexingFilter = 'all';
     activeH1Filter = 'all';
     activeDuplicateFilter = 'all';
-    activeExternalLinksFilter = 'pages';
+    activeViewMode = 'pages';
     knownStatusCodes = new Set();
     invalidateDuplicateCounts();
-    invalidateExternalLinksIndex();
+    invalidateLinksIndex();
     if (statusFilter) {
         statusFilter.value = 'all';
     }
@@ -1061,8 +1226,8 @@ async function openUrlInBrowser(url) {
 
 function updateExportButton() {
     const canExport = uiState === 'idle' || uiState === 'paused';
-    const hasVisibleRows = isExternalListView()
-        ? getDisplayedExternalLinks().length > 0
+    const hasVisibleRows = isLinksListView()
+        ? getDisplayedLinks().length > 0
         : getFilteredResults().length > 0;
     exportButton.disabled = !hasVisibleRows;
     exportButton.classList.toggle('hidden', !canExport || scanResults.size === 0);
@@ -1112,12 +1277,12 @@ function setUIState(state) {
 
 function clearScanData() {
     invalidateDuplicateCounts();
-    invalidateExternalLinksIndex();
+    invalidateLinksIndex();
     latestReferrersByUrl = new Map();
     scanResults.clear();
     insertionOrder.length = 0;
     selectedUrl = null;
-    selectedExternalUrl = null;
+    selectedLinkUrl = null;
     sortState = { column: null, direction: 'asc' };
     updateSortIndicators();
     resultsTable.innerHTML = '';
@@ -1142,7 +1307,7 @@ function collectWorkspaceSnapshot() {
             insertionOrder,
             startUrl: urlInput.value.trim(),
             lastScanProgress,
-            selectedUrl: isExternalListView() ? null : selectedUrl,
+            selectedUrl: isLinksListView() ? null : selectedUrl,
             statusHint: statusText.textContent,
             filters: {
                 content: activeContentFilter,
@@ -1150,10 +1315,10 @@ function collectWorkspaceSnapshot() {
                 indexing: activeIndexingFilter,
                 h1: activeH1Filter,
                 duplicate: activeDuplicateFilter,
-                externalLinks: activeExternalLinksFilter,
+                viewMode: activeViewMode,
             },
         }),
-        selectedExternalUrl: isExternalListView() ? selectedExternalUrl : null,
+        selectedLinkUrl: isLinksListView() ? selectedLinkUrl : null,
     };
 }
 
@@ -1184,12 +1349,8 @@ function applyFilterState(filters) {
     activeIndexingFilter = filters.indexing || 'all';
     activeH1Filter = filters.h1 || 'all';
     activeDuplicateFilter = filters.duplicate || 'all';
-    activeExternalLinksFilter = normalizeTableViewMode(filters.externalLinks);
-    if (isExternalListView() && filters.externalType) {
-        activeContentFilter = filters.externalType;
-    } else {
-        activeContentFilter = filters.content || 'all';
-    }
+    activeViewMode = normalizeViewMode(filters.viewMode || filters.externalLinks);
+    activeContentFilter = filters.content || filters.externalType || 'all';
     if (statusFilter) {
         statusFilter.value = activeStatusFilter;
     }
@@ -1203,7 +1364,7 @@ function applyFilterState(filters) {
         duplicateFilter.value = activeDuplicateFilter;
     }
     if (externalLinksFilter) {
-        externalLinksFilter.value = activeExternalLinksFilter;
+        externalLinksFilter.value = activeViewMode;
     }
     rebuildContentTypeFilterOptions();
     updateTableHeadMode();
@@ -1267,9 +1428,10 @@ function restoreWorkspaceFromSession() {
         statusText.textContent = workspace.statusHint;
     }
 
-    if (isExternalListView()) {
-        if (workspace.selectedExternalUrl && getExternalEntry(workspace.selectedExternalUrl)) {
-            selectExternalRow(workspace.selectedExternalUrl);
+    if (isLinksListView()) {
+        const linkUrl = workspace.selectedLinkUrl || workspace.selectedExternalUrl;
+        if (linkUrl && getLinkEntry(linkUrl)) {
+            selectLinkRow(linkUrl);
         }
     } else if (workspace.selectedUrl && scanResults.has(workspace.selectedUrl)) {
         selectRow(workspace.selectedUrl);
@@ -1379,16 +1541,22 @@ function updateSortIndicators() {
     });
 }
 
-function createExternalTableRow(entry, displayIndex) {
+function formatLinkScopeLabel(external) {
+    return external ? 'Зовнішнє' : 'Внутрішнє';
+}
+
+function createLinkTableRow(entry, displayIndex) {
     const tr = document.createElement('tr');
-    tr.dataset.externalUrl = entry.href;
-    tr.className = 'border-b border-zinc-100 cursor-pointer hover:bg-zinc-50 bg-amber-50/20';
-    if (selectedExternalUrl === entry.href) {
+    tr.dataset.linkUrl = entry.href;
+    tr.className = `border-b border-zinc-100 cursor-pointer hover:bg-zinc-50${entry.external ? ' bg-amber-50/20' : ''}`;
+    if (selectedLinkUrl === entry.href) {
         tr.classList.add('bg-blue-50');
     }
+    const scopeClass = entry.external ? 'text-amber-700' : 'text-emerald-700';
     tr.innerHTML = `
         <td class="p-2 text-zinc-400">${displayIndex}</td>
         <td class="p-2">${urlCellHtml(entry.href)}</td>
+        <td class="p-2 whitespace-nowrap ${scopeClass} font-medium">${formatLinkScopeLabel(entry.external)}</td>
         <td class="p-2 font-mono text-zinc-600">${entry.host ? escapeHtml(entry.host) : '<span class="text-zinc-400 italic">—</span>'}</td>
         <td class="p-2 text-zinc-600" title="${escapeHtml(entry.kinds.join(', '))}">${escapeHtml(formatOutlinkKindLabel(entry.kind))}${entry.kinds.length > 1 ? `<span class="text-zinc-400 text-[10px]">+${entry.kinds.length - 1}</span>` : ''}</td>
         <td class="p-2 font-mono text-zinc-600 text-[11px]" title="${escapeHtml(entry.tags.join(', '))}">${escapeHtml(entry.tag)}${entry.tags.length > 1 ? `<span class="text-zinc-400 text-[10px]">+${entry.tags.length - 1}</span>` : ''}</td>
@@ -1399,7 +1567,7 @@ function createExternalTableRow(entry, displayIndex) {
         if (e.target.closest('.url-copy, .url-open')) {
             return;
         }
-        selectExternalRow(entry.href);
+        selectLinkRow(entry.href);
     });
     return tr;
 }
@@ -1446,25 +1614,26 @@ function refreshTable() {
     updateDetailTabsVisibility();
     updatePageFiltersDisabled();
 
-    if (isExternalListView()) {
-        const entries = getDisplayedExternalLinks();
+    if (isLinksListView()) {
+        const allInScope = getLinksIndex().filter(passesLinkScopeFilter);
+        const entries = getDisplayedLinks();
         resultsTable.innerHTML = '';
         entries.forEach((entry, i) => {
-            resultsTable.appendChild(createExternalTableRow(entry, i + 1));
+            resultsTable.appendChild(createLinkTableRow(entry, i + 1));
         });
 
-        updateFilterCount(entries.length, getExternalLinksIndex().length);
+        updateFilterCount(entries.length, allInScope.length);
         if (uiState === 'idle' || uiState === 'paused') {
             updateExportButton();
         }
 
-        if (selectedExternalUrl && !entries.some((row) => row.href === selectedExternalUrl)) {
+        if (selectedLinkUrl && !entries.some((row) => row.href === selectedLinkUrl)) {
             document.querySelectorAll('#resultsTable tr').forEach((tr) => {
                 tr.classList.remove('bg-blue-50');
             });
-            detailContent.innerHTML = '<p class="p-4 text-zinc-400 italic">Оберіть зовнішнє посилання у таблиці вище</p>';
-        } else if (selectedExternalUrl && getExternalEntry(selectedExternalUrl)) {
-            syncSelectedExternalRowUi();
+            detailContent.innerHTML = '<p class="p-4 text-zinc-400 italic">Оберіть посилання у таблиці вище</p>';
+        } else if (selectedLinkUrl && getLinkEntry(selectedLinkUrl)) {
+            syncSelectedLinkRowUi();
         }
         return;
     }
@@ -1507,16 +1676,16 @@ function syncSelectedRowUi() {
     renderDetailPanel();
 }
 
-function syncSelectedExternalRowUi() {
-    if (!selectedExternalUrl || !getExternalEntry(selectedExternalUrl)) {
+function syncSelectedLinkRowUi() {
+    if (!selectedLinkUrl || !getLinkEntry(selectedLinkUrl)) {
         return;
     }
-    selectedUrlHint.textContent = truncate(selectedExternalUrl, 80);
-    selectedUrlHint.title = selectedExternalUrl;
+    selectedUrlHint.textContent = truncate(selectedLinkUrl, 80);
+    selectedUrlHint.title = selectedLinkUrl;
     if (selectedUrlBar) {
         selectedUrlBar.querySelectorAll('.url-copy, .url-open').forEach((el) => el.remove());
         const actions = document.createElement('span');
-        actions.innerHTML = urlActionButtons(selectedExternalUrl);
+        actions.innerHTML = urlActionButtons(selectedLinkUrl);
         selectedUrlBar.appendChild(actions);
     }
     renderDetailPanel();
@@ -1548,7 +1717,7 @@ function upsertScanResult(data) {
         data.outlinks = [];
     }
     invalidateDuplicateCounts();
-    invalidateExternalLinksIndex();
+    invalidateLinksIndex();
     const isNew = !scanResults.has(data.url);
     if (isNew) {
         insertionOrder.push(data.url);
@@ -1557,11 +1726,11 @@ function upsertScanResult(data) {
     requestRefreshTable();
     scheduleWorkspacePersist();
 
-    if (isNew && !selectedUrl && !isExternalListView()) {
+    if (isNew && !selectedUrl && isPagesListView()) {
         selectedUrl = data.url;
     } else if (selectedUrl === data.url) {
         renderDetailPanel();
-    } else if (selectedExternalUrl && isExternalListView()) {
+    } else if (selectedLinkUrl && isLinksListView()) {
         renderDetailPanel();
     }
 }
@@ -1620,16 +1789,18 @@ if (duplicateFilter) {
 
 if (externalLinksFilter) {
     externalLinksFilter.addEventListener('change', () => {
-        activeExternalLinksFilter = normalizeTableViewMode(externalLinksFilter.value);
-        if (isExternalListView()) {
+        activeViewMode = normalizeViewMode(externalLinksFilter.value);
+        if (isLinksListView()) {
             selectedUrl = null;
-            selectedExternalUrl = null;
-            sortState = { column: 'url', direction: 'asc' };
-            updateSortIndicators();
+            if (!selectedLinkUrl) {
+                sortState = { column: 'url', direction: 'asc' };
+                updateSortIndicators();
+            }
         } else {
-            selectedExternalUrl = null;
+            selectedLinkUrl = null;
         }
-        rebuildContentTypeFilterOptions({ preserveValue: false });
+        knownPresentContentTypesKey = '';
+        rebuildContentTypeFilterOptions({ preserveValue: true });
         updateTableHeadMode();
         updateDetailTabsVisibility();
         updatePageFiltersDisabled();
@@ -1654,7 +1825,7 @@ document.querySelectorAll('.sortable-th').forEach((th) => {
 
 function selectRow(url) {
     selectedUrl = url;
-    selectedExternalUrl = null;
+    selectedLinkUrl = null;
     document.querySelectorAll('#resultsTable tr').forEach((tr) => {
         tr.classList.toggle('bg-blue-50', tr.dataset.url === url);
     });
@@ -1662,13 +1833,13 @@ function selectRow(url) {
     scheduleWorkspacePersist();
 }
 
-function selectExternalRow(href) {
-    selectedExternalUrl = href;
+function selectLinkRow(href) {
+    selectedLinkUrl = href;
     selectedUrl = null;
     document.querySelectorAll('#resultsTable tr').forEach((tr) => {
-        tr.classList.toggle('bg-blue-50', tr.dataset.externalUrl === href);
+        tr.classList.toggle('bg-blue-50', tr.dataset.linkUrl === href);
     });
-    syncSelectedExternalRowUi();
+    syncSelectedLinkRowUi();
     scheduleWorkspacePersist();
 }
 
@@ -1704,11 +1875,19 @@ function renderLinkTable(links, emptyText, caption = '') {
                     : '';
                 const kind = getOutlinkKind(link);
                 const tag = getOutlinkTag(link);
+                const relInfo = getLinkRelInfo(link);
+                const relCell = relInfo.applicable
+                    ? (relInfo.rel
+                        ? `<span class="font-mono">${escapeHtml(relInfo.rel)}</span>`
+                        : '<span class="text-zinc-500 italic">follow</span>')
+                    : '<span class="text-zinc-400 italic">—</span>';
                 return `
         <tr class="border-b border-zinc-100 hover:bg-zinc-50${external ? ' bg-amber-50/40' : ''}">
             <td class="p-2">${urlCellHtml(link.href || link)}${typeBadge}</td>
             <td class="p-2 text-zinc-500 whitespace-nowrap">${escapeHtml(formatOutlinkKindLabel(kind))}</td>
             <td class="p-2 font-mono text-zinc-600 text-[11px] whitespace-nowrap">${escapeHtml(tag)}</td>
+            <td class="p-2 text-zinc-600">${relCell}</td>
+            <td class="p-2 whitespace-nowrap">${formatRelAllowedStatus(relInfo.relFollowAllowed)}</td>
             <td class="p-2 text-zinc-600">${link.text ? escapeHtml(link.text) : '<span class="text-zinc-400 italic">—</span>'}</td>
         </tr>`;
             }
@@ -1720,6 +1899,8 @@ function renderLinkTable(links, emptyText, caption = '') {
                 <th class="p-2 font-semibold">URL</th>
                 <th class="p-2 font-semibold w-24">Тип</th>
                 <th class="p-2 font-semibold min-w-[110px]">Тег</th>
+                <th class="p-2 font-semibold min-w-[90px]">rel</th>
+                <th class="p-2 font-semibold w-24">Перехід</th>
                 <th class="p-2 font-semibold w-1/3">Текст посилання</th>
             </tr>
         </thead>
@@ -1806,13 +1987,24 @@ function renderSourcePagesTable(sources, emptyText, caption = '') {
         : '';
     const rows = sources
         .map(
-            (source) => `
+            (source) => {
+                const relInfo = getLinkRelInfo(source);
+                const relCell = relInfo.applicable
+                    ? (relInfo.rel
+                        ? `<span class="font-mono">${escapeHtml(relInfo.rel)}</span>`
+                        : '<span class="text-zinc-500 italic">follow</span>')
+                    : '<span class="text-zinc-400 italic">—</span>';
+                return `
         <tr class="border-b border-zinc-100 hover:bg-zinc-50">
             <td class="p-2">${urlCellHtml(source.pageUrl)}</td>
             <td class="p-2 text-zinc-500 whitespace-nowrap">${escapeHtml(formatOutlinkKindLabel(source.kind))}</td>
             <td class="p-2 font-mono text-zinc-600 text-[11px] whitespace-nowrap">${escapeHtml(source.tag || '—')}</td>
+            <td class="p-2 text-zinc-600">${relCell}</td>
+            <td class="p-2 whitespace-nowrap">${formatRelAllowedStatus(relInfo.relFollowAllowed)}</td>
+            <td class="p-2 whitespace-nowrap">${formatRelAllowedStatus(relInfo.relIndexAllowed)}</td>
             <td class="p-2 text-zinc-600">${source.text ? escapeHtml(source.text) : '<span class="text-zinc-400 italic">—</span>'}</td>
-        </tr>`
+        </tr>`;
+            }
         )
         .join('');
     return `${captionHtml}<table class="w-full border-collapse">
@@ -1821,6 +2013,9 @@ function renderSourcePagesTable(sources, emptyText, caption = '') {
                 <th class="p-2 font-semibold">Сторінка</th>
                 <th class="p-2 font-semibold w-24">Тип</th>
                 <th class="p-2 font-semibold min-w-[110px]">Тег</th>
+                <th class="p-2 font-semibold min-w-[90px]">rel</th>
+                <th class="p-2 font-semibold w-24">Перехід</th>
+                <th class="p-2 font-semibold w-24">Індексація</th>
                 <th class="p-2 font-semibold w-1/3">Текст посилання</th>
             </tr>
         </thead>
@@ -1828,42 +2023,72 @@ function renderSourcePagesTable(sources, emptyText, caption = '') {
     </table>`;
 }
 
-function buildExternalDetailRows(entry) {
+function buildLinkDetailRows(entry) {
     const kindLabel = entry.kinds.length > 1
         ? entry.kinds.map((kind) => formatOutlinkKindLabel(kind)).join(', ')
         : formatOutlinkKindLabel(entry.kind);
     const tagLabel = entry.tags.length > 1
         ? entry.tags.join(', ')
         : entry.tag;
-    return [
-        ['Зовнішній URL', urlCellHtml(entry.href)],
+    const relSummary = summarizeEntryRelInfo(entry.sources);
+    const rows = [
+        ['URL', urlCellHtml(entry.href)],
+        ['Область', escapeHtml(formatLinkScopeLabel(entry.external))],
         ['Host', entry.host ? escapeHtml(entry.host) : '<span class="text-zinc-400 italic">—</span>'],
         ['Тип', escapeHtml(kindLabel)],
         ['Тег', `<span class="font-mono">${escapeHtml(tagLabel)}</span>`],
         ['Сторінок-джерел', String(entry.sourceCount)],
         ['Текст посилання', entry.sampleText ? escapeHtml(entry.sampleText) : '<span class="text-zinc-400 italic">—</span>'],
     ];
+
+    if (relSummary.applicable) {
+        rows.push([
+            'rel',
+            relSummary.rel
+                ? `<span class="font-mono">${escapeHtml(relSummary.rel)}</span>`
+                : '<span class="text-zinc-500 italic">follow (за замовчуванням)</span>',
+        ]);
+        rows.push([
+            'Перехід по посиланню',
+            relSummary.mixed
+                ? '<span class="text-zinc-500 italic">Різні значення на сторінках-джерелах</span>'
+                : formatRelAllowedStatus(relSummary.relFollowAllowed),
+        ]);
+        rows.push([
+            'Індексація (передача сигналу)',
+            relSummary.mixed
+                ? '<span class="text-zinc-500 italic">Різні значення на сторінках-джерелах</span>'
+                : formatRelAllowedStatus(relSummary.relIndexAllowed),
+        ]);
+        if (relSummary.relLabel && relSummary.relLabel !== 'follow') {
+            rows.push(['Маркери rel', escapeHtml(relSummary.relLabel)]);
+        }
+    } else {
+        rows.push(['rel', '<span class="text-zinc-400 italic">Не застосовується для цього тега</span>']);
+    }
+
+    return rows;
 }
 
 function renderDetailPanel() {
-    if (isExternalListView()) {
-        if (!selectedExternalUrl) {
-            detailContent.innerHTML = '<p class="p-4 text-zinc-400 italic">Оберіть зовнішнє посилання у таблиці вище</p>';
+    if (isLinksListView()) {
+        if (!selectedLinkUrl) {
+            detailContent.innerHTML = '<p class="p-4 text-zinc-400 italic">Оберіть посилання у таблиці вище</p>';
             return;
         }
-        const entry = getExternalEntry(selectedExternalUrl);
+        const entry = getLinkEntry(selectedLinkUrl);
         if (!entry) {
-            detailContent.innerHTML = '<p class="p-4 text-zinc-400 italic">Зовнішнє посилання не знайдено</p>';
+            detailContent.innerHTML = '<p class="p-4 text-zinc-400 italic">Посилання не знайдено</p>';
             return;
         }
-        if (activeTab === 'external-sources') {
+        if (activeTab === 'link-sources') {
             detailContent.innerHTML = renderSourcePagesTable(
                 entry.sources,
                 'Немає сторінок-джерел',
                 `Знайдено на ${entry.sourceCount} стор.`
             );
         } else {
-            detailContent.innerHTML = renderDetailTable(buildExternalDetailRows(entry));
+            detailContent.innerHTML = renderDetailTable(buildLinkDetailRows(entry));
         }
         return;
     }
@@ -1895,37 +2120,44 @@ function renderDetailPanel() {
 exportButton.addEventListener('click', () => {
     const bom = '\uFEFF';
 
-    if (isExternalListView()) {
-        const entries = getDisplayedExternalLinks();
+    if (isLinksListView()) {
+        const entries = getDisplayedLinks();
         if (entries.length === 0) {
-            alert('Немає зовнішніх посилань для експорту.');
+            alert('Немає посилань для експорту за поточними фільтрами.');
             return;
         }
-        const headers = ['External URL', 'Host', 'Type', 'Tag', 'Source Pages Count', 'Source Pages', 'Link Texts', 'Source Types', 'Source Tags'];
+        const headers = ['URL', 'Scope', 'Host', 'Type', 'Tag', 'Rel', 'Follow Allowed', 'Index Allowed', 'Source Pages Count', 'Source Pages', 'Link Texts', 'Source Types', 'Source Tags', 'Source Rels'];
         const csvRows = [headers.join(',')];
         for (const entry of entries) {
+            const relSummary = summarizeEntryRelInfo(entry.sources);
             const pages = entry.sources.map((source) => source.pageUrl).join('; ');
             const texts = entry.sources.map((source) => source.text || '—').join('; ');
             const sourceTypes = entry.sources.map((source) => formatOutlinkKindLabel(source.kind)).join('; ');
             const sourceTags = entry.sources.map((source) => source.tag || '—').join('; ');
+            const sourceRels = entry.sources.map((source) => getLinkRelInfo(source).rel || 'follow').join('; ');
             const kindLabel = entry.kinds.map((kind) => formatOutlinkKindLabel(kind)).join('; ');
             const tagLabel = entry.tags.join('; ');
             csvRows.push([
                 `"${entry.href.replace(/"/g, '""')}"`,
+                `"${formatLinkScopeLabel(entry.external)}"`,
                 `"${entry.host.replace(/"/g, '""')}"`,
                 `"${kindLabel.replace(/"/g, '""')}"`,
                 `"${tagLabel.replace(/"/g, '""')}"`,
+                `"${(relSummary.rel || 'follow').replace(/"/g, '""')}"`,
+                `"${relSummary.relFollowAllowed === false ? 'Обмежено' : (relSummary.relFollowAllowed ? 'Дозволено' : 'Різні')}"`,
+                `"${relSummary.relIndexAllowed === false ? 'Обмежено' : (relSummary.relIndexAllowed ? 'Дозволено' : 'Різні')}"`,
                 `"${entry.sourceCount}"`,
                 `"${pages.replace(/"/g, '""')}"`,
                 `"${texts.replace(/"/g, '""')}"`,
                 `"${sourceTypes.replace(/"/g, '""')}"`,
                 `"${sourceTags.replace(/"/g, '""')}"`,
+                `"${sourceRels.replace(/"/g, '""')}"`,
             ].join(','));
         }
         const blob = new Blob([bom + csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
         const link = document.createElement('a');
         link.href = URL.createObjectURL(blob);
-        link.download = `spider_external_links_${new Date().toISOString().slice(0, 10)}.csv`;
+        link.download = `spider_links_${new Date().toISOString().slice(0, 10)}.csv`;
         link.click();
         return;
     }
@@ -2034,7 +2266,7 @@ function applySessionDump(dump, filePath = '') {
     populateScanResults(normalized);
 
     selectedUrl = null;
-    selectedExternalUrl = null;
+    selectedLinkUrl = null;
     lastScanProgress = normalized.progressAtSave;
     requestRefreshTable({ immediate: true });
     setUIState('idle');
@@ -2245,6 +2477,7 @@ function initDetailPanelResize() {
 
 initDetailPanelResize();
 restoreWorkspaceFromSession();
+rebuildContentTypeFilterOptions({ force: true });
 setUIState('idle');
 
 window.addEventListener('pagehide', () => {

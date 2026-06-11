@@ -1,6 +1,6 @@
 # Spider-Electron — внутрішня документація
 
-> Останнє оновлення: 2026-06-11 (типи зовнішніх ресурсів)  
+> Останнє оновлення: 2026-06-11 (rel на посиланнях)  
 > Короткий довідник для розробки та правок. Детальніше про підтримку — [DOC_MAINTENANCE.md](./DOC_MAINTENANCE.md).
 
 ## Що це
@@ -108,7 +108,7 @@ Renderer
   linkCount?: number,
   headings?: [{ level: number, text: string }],
   redirectUrl?: string,
-  outlinks?: [{ href: string, text: string, external?: boolean, kind?: string, tag?: string }]
+  outlinks?: [{ href: string, text: string, external?: boolean, kind?: string, tag?: string, rel?: string, relFollowAllowed?: boolean | null, relIndexAllowed?: boolean | null, relLabel?: string }]
 }
 ```
 

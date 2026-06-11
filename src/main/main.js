@@ -328,6 +328,41 @@ function classifyOutlinkKind(href, { element = '', rel = '', as = '' } = {}) {
     return 'other';
 }
 
+function parseAnchorRel(rel) {
+    const raw = String(rel || '').trim();
+    if (!raw) {
+        return {
+            rel: '',
+            relFollowAllowed: true,
+            relIndexAllowed: true,
+            relLabel: 'follow',
+        };
+    }
+
+    const tokens = raw.toLowerCase().split(/[\s,]+/).filter(Boolean);
+    const hasNofollow = tokens.includes('nofollow');
+    const hasSponsored = tokens.includes('sponsored');
+    const hasUgc = tokens.includes('ugc');
+    const restricted = hasNofollow || hasSponsored || hasUgc;
+    const markers = [
+        hasNofollow ? 'nofollow' : '',
+        hasSponsored ? 'sponsored' : '',
+        hasUgc ? 'ugc' : '',
+    ].filter(Boolean);
+
+    return {
+        rel: raw,
+        relFollowAllowed: !restricted,
+        relIndexAllowed: !restricted,
+        relLabel: markers.length ? markers.join(', ') : raw,
+    };
+}
+
+function isAnchorRelContext(context = {}) {
+    const element = String(context.element || '').toLowerCase();
+    return element === 'anchor' || element === 'area';
+}
+
 function formatOutlinkTag({ element = '', rel = '', as = '', tag = '' } = {}) {
     if (tag) {
         return tag;
@@ -395,17 +430,27 @@ function collectPageOutlinks($, currentUrl, allowedHostname) {
             const absoluteUrl = normalizePageUrl(new URL(href, currentUrl).href);
             const tag = formatOutlinkTag(context);
             const kind = classifyOutlinkKind(absoluteUrl, context);
-            const seenKey = `${tag}\0${absoluteUrl}`;
+            const relPart = isAnchorRelContext(context)
+                ? String(context.rel || '').toLowerCase().trim()
+                : '';
+            const seenKey = `${tag}\0${relPart}\0${absoluteUrl}`;
             if (seen.has(seenKey)) {
                 return;
             }
             seen.add(seenKey);
+            const relInfo = isAnchorRelContext(context)
+                ? parseAnchorRel(context.rel || '')
+                : { rel: '', relFollowAllowed: null, relIndexAllowed: null, relLabel: '' };
             outlinks.push({
                 href: absoluteUrl,
                 text: String(text || '').trim().slice(0, 200),
                 external: !isSameHost(absoluteUrl, allowedHostname),
                 kind,
                 tag,
+                rel: relInfo.rel,
+                relFollowAllowed: relInfo.relFollowAllowed,
+                relIndexAllowed: relInfo.relIndexAllowed,
+                relLabel: relInfo.relLabel,
             });
         } catch {
             // невалідний URL
@@ -413,11 +458,19 @@ function collectPageOutlinks($, currentUrl, allowedHostname) {
     };
 
     $('a[href]').each((_, link) => {
-        addOutlink($(link).attr('href'), extractElementText($, link), { element: 'anchor' });
+        const el = $(link);
+        addOutlink(el.attr('href'), extractElementText($, link), {
+            element: 'anchor',
+            rel: el.attr('rel') || '',
+        });
     });
 
     $('area[href]').each((_, area) => {
-        addOutlink($(area).attr('href'), $(area).attr('alt') || 'area', { element: 'area' });
+        const el = $(area);
+        addOutlink(el.attr('href'), el.attr('alt') || 'area', {
+            element: 'area',
+            rel: el.attr('rel') || '',
+        });
     });
 
     $('link[href]').each((_, link) => {

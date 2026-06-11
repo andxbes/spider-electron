@@ -91,8 +91,6 @@
               class="px-2 py-1 border border-zinc-300 rounded bg-white text-zinc-800 min-w-[7rem]"
             >
               <option value="all">Усі</option>
-              <option value="html">HTML</option>
-              <option value="media">Медіа</option>
             </select>
           </label>
           <label class="flex items-center gap-1.5">
@@ -150,7 +148,9 @@
               class="px-2 py-1 border border-zinc-300 rounded bg-white text-zinc-800 min-w-[10rem]"
             >
               <option value="pages">Сторінки</option>
-              <option value="external">Зовнішні посилання</option>
+              <option value="links-all">Усі посилання</option>
+              <option value="links-internal">Внутрішні</option>
+              <option value="links-external">Зовнішні</option>
             </select>
           </label>
           <span id="filterCount" class="text-zinc-400 ml-auto whitespace-nowrap"></span>
@@ -173,15 +173,16 @@
                 <th class="sortable-th p-2 font-semibold w-14 cursor-pointer select-none hover:bg-zinc-200" data-sort="inlinks" title="Сортувати">In</th>
               </tr>
             </thead>
-            <thead id="externalTableHead" class="sticky top-0 bg-zinc-100 border-b border-zinc-300 z-10 hidden">
+            <thead id="linksTableHead" class="sticky top-0 bg-zinc-100 border-b border-zinc-300 z-10 hidden">
               <tr class="text-left text-zinc-600">
                 <th class="sortable-th p-2 font-semibold w-8 cursor-pointer select-none hover:bg-zinc-200" data-sort="index" title="Сортувати">#</th>
-                <th class="sortable-th p-2 font-semibold min-w-[240px] cursor-pointer select-none hover:bg-zinc-200" data-sort="url" title="Сортувати">Зовнішній URL</th>
-                <th class="sortable-th p-2 font-semibold min-w-[140px] cursor-pointer select-none hover:bg-zinc-200" data-sort="host" title="Сортувати">Host</th>
+                <th class="sortable-th p-2 font-semibold min-w-[220px] cursor-pointer select-none hover:bg-zinc-200" data-sort="url" title="Сортувати">URL</th>
+                <th class="sortable-th p-2 font-semibold w-20 cursor-pointer select-none hover:bg-zinc-200" data-sort="scope" title="Сортувати">Область</th>
+                <th class="sortable-th p-2 font-semibold min-w-[120px] cursor-pointer select-none hover:bg-zinc-200" data-sort="host" title="Сортувати">Host</th>
                 <th class="sortable-th p-2 font-semibold w-24 cursor-pointer select-none hover:bg-zinc-200" data-sort="kind" title="Сортувати">Тип</th>
-                <th class="sortable-th p-2 font-semibold min-w-[120px] cursor-pointer select-none hover:bg-zinc-200" data-sort="tag" title="Сортувати">Тег</th>
+                <th class="sortable-th p-2 font-semibold min-w-[110px] cursor-pointer select-none hover:bg-zinc-200" data-sort="tag" title="Сортувати">Тег</th>
                 <th class="sortable-th p-2 font-semibold w-20 cursor-pointer select-none hover:bg-zinc-200" data-sort="pages" title="Сортувати">Сторінок</th>
-                <th class="sortable-th p-2 font-semibold min-w-[200px] cursor-pointer select-none hover:bg-zinc-200" data-sort="text" title="Сортувати">Текст</th>
+                <th class="sortable-th p-2 font-semibold min-w-[160px] cursor-pointer select-none hover:bg-zinc-200" data-sort="text" title="Сортувати">Текст</th>
               </tr>
             </thead>
             <tbody id="resultsTable"></tbody>
@@ -226,15 +227,15 @@
           </button>
           <button
             type="button"
-            data-tab="external-details"
-            class="detail-tab external-view-tab hidden px-4 py-2 text-xs font-medium border-b-2 border-transparent text-zinc-600 hover:text-zinc-800"
+            data-tab="link-details"
+            class="detail-tab link-view-tab hidden px-4 py-2 text-xs font-medium border-b-2 border-transparent text-zinc-600 hover:text-zinc-800"
           >
-            Деталі
+            Деталі посилання
           </button>
           <button
             type="button"
-            data-tab="external-sources"
-            class="detail-tab external-view-tab hidden px-4 py-2 text-xs font-medium border-b-2 border-transparent text-zinc-600 hover:text-zinc-800"
+            data-tab="link-sources"
+            class="detail-tab link-view-tab hidden px-4 py-2 text-xs font-medium border-b-2 border-transparent text-zinc-600 hover:text-zinc-800"
           >
             Сторінки-джерела
           </button>
