@@ -208,7 +208,7 @@ function isSkippableHref(href) {
         || value === '#';
 }
 
-function collectPageOutlinks($, currentUrl) {
+function collectPageOutlinks($, currentUrl, allowedHostname) {
     const outlinks = [];
     const seen = new Set();
 
@@ -225,6 +225,7 @@ function collectPageOutlinks($, currentUrl) {
             outlinks.push({
                 href: absoluteUrl,
                 text: String(text || '').trim().slice(0, 200),
+                external: !isSameHost(absoluteUrl, allowedHostname),
             });
         } catch {
             // невалідний URL
@@ -814,7 +815,7 @@ async function crawl(url, referrer, browserWindow) {
         const title = extractPageTitle($);
         const description = extractMetaDescription($);
         const canonical = $('link[rel="canonical"]').attr('href') || '';
-        const outlinks = collectPageOutlinks($, currentUrl);
+        const outlinks = collectPageOutlinks($, currentUrl, urlObject.hostname);
 
         const headings = [];
         $('h1, h2, h3, h4, h5, h6').each((i, el) => {
@@ -858,6 +859,9 @@ async function crawl(url, referrer, browserWindow) {
 
         if (!isSessionPaused(session) && !session?.stopped) {
             for (const outlink of outlinks) {
+                if (outlink.external) {
+                    continue;
+                }
                 enqueueUrl(outlink.href, currentUrl, urlObject.hostname, outlink.text);
             }
         }

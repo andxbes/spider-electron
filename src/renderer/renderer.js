@@ -10,6 +10,8 @@ const controlsIdle = document.getElementById('controlsIdle');
 const controlsRunning = document.getElementById('controlsRunning');
 const controlsPaused = document.getElementById('controlsPaused');
 const resultsTable = document.getElementById('resultsTable');
+const pagesTableHead = document.getElementById('pagesTableHead');
+const externalTableHead = document.getElementById('externalTableHead');
 const detailContent = document.getElementById('detailContent');
 const selectedUrlHint = document.getElementById('selectedUrlHint');
 const selectedUrlBar = document.getElementById('selectedUrlBar');
@@ -23,11 +25,13 @@ const statusFilter = document.getElementById('statusFilter');
 const indexingFilter = document.getElementById('indexingFilter');
 const h1Filter = document.getElementById('h1Filter');
 const duplicateFilter = document.getElementById('duplicateFilter');
+const externalLinksFilter = document.getElementById('externalLinksFilter');
 const filterCount = document.getElementById('filterCount');
 
 const scanResults = new Map();
 const insertionOrder = [];
 let selectedUrl = null;
+let selectedExternalUrl = null;
 let activeTab = 'details';
 let sortState = { column: null, direction: 'asc' };
 /** @type {'all' | 'html' | 'media'} */
@@ -40,7 +44,11 @@ let activeIndexingFilter = 'all';
 let activeH1Filter = 'all';
 /** @type {'all' | 'h1' | 'title' | 'description'} */
 let activeDuplicateFilter = 'all';
+/** @type {'pages' | 'external'} */
+let activeExternalLinksFilter = 'pages';
+let scanHostname = '';
 let duplicateCountsCache = null;
+let externalLinksIndexCache = null;
 let latestReferrersByUrl = new Map();
 /** @type {'idle' | 'running' | 'paused'} */
 let uiState = 'idle';
@@ -317,6 +325,157 @@ function invalidateDuplicateCounts() {
     duplicateCountsCache = null;
 }
 
+function invalidateExternalLinksIndex() {
+    externalLinksIndexCache = null;
+}
+
+function isExternalListView() {
+    return activeExternalLinksFilter === 'external';
+}
+
+function normalizeTableViewMode(value) {
+    if (value === 'external' || value === 'has-external') {
+        return 'external';
+    }
+    return 'pages';
+}
+
+function getExternalLinkHost(href) {
+    try {
+        return new URL(href).hostname;
+    } catch {
+        return '';
+    }
+}
+
+function buildExternalLinksIndex() {
+    const map = new Map();
+    for (const page of scanResults.values()) {
+        for (const link of page.outlinks || []) {
+            if (!isExternalOutlink(link)) {
+                continue;
+            }
+            const href = link.href;
+            if (!href) {
+                continue;
+            }
+            if (!map.has(href)) {
+                map.set(href, {
+                    href,
+                    host: getExternalLinkHost(href),
+                    sources: [],
+                });
+            }
+            map.get(href).sources.push({
+                pageUrl: page.url,
+                text: link.text || '',
+            });
+        }
+    }
+
+    return [...map.values()].map((entry) => ({
+        ...entry,
+        sourceCount: entry.sources.length,
+        sampleText: entry.sources.find((source) => source.text)?.text || '',
+    }));
+}
+
+function getExternalLinksIndex() {
+    if (!externalLinksIndexCache) {
+        externalLinksIndexCache = buildExternalLinksIndex();
+    }
+    return externalLinksIndexCache;
+}
+
+function getExternalEntry(href) {
+    return getExternalLinksIndex().find((entry) => entry.href === href) || null;
+}
+
+function getDisplayedExternalLinks() {
+    const entries = [...getExternalLinksIndex()];
+    if (sortState.column) {
+        entries.sort(compareExternalRows);
+    } else {
+        entries.sort((a, b) => a.href.localeCompare(b.href));
+    }
+    return entries;
+}
+
+function compareExternalRows(a, b) {
+    const { column, direction } = sortState;
+    const mul = direction === 'asc' ? 1 : -1;
+    let va;
+    let vb;
+
+    switch (column) {
+        case 'host':
+            va = a.host.toLowerCase();
+            vb = b.host.toLowerCase();
+            break;
+        case 'pages':
+            va = a.sourceCount;
+            vb = b.sourceCount;
+            break;
+        case 'text':
+            va = a.sampleText.toLowerCase();
+            vb = b.sampleText.toLowerCase();
+            break;
+        case 'url':
+        default:
+            va = a.href;
+            vb = b.href;
+    }
+
+    if (va < vb) return -1 * mul;
+    if (va > vb) return 1 * mul;
+    return a.href.localeCompare(b.href) * mul;
+}
+
+function updateTableHeadMode() {
+    if (pagesTableHead) {
+        pagesTableHead.classList.toggle('hidden', isExternalListView());
+    }
+    if (externalTableHead) {
+        externalTableHead.classList.toggle('hidden', !isExternalListView());
+    }
+}
+
+function updateDetailTabsVisibility() {
+    document.querySelectorAll('.page-view-tab').forEach((el) => {
+        el.classList.toggle('hidden', isExternalListView());
+    });
+    document.querySelectorAll('.external-view-tab').forEach((el) => {
+        el.classList.toggle('hidden', !isExternalListView());
+    });
+
+    if (isExternalListView()) {
+        if (!['external-details', 'external-sources'].includes(activeTab)) {
+            activeTab = 'external-details';
+        }
+    } else if (activeTab === 'external-details' || activeTab === 'external-sources') {
+        activeTab = 'details';
+    }
+
+    document.querySelectorAll('.detail-tab').forEach((btn) => {
+        const isActive = btn.dataset.tab === activeTab;
+        btn.classList.toggle('border-blue-600', isActive);
+        btn.classList.toggle('text-blue-700', isActive);
+        btn.classList.toggle('bg-white', isActive);
+        btn.classList.toggle('border-transparent', !isActive);
+        btn.classList.toggle('text-zinc-600', !isActive);
+    });
+}
+
+function updatePageFiltersDisabled() {
+    const disabled = isExternalListView();
+    for (const el of [contentTypeFilter, statusFilter, indexingFilter, h1Filter, duplicateFilter]) {
+        if (el) {
+            el.disabled = disabled;
+            el.classList.toggle('opacity-50', disabled);
+        }
+    }
+}
+
 function buildFieldDuplicateCounts(getValue) {
     const counts = new Map();
     for (const data of scanResults.values()) {
@@ -377,6 +536,45 @@ function duplicateCountBadge(count) {
         return '';
     }
     return `<span class="text-amber-600 font-semibold ml-1" title="Таких самих на ${count} сторінках">×${count}</span>`;
+}
+
+function setScanHostnameFromUrl(startUrl) {
+    try {
+        scanHostname = new URL(startUrl).hostname;
+    } catch {
+        scanHostname = '';
+    }
+}
+
+function getScanHostname() {
+    if (scanHostname) {
+        return scanHostname;
+    }
+    try {
+        return new URL(urlInput.value.trim()).hostname;
+    } catch {
+        return '';
+    }
+}
+
+function isExternalOutlink(link) {
+    if (typeof link.external === 'boolean') {
+        return link.external;
+    }
+    const href = link.href || link;
+    const host = getScanHostname();
+    if (!host) {
+        return false;
+    }
+    try {
+        return new URL(href).hostname !== host;
+    } catch {
+        return false;
+    }
+}
+
+function countExternalOutlinks(data) {
+    return (data.outlinks || []).filter(isExternalOutlink).length;
 }
 
 function passesTableFilters(data) {
@@ -507,8 +705,10 @@ function resetTableFilters() {
     activeIndexingFilter = 'all';
     activeH1Filter = 'all';
     activeDuplicateFilter = 'all';
+    activeExternalLinksFilter = 'pages';
     knownStatusCodes = new Set();
     invalidateDuplicateCounts();
+    invalidateExternalLinksIndex();
     if (contentTypeFilter) {
         contentTypeFilter.value = 'all';
     }
@@ -524,6 +724,12 @@ function resetTableFilters() {
     if (duplicateFilter) {
         duplicateFilter.value = 'all';
     }
+    if (externalLinksFilter) {
+        externalLinksFilter.value = 'pages';
+    }
+    updateTableHeadMode();
+    updateDetailTabsVisibility();
+    updatePageFiltersDisabled();
     updateStatusFilterOptions({ force: true });
 }
 
@@ -627,7 +833,9 @@ async function openUrlInBrowser(url) {
 
 function updateExportButton() {
     const canExport = uiState === 'idle' || uiState === 'paused';
-    const hasVisibleRows = getFilteredResults().length > 0;
+    const hasVisibleRows = isExternalListView()
+        ? getDisplayedExternalLinks().length > 0
+        : getFilteredResults().length > 0;
     exportButton.disabled = !hasVisibleRows;
     exportButton.classList.toggle('hidden', !canExport || scanResults.size === 0);
 }
@@ -676,10 +884,12 @@ function setUIState(state) {
 
 function clearScanData() {
     invalidateDuplicateCounts();
+    invalidateExternalLinksIndex();
     latestReferrersByUrl = new Map();
     scanResults.clear();
     insertionOrder.length = 0;
     selectedUrl = null;
+    selectedExternalUrl = null;
     sortState = { column: null, direction: 'asc' };
     updateSortIndicators();
     resultsTable.innerHTML = '';
@@ -698,21 +908,25 @@ function clearScanResults() {
 }
 
 function collectWorkspaceSnapshot() {
-    return buildWorkspaceSnapshot({
-        scanResults,
-        insertionOrder,
-        startUrl: urlInput.value.trim(),
-        lastScanProgress,
-        selectedUrl,
-        statusHint: statusText.textContent,
-        filters: {
-            content: activeContentFilter,
-            status: activeStatusFilter,
-            indexing: activeIndexingFilter,
-            h1: activeH1Filter,
-            duplicate: activeDuplicateFilter,
-        },
-    });
+    return {
+        ...buildWorkspaceSnapshot({
+            scanResults,
+            insertionOrder,
+            startUrl: urlInput.value.trim(),
+            lastScanProgress,
+            selectedUrl: isExternalListView() ? null : selectedUrl,
+            statusHint: statusText.textContent,
+            filters: {
+                content: activeContentFilter,
+                status: activeStatusFilter,
+                indexing: activeIndexingFilter,
+                h1: activeH1Filter,
+                duplicate: activeDuplicateFilter,
+                externalLinks: activeExternalLinksFilter,
+            },
+        }),
+        selectedExternalUrl: isExternalListView() ? selectedExternalUrl : null,
+    };
 }
 
 function persistWorkspaceNow() {
@@ -743,6 +957,7 @@ function applyFilterState(filters) {
     activeIndexingFilter = filters.indexing || 'all';
     activeH1Filter = filters.h1 || 'all';
     activeDuplicateFilter = filters.duplicate || 'all';
+    activeExternalLinksFilter = normalizeTableViewMode(filters.externalLinks);
     if (contentTypeFilter) {
         contentTypeFilter.value = activeContentFilter;
     }
@@ -758,12 +973,19 @@ function applyFilterState(filters) {
     if (duplicateFilter) {
         duplicateFilter.value = activeDuplicateFilter;
     }
+    if (externalLinksFilter) {
+        externalLinksFilter.value = activeExternalLinksFilter;
+    }
+    updateTableHeadMode();
+    updateDetailTabsVisibility();
+    updatePageFiltersDisabled();
     updateStatusFilterOptions({ force: true });
 }
 
 function populateScanResults(normalized) {
     clearScanData();
     urlInput.value = normalized.startUrl;
+    setScanHostnameFromUrl(normalized.startUrl);
 
     const resultMap = new Map(normalized.results.map((entry) => [entry.url, entry]));
     for (const url of normalized.insertionOrder) {
@@ -815,7 +1037,11 @@ function restoreWorkspaceFromSession() {
         statusText.textContent = workspace.statusHint;
     }
 
-    if (workspace.selectedUrl && scanResults.has(workspace.selectedUrl)) {
+    if (isExternalListView()) {
+        if (workspace.selectedExternalUrl && getExternalEntry(workspace.selectedExternalUrl)) {
+            selectExternalRow(workspace.selectedExternalUrl);
+        }
+    } else if (workspace.selectedUrl && scanResults.has(workspace.selectedUrl)) {
         selectRow(workspace.selectedUrl);
     }
 
@@ -827,6 +1053,7 @@ async function beginScan(startUrl, { clearResults = true } = {}) {
     if (clearResults) {
         clearScanResults();
     }
+    setScanHostnameFromUrl(startUrl);
     lastScanProgress = null;
     setUIState('running');
     updateUrlInputProgress({ scanned: 0, queue: 0 });
@@ -841,9 +1068,11 @@ async function beginScan(startUrl, { clearResults = true } = {}) {
 }
 
 function getRowMetrics(data) {
+    const outlinks = data.outlinks || [];
     return {
         inCount: getReferrersForUrl(data.url).length,
-        linkCount: data.linkCount ?? (data.outlinks?.length || 0),
+        linkCount: data.linkCount ?? outlinks.length,
+        externalCount: countExternalOutlinks(data),
     };
 }
 
@@ -920,9 +1149,35 @@ function updateSortIndicators() {
     });
 }
 
+function createExternalTableRow(entry, displayIndex) {
+    const tr = document.createElement('tr');
+    tr.dataset.externalUrl = entry.href;
+    tr.className = 'border-b border-zinc-100 cursor-pointer hover:bg-zinc-50 bg-amber-50/20';
+    if (selectedExternalUrl === entry.href) {
+        tr.classList.add('bg-blue-50');
+    }
+    tr.innerHTML = `
+        <td class="p-2 text-zinc-400">${displayIndex}</td>
+        <td class="p-2">${urlCellHtml(entry.href)}</td>
+        <td class="p-2 font-mono text-zinc-600">${entry.host ? escapeHtml(entry.host) : '<span class="text-zinc-400 italic">—</span>'}</td>
+        <td class="p-2 text-center font-semibold">${entry.sourceCount}</td>
+        <td class="p-2 text-zinc-600" title="${escapeHtml(entry.sampleText)}">${entry.sampleText ? escapeHtml(truncate(entry.sampleText, 60)) : '<span class="text-zinc-400 italic">—</span>'}</td>
+    `;
+    tr.addEventListener('click', (e) => {
+        if (e.target.closest('.url-copy, .url-open')) {
+            return;
+        }
+        selectExternalRow(entry.href);
+    });
+    return tr;
+}
+
 function createTableRow(data, displayIndex) {
-    const { inCount, linkCount } = getRowMetrics(data);
+    const { inCount, linkCount, externalCount } = getRowMetrics(data);
     const dupCounts = getDuplicateCounts();
+    const linksTitle = externalCount > 0
+        ? `Всього: ${linkCount}, зовнішніх: ${externalCount}`
+        : '';
     const titleDup = getTextDuplicateCount(data.title, dupCounts.title);
     const descDup = getTextDuplicateCount(data.metaDescription, dupCounts.description);
     const tr = document.createElement('tr');
@@ -942,7 +1197,7 @@ function createTableRow(data, displayIndex) {
         <td class="p-2">${h1CellHtml(data, dupCounts)}</td>
         <td class="p-2" title="${escapeHtml(data.title)}">${escapeHtml(truncate(data.title, 50))}${duplicateCountBadge(titleDup)}</td>
         <td class="p-2" title="${escapeHtml(data.metaDescription)}">${escapeHtml(truncate(data.metaDescription, 60))}${duplicateCountBadge(descDup)}</td>
-        <td class="p-2 text-center">${linkCount}</td>
+        <td class="p-2 text-center"${linksTitle ? ` title="${escapeHtml(linksTitle)}"` : ''}>${linkCount}${externalCount > 0 ? `<span class="text-amber-600 text-[10px] ml-0.5" title="${escapeHtml(linksTitle)}">+${externalCount}</span>` : ''}</td>
         <td class="p-2 text-center">${inCount}</td>
     `;
     tr.addEventListener('click', (e) => {
@@ -955,6 +1210,33 @@ function createTableRow(data, displayIndex) {
 }
 
 function refreshTable() {
+    updateTableHeadMode();
+    updateDetailTabsVisibility();
+    updatePageFiltersDisabled();
+
+    if (isExternalListView()) {
+        const entries = getDisplayedExternalLinks();
+        resultsTable.innerHTML = '';
+        entries.forEach((entry, i) => {
+            resultsTable.appendChild(createExternalTableRow(entry, i + 1));
+        });
+
+        updateFilterCount(entries.length, getExternalLinksIndex().length);
+        if (uiState === 'idle' || uiState === 'paused') {
+            updateExportButton();
+        }
+
+        if (selectedExternalUrl && !entries.some((row) => row.href === selectedExternalUrl)) {
+            document.querySelectorAll('#resultsTable tr').forEach((tr) => {
+                tr.classList.remove('bg-blue-50');
+            });
+            detailContent.innerHTML = '<p class="p-4 text-zinc-400 italic">Оберіть зовнішнє посилання у таблиці вище</p>';
+        } else if (selectedExternalUrl && getExternalEntry(selectedExternalUrl)) {
+            syncSelectedExternalRowUi();
+        }
+        return;
+    }
+
     updateStatusFilterOptions();
 
     const entries = getDisplayedResults();
@@ -993,6 +1275,21 @@ function syncSelectedRowUi() {
     renderDetailPanel();
 }
 
+function syncSelectedExternalRowUi() {
+    if (!selectedExternalUrl || !getExternalEntry(selectedExternalUrl)) {
+        return;
+    }
+    selectedUrlHint.textContent = truncate(selectedExternalUrl, 80);
+    selectedUrlHint.title = selectedExternalUrl;
+    if (selectedUrlBar) {
+        selectedUrlBar.querySelectorAll('.url-copy, .url-open').forEach((el) => el.remove());
+        const actions = document.createElement('span');
+        actions.innerHTML = urlActionButtons(selectedExternalUrl);
+        selectedUrlBar.appendChild(actions);
+    }
+    renderDetailPanel();
+}
+
 function requestRefreshTable({ immediate = false } = {}) {
     if (immediate) {
         if (refreshTableTimer) {
@@ -1019,6 +1316,7 @@ function upsertScanResult(data) {
         data.outlinks = [];
     }
     invalidateDuplicateCounts();
+    invalidateExternalLinksIndex();
     const isNew = !scanResults.has(data.url);
     if (isNew) {
         insertionOrder.push(data.url);
@@ -1027,9 +1325,11 @@ function upsertScanResult(data) {
     requestRefreshTable();
     scheduleWorkspacePersist();
 
-    if (isNew && !selectedUrl) {
+    if (isNew && !selectedUrl && !isExternalListView()) {
         selectedUrl = data.url;
     } else if (selectedUrl === data.url) {
+        renderDetailPanel();
+    } else if (selectedExternalUrl && isExternalListView()) {
         renderDetailPanel();
     }
 }
@@ -1086,6 +1386,25 @@ if (duplicateFilter) {
     });
 }
 
+if (externalLinksFilter) {
+    externalLinksFilter.addEventListener('change', () => {
+        activeExternalLinksFilter = normalizeTableViewMode(externalLinksFilter.value);
+        if (isExternalListView()) {
+            selectedUrl = null;
+            selectedExternalUrl = null;
+            sortState = { column: 'url', direction: 'asc' };
+            updateSortIndicators();
+        } else {
+            selectedExternalUrl = null;
+        }
+        updateTableHeadMode();
+        updateDetailTabsVisibility();
+        updatePageFiltersDisabled();
+        requestRefreshTable({ immediate: true });
+        scheduleWorkspacePersist();
+    });
+}
+
 document.querySelectorAll('.sortable-th').forEach((th) => {
     th.addEventListener('click', () => {
         const col = th.dataset.sort;
@@ -1102,10 +1421,22 @@ document.querySelectorAll('.sortable-th').forEach((th) => {
 
 function selectRow(url) {
     selectedUrl = url;
+    selectedExternalUrl = null;
     document.querySelectorAll('#resultsTable tr').forEach((tr) => {
         tr.classList.toggle('bg-blue-50', tr.dataset.url === url);
     });
     syncSelectedRowUi();
+    scheduleWorkspacePersist();
+}
+
+function selectExternalRow(href) {
+    selectedExternalUrl = href;
+    selectedUrl = null;
+    document.querySelectorAll('#resultsTable tr').forEach((tr) => {
+        tr.classList.toggle('bg-blue-50', tr.dataset.externalUrl === href);
+    });
+    syncSelectedExternalRowUi();
+    scheduleWorkspacePersist();
 }
 
 function renderDetailTable(rows) {
@@ -1133,11 +1464,17 @@ function renderLinkTable(links, emptyText, caption = '') {
         : '';
     const rows = links
         .map(
-            (link) => `
-        <tr class="border-b border-zinc-100 hover:bg-zinc-50">
-            <td class="p-2">${urlCellHtml(link.href || link)}</td>
+            (link) => {
+                const external = isExternalOutlink(link);
+                const typeBadge = external
+                    ? '<span class="inline-block ml-1 px-1 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-800 whitespace-nowrap" title="Зовнішнє посилання — не обходиться">зовн.</span>'
+                    : '';
+                return `
+        <tr class="border-b border-zinc-100 hover:bg-zinc-50${external ? ' bg-amber-50/40' : ''}">
+            <td class="p-2">${urlCellHtml(link.href || link)}${typeBadge}</td>
             <td class="p-2 text-zinc-600">${link.text ? escapeHtml(link.text) : '<span class="text-zinc-400 italic">—</span>'}</td>
-        </tr>`
+        </tr>`;
+            }
         )
         .join('');
     return `${captionHtml}<table class="w-full border-collapse">
@@ -1155,7 +1492,8 @@ function buildDetailRows(data) {
     const h1List = (data.headings || []).filter((h) => h.level === 1);
     const h1 = h1List[0];
     const h2List = (data.headings || []).filter((h) => h.level === 2);
-    const { inCount, linkCount } = getRowMetrics(data);
+    const { inCount, linkCount, externalCount } = getRowMetrics(data);
+    const internalCount = linkCount - externalCount;
 
     const rows = [
         ['Address', urlCellHtml(data.url)],
@@ -1184,6 +1522,8 @@ function buildDetailRows(data) {
                 : '<span class="text-zinc-400 italic">—</span>',
         ],
         ['Вихідних посилань', String(linkCount)],
+        ['Зовнішніх посилань', externalCount > 0 ? String(externalCount) : '<span class="text-zinc-400 italic">0</span>'],
+        ['Внутрішніх посилань', String(internalCount)],
         ['Вхідних посилань', String(inCount)],
     ];
 
@@ -1218,7 +1558,65 @@ function buildDetailRows(data) {
     return rows;
 }
 
+function renderSourcePagesTable(sources, emptyText, caption = '') {
+    if (!sources || sources.length === 0) {
+        return `<p class="p-4 text-zinc-400 italic">${escapeHtml(emptyText)}</p>`;
+    }
+    const captionHtml = caption
+        ? `<p class="px-4 py-2 text-xs text-zinc-500 border-b border-zinc-100 bg-zinc-50">${escapeHtml(caption)}</p>`
+        : '';
+    const rows = sources
+        .map(
+            (source) => `
+        <tr class="border-b border-zinc-100 hover:bg-zinc-50">
+            <td class="p-2">${urlCellHtml(source.pageUrl)}</td>
+            <td class="p-2 text-zinc-600">${source.text ? escapeHtml(source.text) : '<span class="text-zinc-400 italic">—</span>'}</td>
+        </tr>`
+        )
+        .join('');
+    return `${captionHtml}<table class="w-full border-collapse">
+        <thead class="bg-zinc-50 sticky top-0">
+            <tr class="text-left text-zinc-500">
+                <th class="p-2 font-semibold">Сторінка</th>
+                <th class="p-2 font-semibold w-1/3">Текст посилання</th>
+            </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+    </table>`;
+}
+
+function buildExternalDetailRows(entry) {
+    return [
+        ['Зовнішній URL', urlCellHtml(entry.href)],
+        ['Host', entry.host ? escapeHtml(entry.host) : '<span class="text-zinc-400 italic">—</span>'],
+        ['Сторінок-джерел', String(entry.sourceCount)],
+        ['Текст посилання', entry.sampleText ? escapeHtml(entry.sampleText) : '<span class="text-zinc-400 italic">—</span>'],
+    ];
+}
+
 function renderDetailPanel() {
+    if (isExternalListView()) {
+        if (!selectedExternalUrl) {
+            detailContent.innerHTML = '<p class="p-4 text-zinc-400 italic">Оберіть зовнішнє посилання у таблиці вище</p>';
+            return;
+        }
+        const entry = getExternalEntry(selectedExternalUrl);
+        if (!entry) {
+            detailContent.innerHTML = '<p class="p-4 text-zinc-400 italic">Зовнішнє посилання не знайдено</p>';
+            return;
+        }
+        if (activeTab === 'external-sources') {
+            detailContent.innerHTML = renderSourcePagesTable(
+                entry.sources,
+                'Немає сторінок-джерел',
+                `Знайдено на ${entry.sourceCount} стор.`
+            );
+        } else {
+            detailContent.innerHTML = renderDetailTable(buildExternalDetailRows(entry));
+        }
+        return;
+    }
+
     if (!selectedUrl || !scanResults.has(selectedUrl)) {
         detailContent.innerHTML = '<p class="p-4 text-zinc-400 italic">Оберіть URL у таблиці вище</p>';
         return;
@@ -1244,13 +1642,41 @@ function renderDetailPanel() {
 }
 
 exportButton.addEventListener('click', () => {
+    const bom = '\uFEFF';
+
+    if (isExternalListView()) {
+        const entries = getDisplayedExternalLinks();
+        if (entries.length === 0) {
+            alert('Немає зовнішніх посилань для експорту.');
+            return;
+        }
+        const headers = ['External URL', 'Host', 'Source Pages Count', 'Source Pages', 'Link Texts'];
+        const csvRows = [headers.join(',')];
+        for (const entry of entries) {
+            const pages = entry.sources.map((source) => source.pageUrl).join('; ');
+            const texts = entry.sources.map((source) => source.text || '—').join('; ');
+            csvRows.push([
+                `"${entry.href.replace(/"/g, '""')}"`,
+                `"${entry.host.replace(/"/g, '""')}"`,
+                `"${entry.sourceCount}"`,
+                `"${pages.replace(/"/g, '""')}"`,
+                `"${texts.replace(/"/g, '""')}"`,
+            ].join(','));
+        }
+        const blob = new Blob([bom + csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `spider_external_links_${new Date().toISOString().slice(0, 10)}.csv`;
+        link.click();
+        return;
+    }
+
     const entries = getDisplayedResults();
     if (entries.length === 0) {
         alert('Немає рядків для експорту за поточними фільтрами.');
         return;
     }
 
-    const bom = '\uFEFF';
     const headers = ['URL', 'Status', 'Meta Robots', 'Robots.txt Rule', 'Robots.txt Allowed', 'H1 Count', 'Content-Type', 'Response Time (ms)', 'Resource Type', 'Title', 'Meta Description', 'Canonical', 'Link Count', 'Redirect URL', 'Referrers', 'Outlinks', 'Headings'];
     const csvRows = [headers.join(',')];
 
@@ -1349,6 +1775,7 @@ function applySessionDump(dump, filePath = '') {
     populateScanResults(normalized);
 
     selectedUrl = null;
+    selectedExternalUrl = null;
     lastScanProgress = normalized.progressAtSave;
     requestRefreshTable({ immediate: true });
     setUIState('idle');

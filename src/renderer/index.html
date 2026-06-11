@@ -143,11 +143,21 @@
               <option value="description">Meta description</option>
             </select>
           </label>
+          <label class="flex items-center gap-1.5">
+            <span class="text-zinc-500 whitespace-nowrap">Перегляд:</span>
+            <select
+              id="externalLinksFilter"
+              class="px-2 py-1 border border-zinc-300 rounded bg-white text-zinc-800 min-w-[10rem]"
+            >
+              <option value="pages">Сторінки</option>
+              <option value="external">Зовнішні посилання</option>
+            </select>
+          </label>
           <span id="filterCount" class="text-zinc-400 ml-auto whitespace-nowrap"></span>
         </div>
         <div class="overflow-auto flex-grow min-h-0">
           <table class="w-full text-xs border-collapse">
-            <thead class="sticky top-0 bg-zinc-100 border-b border-zinc-300 z-10">
+            <thead id="pagesTableHead" class="sticky top-0 bg-zinc-100 border-b border-zinc-300 z-10">
               <tr class="text-left text-zinc-600">
                 <th class="sortable-th p-2 font-semibold w-8 cursor-pointer select-none hover:bg-zinc-200" data-sort="index" title="Сортувати">#</th>
                 <th class="sortable-th p-2 font-semibold min-w-[200px] cursor-pointer select-none hover:bg-zinc-200" data-sort="url" title="Сортувати">Address</th>
@@ -161,6 +171,15 @@
                 <th class="sortable-th p-2 font-semibold min-w-[160px] cursor-pointer select-none hover:bg-zinc-200" data-sort="metaDescription" title="Сортувати">Meta Description</th>
                 <th class="sortable-th p-2 font-semibold w-14 cursor-pointer select-none hover:bg-zinc-200" data-sort="links" title="Сортувати">Links</th>
                 <th class="sortable-th p-2 font-semibold w-14 cursor-pointer select-none hover:bg-zinc-200" data-sort="inlinks" title="Сортувати">In</th>
+              </tr>
+            </thead>
+            <thead id="externalTableHead" class="sticky top-0 bg-zinc-100 border-b border-zinc-300 z-10 hidden">
+              <tr class="text-left text-zinc-600">
+                <th class="sortable-th p-2 font-semibold w-8 cursor-pointer select-none hover:bg-zinc-200" data-sort="index" title="Сортувати">#</th>
+                <th class="sortable-th p-2 font-semibold min-w-[240px] cursor-pointer select-none hover:bg-zinc-200" data-sort="url" title="Сортувати">Зовнішній URL</th>
+                <th class="sortable-th p-2 font-semibold min-w-[140px] cursor-pointer select-none hover:bg-zinc-200" data-sort="host" title="Сортувати">Host</th>
+                <th class="sortable-th p-2 font-semibold w-20 cursor-pointer select-none hover:bg-zinc-200" data-sort="pages" title="Сортувати">Сторінок</th>
+                <th class="sortable-th p-2 font-semibold min-w-[200px] cursor-pointer select-none hover:bg-zinc-200" data-sort="text" title="Сортувати">Текст</th>
               </tr>
             </thead>
             <tbody id="resultsTable"></tbody>
@@ -185,23 +204,37 @@
           <button
             type="button"
             data-tab="details"
-            class="detail-tab px-4 py-2 text-xs font-medium border-b-2 border-blue-600 text-blue-700 bg-white"
+            class="detail-tab page-view-tab px-4 py-2 text-xs font-medium border-b-2 border-blue-600 text-blue-700 bg-white"
           >
             Деталі URL
           </button>
           <button
             type="button"
             data-tab="inlinks"
-            class="detail-tab px-4 py-2 text-xs font-medium border-b-2 border-transparent text-zinc-600 hover:text-zinc-800"
+            class="detail-tab page-view-tab px-4 py-2 text-xs font-medium border-b-2 border-transparent text-zinc-600 hover:text-zinc-800"
           >
             Вхідні посилання
           </button>
           <button
             type="button"
             data-tab="outlinks"
-            class="detail-tab px-4 py-2 text-xs font-medium border-b-2 border-transparent text-zinc-600 hover:text-zinc-800"
+            class="detail-tab page-view-tab px-4 py-2 text-xs font-medium border-b-2 border-transparent text-zinc-600 hover:text-zinc-800"
           >
             Вихідні посилання
+          </button>
+          <button
+            type="button"
+            data-tab="external-details"
+            class="detail-tab external-view-tab hidden px-4 py-2 text-xs font-medium border-b-2 border-transparent text-zinc-600 hover:text-zinc-800"
+          >
+            Деталі
+          </button>
+          <button
+            type="button"
+            data-tab="external-sources"
+            class="detail-tab external-view-tab hidden px-4 py-2 text-xs font-medium border-b-2 border-transparent text-zinc-600 hover:text-zinc-800"
+          >
+            Сторінки-джерела
           </button>
           <div class="flex-grow"></div>
           <div id="selectedUrlBar" class="flex items-center gap-1 px-2 py-1 max-w-lg min-w-0">

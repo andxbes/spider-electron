@@ -1,6 +1,6 @@
 # Spider-Electron — внутрішня документація
 
-> Останнє оновлення: 2026-06-08 (forge build)  
+> Останнє оновлення: 2026-06-11 (список зовнішніх посилань)  
 > Короткий довідник для розробки та правок. Детальніше про підтримку — [DOC_MAINTENANCE.md](./DOC_MAINTENANCE.md).
 
 ## Що це
@@ -27,7 +27,7 @@ src/
 |------|------------------|
 | `main.js` | BFS-обхід, fetch, robots.txt, cheerio, IPC events |
 | `preload.js` | Whitelist каналів IPC, `window.api` |
-| `renderer.js` | Валідація URL, рендер, `scanResults` Map, CSV |
+| `renderer.js` | Валідація URL, рендер, `scanResults` Map, CSV, перегляд зовнішніх посилань |
 | `index.html` | Розмітка, Tailwind класи |
 
 ## Архітектура (Electron)
@@ -64,7 +64,7 @@ Renderer
 5. **4xx/5xx** — `status: 'ERROR'`.
 6. **200** — cheerio: title, meta description, canonical, headings, link count → `spider-result`.
 7. Якщо `<meta name="robots" content="nofollow">` — не додає нові посилання.
-8. `<a href>` → абсолютні URL без `#`, лише той самий `hostname` → `queue` + `referrersMap`.
+8. Збір усіх вихідних посилань (`<a href>`, медіа-ресурси) → `outlinks` з прапорцем `external` (інший `hostname`). У чергу та `referrersMap` потрапляють лише внутрішні.
 
 **Завершення:** порожня черга або досягнуто `maxPages` (якщо > 0) → `spider-referrers-update` → `spider-end`.
 
@@ -108,7 +108,7 @@ Renderer
   linkCount?: number,
   headings?: [{ level: number, text: string }],
   redirectUrl?: string,
-  outlinks?: [{ href: string, text: string }]
+  outlinks?: [{ href: string, text: string, external?: boolean }]
 }
 ```
 
