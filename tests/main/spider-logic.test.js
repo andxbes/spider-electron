@@ -23,6 +23,10 @@ const {
     crawl,
     startSpider,
     getScanSession,
+    reportDiscoveredLinks,
+    dequeueNextUrl,
+    probeDiscoveredLink,
+    probeExternalLink,
 } = require('../../src/main/spider-logic');
 const robotsParser = require('robots-parser');
 
@@ -168,8 +172,8 @@ describe('spider-logic', () => {
         await crawl('https://example.com/', 'N/A', win);
         const result = win._events.find((e) => e.channel === 'spider-result');
         assert.ok(result);
-        assert.equal(result.payload.title, 'Home');
         assert.equal(result.payload.status, 200);
+        assert.equal(result.payload.title, 'Home');
     });
 
     it('crawl follows same-host redirect chain', async () => {
@@ -195,8 +199,9 @@ describe('spider-logic', () => {
         assert.equal(results[1].payload.title, 'New');
     });
 
-    it('crawl skips URL blocked by robots.txt', async () => {
+    it('crawl skips robots-blocked URL with status 0 without fetch', async () => {
         const win = mockWindow();
+        let pageFetchCount = 0;
         setFetchForTests(async (url) => {
             if (url.includes('robots.txt')) {
                 return mockResponse({
@@ -204,12 +209,21 @@ describe('spider-logic', () => {
                     body: 'User-agent: MyElectronSpider/1.0\nDisallow: /secret\n',
                 });
             }
-            return mockResponse({ status: 200, body: 'nope' });
+            pageFetchCount += 1;
+            return mockResponse({
+                status: 200,
+                headers: { 'content-type': 'text/html' },
+                body: '<html><head><title>Hidden Title</title></head><body><a href="/next">N</a></body></html>',
+            });
         });
 
         await crawl('https://example.com/secret', 'N/A', win);
         const result = win._events.find((e) => e.channel === 'spider-result');
-        assert.equal(result.payload.status, 'SKIPPED');
+        assert.equal(pageFetchCount, 0);
+        assert.equal(result.payload.status, 0);
+        assert.equal(result.payload.title, '');
+        assert.equal(result.payload.robotsAllowed, false);
+        assert.equal(getQueueLength(), 0);
     });
 
     it('fetchSitemapPageUrls parses urlset', async () => {
@@ -240,6 +254,147 @@ describe('spider-logic', () => {
 
         await crawl('https://example.com/', 'N/A', win);
         assert.equal(getQueueLength(), 0);
+    });
+
+    it('reportDiscoveredLinks stub includes robots.txt for internal script', async () => {
+        const win = mockWindow();
+        setFetchForTests(async (url) => {
+            if (url.includes('robots.txt')) {
+                return mockResponse({
+                    status: 200,
+                    body: 'User-agent: MyElectronSpider/1.0\nDisallow: /static/\n',
+                });
+            }
+            return mockResponse({ status: 404 });
+        });
+
+        await reportDiscoveredLinks(win, [{
+            url: 'https://example.com/static/app.js',
+            external: false,
+            tag: 'script[src]',
+            kind: 'javascript',
+            text: '',
+        }], 'https://example.com/', 'example.com');
+
+        const batch = win._events.find((e) => e.channel === 'spider-results-batch');
+        assert.ok(batch);
+        assert.equal(batch.payload[0].robotsAllowed, false);
+        assert.match(batch.payload[0].robotsRule, /Disallow/i);
+    });
+
+    it('reportDiscoveredLinks blocks internal robots-disallowed links without probe', async () => {
+        const win = mockWindow();
+        let pageFetchCount = 0;
+        setFetchForTests(async (url) => {
+            if (url.includes('robots.txt')) {
+                return mockResponse({
+                    status: 200,
+                    body: 'User-agent: MyElectronSpider/1.0\nDisallow: /wp-json/\n',
+                });
+            }
+            pageFetchCount += 1;
+            return mockResponse({ status: 200 });
+        });
+
+        const oembedUrl = 'http://localhost/wp-json/oembed/1.0/embed?url=http%3A%2F%2Flocalhost%2Fproduct%2Ftest%2F';
+        await reportDiscoveredLinks(win, [{
+            url: oembedUrl,
+            external: false,
+            tag: 'link[href]',
+            kind: 'html',
+            text: 'oembed',
+        }], 'http://localhost/', 'localhost');
+
+        assert.equal(getQueueLength(), 0);
+        assert.equal(pageFetchCount, 0);
+        const batch = win._events.find((e) => e.channel === 'spider-results-batch');
+        assert.ok(batch);
+        assert.equal(batch.payload[0].status, 0);
+        assert.equal(batch.payload[0].robotsAllowed, false);
+        assert.match(batch.payload[0].robotsRule, /Disallow/i);
+    });
+
+    it('reportDiscoveredLinks enqueues internal media for HTTP probe', async () => {
+        const win = mockWindow();
+        setFetchForTests(async (url) => {
+            if (url.includes('robots.txt')) {
+                return mockResponse({ status: 404 });
+            }
+            if (url.endsWith('/logo.png')) {
+                return mockResponse({
+                    status: 200,
+                    headers: { 'content-type': 'image/png' },
+                });
+            }
+            return mockResponse({ status: 404 });
+        });
+
+        await reportDiscoveredLinks(win, [{
+            url: 'https://example.com/logo.png',
+            external: false,
+            tag: 'img[src]',
+            kind: 'media',
+            text: '',
+        }], 'https://example.com/', 'example.com');
+
+        assert.equal(getQueueLength(), 1);
+        const item = dequeueNextUrl();
+        assert.equal(item.type, 'probe');
+        await probeDiscoveredLink(item.url, item.referrer, item.link, win);
+
+        const result = win._events.find((e) => e.channel === 'spider-result');
+        assert.equal(result.payload.status, 200);
+        assert.equal(result.payload.contentType, 'image/png');
+        assert.equal(result.payload.external, false);
+        assert.equal(result.payload.fetched, true);
+    });
+
+    it('probeExternalLink fetches status and content-type even for rel=nofollow', async () => {
+        const win = mockWindow();
+        let fetchCalls = [];
+        setFetchForTests(async (url) => {
+            fetchCalls.push(url);
+            if (url === 'https://other.com/x') {
+                return mockResponse({
+                    status: 403,
+                    headers: { 'content-type': 'text/html; charset=utf-8' },
+                });
+            }
+            return mockResponse({ status: 404 });
+        });
+
+        const link = {
+            url: 'https://other.com/x',
+            external: true,
+            tag: 'a[href]',
+            text: 'Ext',
+            rel: 'nofollow',
+            relFollowAllowed: false,
+            relIndexAllowed: null,
+            relLabel: 'nofollow',
+            kind: 'html',
+        };
+
+        await reportDiscoveredLinks(win, [link], 'https://example.com/', 'example.com', { follow: false });
+        assert.equal(getQueueLength(), 1);
+
+        const batch = win._events.find((e) => e.channel === 'spider-results-batch');
+        assert.ok(batch);
+        assert.equal(batch.payload[0].fetched, false);
+        assert.equal(batch.payload[0].external, true);
+
+        const item = dequeueNextUrl();
+        assert.equal(item.type, 'probe');
+        await probeExternalLink(item.url, item.referrer, item.link, win);
+
+        assert.ok(fetchCalls.includes('https://other.com/x'));
+        const result = win._events.find((e) => e.channel === 'spider-result');
+        assert.equal(result.payload.status, 403);
+        assert.equal(result.payload.contentType, 'text/html');
+        assert.equal(result.payload.external, true);
+        assert.equal(result.payload.fetched, true);
+        assert.equal(result.payload.relLabel, 'nofollow');
+        assert.notEqual(result.payload.robotsAllowed, undefined);
     });
 
     it('startSpider completes small site scan', async () => {

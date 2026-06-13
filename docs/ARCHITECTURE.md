@@ -1,6 +1,6 @@
 # Spider-Electron — внутрішня документація
 
-> Останнє оновлення: 2026-06-13 (тести: node:test, винесена логіка в модулі)  
+> Останнє оновлення: 2026-06-13 (robots: без HTTP для внутрішніх disallow)  
 > Короткий довідник для розробки та правок. Детальніше про підтримку — [DOC_MAINTENANCE.md](./DOC_MAINTENANCE.md).
 
 ## Що це
@@ -74,13 +74,13 @@ Renderer
 **На кожній сторінці (`crawl`):**
 
 1. Skip, якщо URL вже в `visitedUrls` або ліміт досягнуто.
-2. Перевірка `robots.txt` (кеш `robotsCache` по host). Блок → `status: 'SKIPPED'`.
+2. Перевірка **robots.txt** (внутрішні URL) — якщо `Disallow`, HTTP-запит **не** виконується: ні `crawl`, ні `probe`; `status: 0`. Зовнішні URL перевіряються по HTTP навіть при забороні в robots.txt їхнього хоста.
 3. `fetch` з timeout 5s, `redirect: 'manual'`, User-Agent `MyElectronSpider/1.0`.
-4. **3xx** — фіксація `redirectUrl`, enqueue цілі (лише той самий `hostname`).
-5. **4xx/5xx** — `status: 'ERROR'`.
+4. **3xx** — фіксація `redirectUrl`, enqueue цілі (лише той самий `hostname`); ціль redirect теж перевіряється robots.txt перед fetch.
+5. **4xx/5xx** — `status` = код відповіді, `title` порожній.
 6. **200** — cheerio: title, meta description, canonical, headings, link count → `spider-result`.
 7. Якщо `<meta name="robots" content="nofollow">` — не додає нові посилання.
-8. Збір URL з HTML: `<a>`, `<link>`, `<script>`, `<img>`, … — завантажені сторінки через `spider-result`; JS/CSS/медіа та зовнішні — пакетом `spider-results-batch` (`fetched: false`). **Завантажуються** лише внутрішні навігаційні: `a[href]`, `area[href]`, `form[action]`, внутрішні `iframe[src]` (HTML). Для не-навігаційних ресурсів (скрипти, стилі, медіа) stub створюється **завжди**, навіть якщо URL у черзі; для навігаційних — лише якщо URL ще не обійдений і не в черзі.
+8. Збір URL з HTML: `<a>`, `<link>`, `<script>`, `<img>`, … — HTML-сторінки через `crawl`; **медіа, CSS, JS і зовнішні** — stub у batch, потім **probe** (status + `content-type` + robots.txt + `X-Robots-Tag`, без HTML) — навіть при `rel=nofollow`. BFS лише для внутрішніх навігаційних: `a[href]`, `area[href]`, `form[action]`, `iframe[src]` (HTML). Stub для не-навігаційних ресурсів — **завжди**; для навігаційних — лише якщо URL не в черзі обходу.
 
 **Завершення:** порожня черга або досягнуто `maxPages` (якщо > 0) → `spider-referrers-update` → `spider-end`. На renderer після referrers — `materializeDiscoveredFromReferrers()`: URL з referrers, яких немає в `scanResults`, додаються як знайдені (`fetched: false`).
 
@@ -107,7 +107,7 @@ Renderer
 | M → R | `spider-result` | один об'єкт посилання (завантажене) |
 | M → R | `spider-results-batch` | масив знайдених, не завантажених посилань |
 | M → R | `spider-progress` | `{ scanned, queue, active?, status?, finished? }` |
-| M → R | `spider-referrers-update` | `{ [url]: referrers[] }` |
+| M → R | `spider-referrers-update` | `{ referrers: { [url]: referrers[] }, robotsByUrl: { [url]: { robotsAllowed, robotsRule } } }` |
 | M → R | `spider-end` | `message: string` |
 
 Нові канали — додати в `preload.js` (`validSendChannels` / `validReceiveChannels`) і в `contextBridge`.
@@ -117,7 +117,7 @@ Renderer
 ```js
 {
   url: string,
-  status: number | 'ERROR' | 'SKIPPED' | '',
+  status: number | 'ERROR' | '',
   external: boolean,
   fetched: boolean,
   kind?: string,
@@ -187,26 +187,31 @@ Renderer
 
 ```bash
 npm install            # postinstall докачує бінарник Electron
-npm test               # unit-тести (node:test)
+npm test               # unit-тести (scripts/run-tests.mjs → node:test)
 npm start              # build:css + electron-forge start
 npm run build:css      # input.css → styles.css
-npm run package        # пакування в out/ (prepackage → build:css)
-npm run make           # дистрибутиви Linux/Windows (premake → build:css)
+npm run prebuild       # test + build:css (перед package/make)
+npm run package        # пакування в out/ (prepackage → prebuild)
+npm run make           # дистрибутив поточної ОС (premake → prebuild)
+npm run make:all       # Linux + Windows + macOS zip (prebuild один раз)
+npm run all            # alias make:all
 npm run make:linux     # лише Linux (zip)
 npm run make:win       # Windows zip (з Linux); Setup.exe — лише збірка на Windows
-npm run make:mac       # лише macOS (dmg + zip); збирати на Mac
+npm run make:mac       # macOS zip (з Linux); dmg — лише збірка на Mac
 ```
 
-Конфіг збірки — `forge.config.js`. Збірку запускати з **терміналу** або через **Tasks → make (Linux)** (`.vscode/tasks.json`), не через npm Scripts у боковій панелі — Forge зависає без TTY. У скриптах стоїть `CI=true`, щоб обійти це.
+Конфіг збірки — `forge.config.js`. Збірку запускати з **терміналу** або через **Tasks** (`.vscode/tasks.json`): **build: all platforms**, **build: linux** тощо — не через npm Scripts у боковій панелі, Forge зависає без TTY. У скриптах стоїть `CI=true`, щоб обійти це. Тести — **Tasks → test** або `npm test`.
 
-`styles.css` у `.gitignore` — `build:css` запускається автоматично перед `start`, `package`, `make`.
+`make:all` з Linux дає zip для linux/win32/darwin; Squirrel Setup.exe — лише на Windows, dmg — лише на macOS (`forge.config.js`).
+
+`styles.css` у `.gitignore` — `build:css` запускається автоматично перед `start`; перед `package` і `make*` спочатку `npm test`, потім `build:css` (`prebuild`).
 
 **Якщо Forge падає з `ENOENT path.txt`:** завантаження бінарника Electron перервалось (мережа). Виправлення: `node node_modules/electron/install.js` або повторний `npm install`.
 
 ## Тести
 
 - **Runner:** вбудований `node:test` + `node:assert/strict` (без додаткових dev-залежностей).
-- **Команда:** `npm test` — усі файли `tests/**/*.test.js`.
+- **Команда:** `npm test` — `scripts/run-tests.mjs` знаходить усі `tests/**/*.test.js` і запускає `node --test` (glob у npm-скрипті ненадійний).
 - **Покриття:**
   - `shared/url-utils` — нормалізація URL, redirect, content-type;
   - `main/spider-logic` — парсинг HTML, robots/meta, черга, crawl/startSpider (mock fetch);

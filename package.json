@@ -7,16 +7,19 @@
   "scripts": {
     "postinstall": "node node_modules/electron/install.js",
     "build:css": "postcss ./src/renderer/input.css -o ./src/renderer/styles.css",
+    "test": "node scripts/run-tests.mjs",
+    "prebuild": "npm test && npm run build:css",
     "start": "npm run build:css && CI=true electron-forge start",
-    "prepackage": "npm run build:css",
+    "prepackage": "npm run prebuild",
     "package": "CI=true electron-forge package",
-    "premake": "npm run build:css",
+    "premake": "npm run prebuild",
     "make": "CI=true electron-forge make",
-    "make:linux": "CI=true electron-forge make --platform=linux",
+    "make:linux": "npm run prebuild && CI=true electron-forge make --platform=linux",
     "linux": "npm run make:linux",
-    "make:win": "CI=true electron-forge make --platform=win32",
-    "make:mac": "CI=true electron-forge make --platform=darwin",
-    "test": "node --test tests/**/*.test.js"
+    "make:win": "npm run prebuild && CI=true electron-forge make --platform=win32",
+    "make:mac": "npm run prebuild && CI=true electron-forge make --platform=darwin",
+    "make:all": "npm run prebuild && CI=true electron-forge make --platform=linux && CI=true electron-forge make --platform=win32 && CI=true electron-forge make --platform=darwin",
+    "all": "npm run make:all"
   },
   "devDependencies": {
     "@electron-forge/cli": "^7.11.2",

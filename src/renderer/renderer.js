@@ -54,6 +54,7 @@ let scanHostname = '';
 let duplicateCountsCache = null;
 let knownPresentContentTypesKey = '';
 let latestReferrersByUrl = new Map();
+let latestRobotsByUrl = new Map();
 /** @type {'idle' | 'running' | 'paused'} */
 let uiState = 'idle';
 let knownStatusCodes = new Set();
@@ -223,11 +224,26 @@ function getReferrersForUrl(url) {
 
 function rebuildLatestReferrersFromResults() {
     latestReferrersByUrl = new Map();
+    latestRobotsByUrl = new Map();
     for (const [url, data] of scanResults.entries()) {
         if (data.referrers?.length) {
             latestReferrersByUrl.set(url, data.referrers);
         }
     }
+}
+
+function mergeRobotsFieldsIfMissing(data, robotsFields) {
+    if (!robotsFields || (robotsFields.robotsAllowed == null && !robotsFields.robotsRule)) {
+        return data;
+    }
+    if (data.robotsAllowed != null || data.robotsRule) {
+        return data;
+    }
+    return {
+        ...data,
+        robotsAllowed: robotsFields.robotsAllowed,
+        robotsRule: robotsFields.robotsRule,
+    };
 }
 
 function materializeDiscoveredFromReferrers() {
@@ -237,6 +253,7 @@ function materializeDiscoveredFromReferrers() {
             continue;
         }
         const refText = refs[0]?.text || '';
+        const robotsFields = latestRobotsByUrl.get(url) || {};
         if (upsertScanResult({
             url,
             status: '',
@@ -247,6 +264,7 @@ function materializeDiscoveredFromReferrers() {
             kind: '',
             tag: '',
             referrers: refs,
+            ...robotsFields,
         }, { deferUi: true })) {
             changed = true;
         }
@@ -258,9 +276,12 @@ function materializeDiscoveredFromReferrers() {
     return changed;
 }
 
-function applyReferrersUpdate(allReferrers) {
+function applyReferrersUpdate(payload) {
+    const referrersPayload = payload?.referrers ?? payload;
+    const robotsPayload = payload?.robotsByUrl ?? {};
     latestReferrersByUrl = new Map();
-    for (const [url, refs] of Object.entries(allReferrers || {})) {
+    latestRobotsByUrl = new Map(Object.entries(robotsPayload));
+    for (const [url, refs] of Object.entries(referrersPayload || {})) {
         const normalized = Array.isArray(refs)
             ? refs.map(normalizeReferrerEntry).filter((entry) => entry.href)
             : [];
@@ -270,6 +291,10 @@ function applyReferrersUpdate(allReferrers) {
     for (const [url, data] of scanResults.entries()) {
         if (latestReferrersByUrl.has(url)) {
             data.referrers = latestReferrersByUrl.get(url);
+        }
+        const merged = mergeRobotsFieldsIfMissing(data, latestRobotsByUrl.get(url));
+        if (merged !== data) {
+            scanResults.set(url, normalizeLinkEntry(merged));
         }
     }
     materializeDiscoveredFromReferrers();
@@ -462,7 +487,6 @@ function updateStatusFilterOptions({ force = false } = {}) {
         { value: '3xx', label: '3xx' },
         { value: '4xx', label: '4xx' },
         { value: '5xx', label: '5xx' },
-        { value: 'SKIPPED', label: 'SKIPPED' },
         { value: 'ERROR', label: 'Помилка мережі' },
     ];
 
@@ -674,6 +698,7 @@ function scheduleStartupTableRefresh() {
 function clearScanData() {
     invalidateDuplicateCounts();
     latestReferrersByUrl = new Map();
+    latestRobotsByUrl = new Map();
     scanResults.clear();
     insertionOrder.length = 0;
     resetTableRenderCache();

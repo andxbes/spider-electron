@@ -48,7 +48,7 @@ function escapeHtml(str) {
 
 function statusRowClass(status) {
     if (status === 200) return 'text-green-700';
-    if (status === 'SKIPPED') return 'text-yellow-700';
+    if (status === 0 || status === 'SKIPPED') return 'text-yellow-700';
     if (status === 'ERROR' || (typeof status === 'number' && status >= 400)) return 'text-red-700';
     if (typeof status === 'number' && status >= 300 && status < 400) return 'text-blue-700';
     return 'text-zinc-600';
@@ -335,7 +335,7 @@ function isMetaRobotsBlocked(data) {
 }
 
 function isRobotsTxtBlocked(data) {
-    return data.robotsAllowed === false || data.status === 'SKIPPED';
+    return data.robotsAllowed === false;
 }
 
 function isIndexingBlocked(data) {
