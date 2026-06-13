@@ -1,10 +1,24 @@
 const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const path = require('node:path');
+const fs = require('node:fs');
 const { URL } = require('node:url');
 const { getSettingsPath, loadSettings, saveSettings } = require('./settings-persistence');
 const { registerSessionDumpHandlers, createApplicationMenu } = require('./session-dump');
 
+if (process.platform === 'linux') {
+    app.commandLine.appendSwitch('class', 'spider-electron');
+}
+
 let mainWindow = null;
+
+function getAppIconPath() {
+    const packagedIcon = path.join(process.resourcesPath, 'icon.png');
+    const devIcon = path.join(__dirname, '../../assets/icon.png');
+    if (fs.existsSync(packagedIcon)) {
+        return packagedIcon;
+    }
+    return devIcon;
+}
 
 // Функція створення головного вікна застосунку
 const createWindow = () => {
@@ -13,6 +27,7 @@ const createWindow = () => {
         height: 800,
         show: false,
         backgroundColor: '#f4f4f5',
+        icon: getAppIconPath(),
         webPreferences: {
             // Шлях до preload-скрипта для безпечної взаємодії з renderer
             preload: path.join(__dirname, '../preload/preload.js'),
@@ -31,6 +46,9 @@ const createWindow = () => {
 };
 
 app.whenReady().then(() => {
+    if (process.platform === 'linux') {
+        app.setAppUserModelId('spider-electron');
+    }
     registerSessionDumpHandlers(ipcMain);
     createApplicationMenu(() => mainWindow);
     createWindow();

@@ -1,4 +1,6 @@
 /** @type {import('@electron-forge/shared-types').ForgeConfig} */
+const path = require('node:path');
+
 const makers = [
   {
     name: '@electron-forge/maker-zip',
@@ -30,6 +32,10 @@ module.exports = {
   packagerConfig: {
     asar: true,
     npmRebuild: false,
+    icon: path.join(__dirname, 'assets', 'icon'),
+    extraResource: [
+      path.join(__dirname, 'assets', 'icon.png'),
+    ],
     ignore: [
       /^\/\.git(\/|$)/,
       /^\/\.cursor(\/|$)/,

@@ -123,6 +123,51 @@
       "problemMatcher": []
     },
     {
+      "label": "deploy: linux",
+      "type": "shell",
+      "command": "npm run deploy:linux",
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "shell": {
+          "executable": "zsh",
+          "args": ["-ilc"]
+        }
+      },
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "echo": true,
+        "focus": true,
+        "panel": "new",
+        "showReuseMessage": false,
+        "clear": false,
+        "close": false
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "install: linux",
+      "type": "shell",
+      "command": "npm run install:linux",
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "shell": {
+          "executable": "zsh",
+          "args": ["-ilc"]
+        }
+      },
+      "presentation": {
+        "reveal": "always",
+        "echo": true,
+        "focus": true,
+        "panel": "new",
+        "showReuseMessage": false,
+        "clear": false,
+        "close": false
+      },
+      "problemMatcher": []
+    },
+    {
       "label": "start",
       "type": "shell",
       "command": "npm start",
