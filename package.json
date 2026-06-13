@@ -15,7 +15,8 @@
     "make:linux": "CI=true electron-forge make --platform=linux",
     "linux": "npm run make:linux",
     "make:win": "CI=true electron-forge make --platform=win32",
-    "make:mac": "CI=true electron-forge make --platform=darwin"
+    "make:mac": "CI=true electron-forge make --platform=darwin",
+    "test": "node --test tests/**/*.test.js"
   },
   "devDependencies": {
     "@electron-forge/cli": "^7.11.2",

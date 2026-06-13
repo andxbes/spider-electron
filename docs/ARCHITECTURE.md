@@ -1,34 +1,50 @@
 # Spider-Electron — внутрішня документація
 
-> Останнє оновлення: 2026-06-11 (ленива таблиця: 100 рядків + scroll)  
+> Останнє оновлення: 2026-06-13 (тести: node:test, винесена логіка в модулі)  
 > Короткий довідник для розробки та правок. Детальніше про підтримку — [DOC_MAINTENANCE.md](./DOC_MAINTENANCE.md).
 
 ## Що це
 
-Desktop-краулер на **Electron**: main process обходить сайт по HTTP і парсить HTML, renderer показує результати та експортує CSV. Проєкт монолітний — **6 вихідних файлів**, без окремих модулів і тестів.
+Desktop-краулер на **Electron**: main process обходить сайт по HTTP і парсить HTML, renderer показує результати та експортує CSV. Логіка краулера та UI-фільтрів винесена в окремі модулі з unit-тестами (`npm test`).
 
 ## Структура файлів
 
 ```
 src/
-├── main/main.js          # Electron lifecycle + вся логіка краулера
-├── preload/preload.js    # IPC bridge (contextBridge → window.api)
+├── shared/
+│   └── url-utils.js       # URL-утиліти (main + тести)
+├── main/
+│   ├── main.js            # Electron lifecycle + IPC
+│   ├── spider-logic.js    # BFS-краулер, fetch, cheerio, robots, sitemap
+│   ├── settings-persistence.js
+│   └── session-dump.js
+├── preload/preload.js     # IPC bridge (contextBridge → window.api)
 └── renderer/
-    ├── index.html        # UI shell, CSP
-    ├── input.css         # Tailwind source
-    ├── styles.css        # згенерований CSS (gitignored)
-    ├── renderer.js       # UI: таблиця + панель деталей
-    ├── settings.html     # сторінка налаштувань
+    ├── index.html         # UI shell, CSP
+    ├── ui-logic.js        # Чиста логіка фільтрів, класифікації, CSV-даних
+    ├── renderer.js        # UI: таблиця + панель деталей
+    ├── session-dump.js    # Дамп / workspace у sessionStorage
+    ├── settings-store.js
     ├── settings.js
-    └── settings-store.js # IPC → settings.json у userData
+    ├── input.css          # Tailwind source
+    └── styles.css         # згенерований CSS (gitignored)
+tests/
+├── shared/url-utils.test.js
+├── main/spider-logic.test.js
+├── main/settings-persistence.test.js
+├── main/session-dump.test.js
+├── renderer/ui-logic.test.js
+├── renderer/session-dump.test.js
+└── preload/ipc-channels.test.js
 ```
 
 | Файл | Відповідальність |
 |------|------------------|
-| `main.js` | BFS-обхід, fetch, robots.txt, cheerio, IPC events |
+| `main.js` | Electron lifecycle, IPC handlers |
+| `spider-logic.js` | BFS-обхід, fetch, robots.txt, cheerio, sitemap, черга |
 | `preload.js` | Whitelist каналів IPC, `window.api` |
-| `renderer.js` | Валідація URL, рендер, `scanResults` Map, CSV, фільтри таблиці сторінок |
-| `index.html` | Розмітка, Tailwind класи |
+| `ui-logic.js` | Фільтри, класифікація ресурсів, rel/meta, дублікати, сортування |
+| `renderer.js` | DOM, рендер таблиці, IPC callbacks, workspace |
 
 ## Архітектура (Electron)
 
@@ -171,6 +187,7 @@ Renderer
 
 ```bash
 npm install            # postinstall докачує бінарник Electron
+npm test               # unit-тести (node:test)
 npm start              # build:css + electron-forge start
 npm run build:css      # input.css → styles.css
 npm run package        # пакування в out/ (prepackage → build:css)
@@ -186,19 +203,34 @@ npm run make:mac       # лише macOS (dmg + zip); збирати на Mac
 
 **Якщо Forge падає з `ENOENT path.txt`:** завантаження бінарника Electron перервалось (мережа). Виправлення: `node node_modules/electron/install.js` або повторний `npm install`.
 
+## Тести
+
+- **Runner:** вбудований `node:test` + `node:assert/strict` (без додаткових dev-залежностей).
+- **Команда:** `npm test` — усі файли `tests/**/*.test.js`.
+- **Покриття:**
+  - `shared/url-utils` — нормалізація URL, redirect, content-type;
+  - `main/spider-logic` — парсинг HTML, robots/meta, черга, crawl/startSpider (mock fetch);
+  - `main/settings-persistence` — normalize/save/load (mock `electron.app`);
+  - `main/session-dump` — валідація дампу;
+  - `renderer/ui-logic` — фільтри, класифікація, сортування, CSV preview;
+  - `renderer/session-dump` — серіалізація результатів;
+  - `preload` — whitelist IPC-каналів.
+- **Не покрито E2E:** Electron UI, реальні HTTP-запити, діалоги файлів — лише unit/integration на рівні модулів.
+
 ## Відомі обмеження / техборг
 
-- Монолітний `main.js` (~296 рядків) — рефакторинг потрібен для concurrency, multi-domain, sitemap.
+- `spider-logic.js` і `renderer.js` ще містять оркестрацію поруч із делегованою логікою.
 - UI українською.
-- Немає тестів, README, `.env` / config-файлів.
+- Немає README, `.env` / config-файлів.
 
 ## Типові місця для правок
 
 | Задача | Де шукати |
 |--------|-----------|
-| Ліміт сторінок, timeout, UA | `main.js` константи |
-| Нова мета-інформація з HTML | `crawl()` cheerio-блок ~164–186 |
-| Нове поле в UI / CSV | `renderer.js` `onSpiderResult` + export |
+| Ліміт сторінок, timeout, UA | `spider-logic.js` константи |
+| Нова мета-інформація з HTML | `crawl()` cheerio-блок у `spider-logic.js` |
+| Нове поле в UI / CSV | `renderer.js` + `ui-logic.js` |
 | Новий IPC event | `main.js` + `preload.js` + `renderer.js` |
+| Unit-тести логіки | `tests/` + відповідний модуль у `src/` |
 | Стилі | `input.css` / Tailwind класи в `index.html` |
 | Безпека IPC | `preload.js` whitelist |

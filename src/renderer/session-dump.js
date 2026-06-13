@@ -142,3 +142,18 @@ function clearWorkspaceSession() {
         // ignore
     }
 }
+
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+        SESSION_DUMP_VERSION,
+        WORKSPACE_STORAGE_KEY,
+        WORKSPACE_VERSION,
+        cloneResultEntry,
+        buildSessionDumpPayload,
+        normalizeLoadedDump,
+        buildWorkspaceSnapshot,
+        saveWorkspaceToSession,
+        loadWorkspaceFromSession,
+        clearWorkspaceSession,
+    };
+}

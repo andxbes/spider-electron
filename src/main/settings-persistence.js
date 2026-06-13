@@ -50,6 +50,7 @@ module.exports = {
     DEFAULT_CONCURRENCY,
     MAX_CONCURRENCY,
     getSettingsPath,
+    normalizeSettings,
     loadSettings,
     saveSettings,
 };
