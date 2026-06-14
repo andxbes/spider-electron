@@ -1,718 +1,108 @@
 const cheerio = require('cheerio');
-const robotsParser = require('robots-parser');
-const { fetch: undiciFetch } = require('undici');
 const { MAX_CONCURRENCY } = require('./settings-persistence');
 const {
     extractPageTitle,
     extractMetaDescription,
-    extractElementText,
     collectMetaAttributeValues,
     extractMetaRobotsRaw,
     getXRobotsTag,
 } = require('./page-extractors');
 const {
     emitSpiderResult,
-    emitSpiderResultsBatch,
     extractPageViaHooks,
-    filterDiscoveredLinksViaHooks,
 } = require('./crawl-hooks');
 require('./crawl-defaults');
 require('./plugins');
 const {
     normalizePageUrl,
-    getUrlExtension,
-    getUrlPathnameLower,
     isSameHost,
-    isSkippableHref,
-    firstSrcsetUrl,
-    looksLikeJavascriptUrl,
     isRedirectStatus,
     resolveRedirectTarget,
     getContentType,
     isHtmlContent,
 } = require('../shared/url-utils');
-
-// --- ЛОГІКА ВЕБ-ПАВУКА ---
-
-const USER_AGENT = 'MyElectronSpider/1.0 (+https://github.com/your-repo)';
-const ROBOTS_UA = 'MyElectronSpider/1.0';
-const FETCH_TIMEOUT_MS = 5000;
-const MAX_REDIRECT_HOPS = 10;
-const FALLBACK_SITEMAP_PATHS = ['/sitemap_index.xml', '/sitemap.xml', '/index.xml'];
-
-const MEDIA_URL_EXTENSIONS = new Set([
-    'jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'ico', 'bmp', 'avif', 'tif', 'tiff',
-    'mp4', 'webm', 'ogv', 'mov', 'avi', 'mkv',
-    'mp3', 'ogg', 'wav', 'flac', 'aac', 'm4a',
-    'pdf', 'zip', 'gz', 'rar', '7z', 'tar',
-    'css', 'js', 'mjs', 'map',
-    'woff', 'woff2', 'ttf', 'eot', 'otf',
-    'xml', 'json', 'txt', 'csv',
-]);
-
-const visitedUrls = new Set();
-const reportedStubUrls = new Set();
-const probedDiscoveredUrls = new Set();
-let htmlQueue = [];
-let mediaQueue = [];
-let probeQueue = [];
-let maxPagesToVisit = 0; // 0 = без ліміту
-const robotsCache = new Map(); // host -> { parser, text }
-const referrersMap = new Map();
-
-function isPageLimitReached() {
-    return maxPagesToVisit > 0 && visitedUrls.size >= maxPagesToVisit;
-}
-
-function tryClaimUrl(url) {
-    let normalized;
-    try {
-        normalized = normalizePageUrl(url);
-    } catch {
-        return false;
-    }
-    if (visitedUrls.has(normalized)) {
-        return false;
-    }
-    if (isPageLimitReached()) {
-        return false;
-    }
-    visitedUrls.add(normalized);
-    return true;
-}
-
-let fetchImpl = undiciFetch;
-
-function setFetchForTests(fn) {
-    fetchImpl = fn;
-}
-
-function resetFetchForTests() {
-    fetchImpl = undiciFetch;
-}
-
-function fetchPage(url) {
-    // undici (Node fetch), а не global fetch Electron — інакше redirect: 'manual'
-    // повертає opaque-redirect зі status 0 без Location, і 301/302 губляться.
-    return fetchImpl(url, {
-        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-        redirect: 'manual',
-        headers: { 'User-Agent': USER_AGENT },
-    });
-}
-
-async function timedFetch(url) {
-    const startedAt = performance.now();
-    const response = await fetchPage(url);
-    return {
-        response,
-        getElapsedMs() {
-            return Math.round(performance.now() - startedAt);
-        },
-    };
-}
-
-
-
-
-
-const OUTLINK_IMAGE_EXTENSIONS = new Set([
-    'jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'ico', 'bmp', 'avif', 'tif', 'tiff',
-]);
-const OUTLINK_MEDIA_EXTENSIONS = new Set([
-    'mp4', 'webm', 'ogv', 'mov', 'avi', 'mkv', 'mp3', 'ogg', 'wav', 'flac', 'aac', 'm4a',
-]);
-const OUTLINK_FONT_EXTENSIONS = new Set(['woff', 'woff2', 'ttf', 'eot', 'otf']);
-const OUTLINK_PLUGIN_EXTENSIONS = new Set(['swf', 'flv']);
-const OUTLINK_HTML_EXTENSIONS = new Set(['html', 'htm', 'php', 'asp', 'aspx', 'jsp', 'shtml']);
-
-
-
-function classifyOutlinkKind(href, { element = '', rel = '', as = '' } = {}) {
-    const ext = getUrlExtension(href);
-    const relLower = String(rel || '').toLowerCase();
-    const elementLower = String(element || '').toLowerCase();
-    const asLower = String(as || '').toLowerCase();
-    const pathLower = getUrlPathnameLower(href);
-
-    if (elementLower === 'script') {
-        return 'javascript';
-    }
-    if (elementLower === 'iframe') {
-        return 'html';
-    }
-    if (elementLower === 'stylesheet') {
-        return 'css';
-    }
-    if (elementLower === 'embed' || elementLower === 'object') {
-        return 'plugins';
-    }
-    if (elementLower === 'video' || elementLower === 'audio') {
-        return 'media';
-    }
-    if (elementLower === 'image' || elementLower === 'icon') {
-        return 'images';
-    }
-
-    if (asLower === 'script' || looksLikeJavascriptUrl(href, ext, pathLower)) {
-        return 'javascript';
-    }
-    if (asLower === 'style' || elementLower === 'stylesheet' || relLower.includes('stylesheet') || ext === 'css') {
-        return 'css';
-    }
-    if (asLower === 'font' || relLower.includes('font') || OUTLINK_FONT_EXTENSIONS.has(ext)) {
-        return 'fonts';
-    }
-    if (asLower === 'image' || relLower.includes('icon') || relLower.includes('apple-touch-icon') || OUTLINK_IMAGE_EXTENSIONS.has(ext)) {
-        return 'images';
-    }
-    if (OUTLINK_MEDIA_EXTENSIONS.has(ext)) {
-        return 'media';
-    }
-    if (ext === 'xml' || ext === 'rss' || ext === 'atom') {
-        return 'xml';
-    }
-    if (ext === 'pdf') {
-        return 'pdf';
-    }
-    if (OUTLINK_PLUGIN_EXTENSIONS.has(ext)) {
-        return 'plugins';
-    }
-    if (relLower.includes('modulepreload') || relLower.includes('preload') || relLower.includes('prefetch')) {
-        if (asLower === 'script' || looksLikeJavascriptUrl(href, ext, pathLower)) {
-            return 'javascript';
-        }
-        if (asLower === 'style' || ext === 'css') {
-            return 'css';
-        }
-        if (asLower === 'font' || OUTLINK_FONT_EXTENSIONS.has(ext)) {
-            return 'fonts';
-        }
-        if (asLower === 'image' || OUTLINK_IMAGE_EXTENSIONS.has(ext)) {
-            return 'images';
-        }
-        if (asLower === 'fetch' || asLower === 'document') {
-            return 'html';
-        }
-        return 'other';
-    }
-    if (elementLower === 'anchor' || elementLower === 'area') {
-        if (!ext || OUTLINK_HTML_EXTENSIONS.has(ext)) {
-            return 'html';
-        }
-    }
-    if (asLower === 'fetch' || asLower === 'document') {
-        return 'html';
-    }
-    if (relLower.includes('alternate') || relLower.includes('canonical') || relLower.includes('manifest')) {
-        return 'html';
-    }
-    if (relLower.includes('preconnect') || relLower.includes('dns-prefetch')) {
-        return 'other';
-    }
-    if (elementLower === 'link' && !ext) {
-        return 'other';
-    }
-    if (!ext) {
-        if (elementLower === 'anchor' || elementLower === 'area') {
-            return 'html';
-        }
-        return 'other';
-    }
-    return 'other';
-}
-
-function parseAnchorRel(rel) {
-    const raw = String(rel || '').trim();
-    if (!raw) {
-        return {
-            rel: '',
-            relFollowAllowed: true,
-            relIndexAllowed: true,
-            relLabel: 'follow',
-        };
-    }
-
-    const tokens = raw.toLowerCase().split(/[\s,]+/).filter(Boolean);
-    const hasNofollow = tokens.includes('nofollow');
-    const hasSponsored = tokens.includes('sponsored');
-    const hasUgc = tokens.includes('ugc');
-    const restricted = hasNofollow || hasSponsored || hasUgc;
-    const markers = [
-        hasNofollow ? 'nofollow' : '',
-        hasSponsored ? 'sponsored' : '',
-        hasUgc ? 'ugc' : '',
-    ].filter(Boolean);
-
-    return {
-        rel: raw,
-        relFollowAllowed: !restricted,
-        relIndexAllowed: !restricted,
-        relLabel: markers.length ? markers.join(', ') : raw,
-    };
-}
-
-function isAnchorRelContext(context = {}) {
-    const element = String(context.element || '').toLowerCase();
-    return element === 'anchor' || element === 'area';
-}
-
-function formatOutlinkTag({ element = '', rel = '', as = '', tag = '' } = {}) {
-    if (tag) {
-        return tag;
-    }
-    const relLower = String(rel || '').toLowerCase().trim();
-    const asValue = String(as || '').trim();
-    switch (element) {
-        case 'anchor':
-            return 'a[href]';
-        case 'area':
-            return 'area[href]';
-        case 'script':
-            return 'script[src]';
-        case 'stylesheet':
-            return 'link[rel=stylesheet]';
-        case 'icon':
-            return 'link[rel=icon]';
-        case 'iframe':
-            return 'iframe[src]';
-        case 'embed':
-            return 'embed[src]';
-        case 'object':
-            return 'object[data]';
-        case 'form':
-            return 'form[action]';
-        case 'image':
-            return 'img[src]';
-        case 'video':
-            return 'video[src]';
-        case 'audio':
-            return 'audio[src]';
-        default:
-            break;
-    }
-    if (relLower.includes('modulepreload')) {
-        return 'link[rel=modulepreload]';
-    }
-    if (relLower.includes('preload')) {
-        return asValue ? `link[rel=preload][as=${asValue}]` : 'link[rel=preload]';
-    }
-    if (relLower.includes('prefetch')) {
-        return 'link[rel=prefetch]';
-    }
-    if (relLower.includes('preconnect')) {
-        return 'link[rel=preconnect]';
-    }
-    if (relLower.includes('dns-prefetch')) {
-        return 'link[rel=dns-prefetch]';
-    }
-    if (relLower) {
-        return `link[rel=${relLower.split(/\s+/)[0]}]`;
-    }
-    return 'link[href]';
-}
-
-function collectPageLinks($, currentUrl, allowedHostname) {
-    const links = [];
-    const seen = new Set();
-
-    const addLink = (href, text = '', context = {}) => {
-        if (isSkippableHref(href)) {
-            return;
-        }
-        try {
-            const absoluteUrl = normalizePageUrl(new URL(href, currentUrl).href);
-            const tag = formatOutlinkTag(context);
-            const kind = classifyOutlinkKind(absoluteUrl, context);
-            const relPart = isAnchorRelContext(context)
-                ? String(context.rel || '').toLowerCase().trim()
-                : '';
-            const seenKey = `${tag}\0${relPart}\0${absoluteUrl}`;
-            if (seen.has(seenKey)) {
-                return;
-            }
-            seen.add(seenKey);
-            const relInfo = isAnchorRelContext(context)
-                ? parseAnchorRel(context.rel || '')
-                : { rel: '', relFollowAllowed: null, relIndexAllowed: null, relLabel: '' };
-            links.push({
-                url: absoluteUrl,
-                text: String(text || '').trim().slice(0, 200),
-                external: !isSameHost(absoluteUrl, allowedHostname),
-                kind,
-                tag,
-                rel: relInfo.rel,
-                relFollowAllowed: relInfo.relFollowAllowed,
-                relIndexAllowed: relInfo.relIndexAllowed,
-                relLabel: relInfo.relLabel,
-            });
-        } catch {
-            // невалідний URL
-        }
-    };
-
-    $('a[href]').each((_, link) => {
-        const el = $(link);
-        addLink(el.attr('href'), extractElementText($, link), {
-            element: 'anchor',
-            rel: el.attr('rel') || '',
-        });
-    });
-
-    $('area[href]').each((_, area) => {
-        const el = $(area);
-        addLink(el.attr('href'), el.attr('alt') || 'area', {
-            element: 'area',
-            rel: el.attr('rel') || '',
-        });
-    });
-
-    $('link[href]').each((_, link) => {
-        const el = $(link);
-        const rel = el.attr('rel') || '';
-        const relLower = rel.toLowerCase();
-        const as = el.attr('as') || '';
-        let element = 'link';
-        if (relLower.includes('stylesheet')) {
-            element = 'stylesheet';
-        } else if (relLower.includes('icon') || relLower.includes('apple-touch-icon')) {
-            element = 'icon';
-        } else if (relLower.includes('modulepreload')) {
-            element = 'script';
-        } else if (relLower.includes('preload') || relLower.includes('prefetch')) {
-            element = as || 'link';
-        }
-        addLink(el.attr('href'), rel || 'link', { element, rel, as });
-    });
-
-    $('script[src]').each((_, script) => {
-        addLink($(script).attr('src'), 'script', { element: 'script' });
-    });
-
-    $('iframe[src]').each((_, frame) => {
-        addLink($(frame).attr('src'), $(frame).attr('title') || 'iframe', { element: 'iframe' });
-    });
-
-    $('embed[src]').each((_, embed) => {
-        addLink($(embed).attr('src'), 'embed', { element: 'embed' });
-    });
-
-    $('object[data]').each((_, object) => {
-        addLink($(object).attr('data'), $(object).attr('title') || 'object', { element: 'object' });
-    });
-
-    $('form[action]').each((_, form) => {
-        addLink($(form).attr('action'), 'form', { element: 'form' });
-    });
-
-    $('input[type="image"][src]').each((_, input) => {
-        addLink($(input).attr('src'), $(input).attr('alt') || 'input', { tag: 'input[type=image][src]' });
-    });
-
-    $('img[src]').each((_, img) => {
-        const el = $(img);
-        addLink(el.attr('src'), el.attr('alt') || el.attr('title') || 'image', { element: 'image' });
-        const srcset = firstSrcsetUrl(el.attr('srcset'));
-        if (srcset) {
-            addLink(srcset, el.attr('alt') || el.attr('title') || 'image', { tag: 'img[srcset]' });
-        }
-    });
-
-    $('picture source[srcset], source[src]').each((_, source) => {
-        const el = $(source);
-        const srcset = firstSrcsetUrl(el.attr('srcset'));
-        if (el.attr('src')) {
-            addLink(el.attr('src'), 'media', { tag: 'source[src]' });
-        }
-        if (srcset) {
-            addLink(srcset, 'media', { tag: 'source[srcset]' });
-        }
-    });
-
-    $('video[src]').each((_, video) => {
-        addLink($(video).attr('src'), 'video', { element: 'video' });
-    });
-    $('video source[src]').each((_, source) => {
-        addLink($(source).attr('src'), 'video', { tag: 'video>source[src]' });
-    });
-
-    $('audio[src]').each((_, audio) => {
-        addLink($(audio).attr('src'), 'audio', { element: 'audio' });
-    });
-    $('audio source[src]').each((_, source) => {
-        addLink($(source).attr('src'), 'audio', { tag: 'audio>source[src]' });
-    });
-
-    return links;
-}
-
-function buildSpiderResult(overrides) {
-    return {
-        metaDescription: '',
-        metaCanonical: '',
-        contentType: '',
-        metaRobots: '',
-        metaRobotsStatus: 'none',
-        metaRobotsLabel: '',
-        robotsAllowed: null,
-        robotsRule: '',
-        responseTimeMs: null,
-        external: false,
-        fetched: true,
-        kind: '',
-        tag: '',
-        headings: [],
-        ...overrides,
-    };
-}
-
-function getRobotsTxtInfo(robots, robotsText, url) {
-    const allowed = robots.isAllowed(url, ROBOTS_UA);
-    if (allowed === undefined) {
-        return {
-            robotsAllowed: null,
-            robotsRule: '—',
-        };
-    }
-
-    const lineNumber = robots.getMatchingLineNumber(url, ROBOTS_UA);
-    let robotsRule = '';
-
-    if (lineNumber > 0 && robotsText) {
-        const line = robotsText.split('\n')[lineNumber - 1];
-        robotsRule = line ? line.trim() : '';
-    } else if (allowed) {
-        robotsRule = 'немає правила (дозволено)';
-    } else {
-        robotsRule = 'заборонено';
-    }
-
-    return {
-        robotsAllowed: allowed,
-        robotsRule,
-    };
-}
-
-async function getRobotsTxtFieldsForUrl(url) {
-    try {
-        const urlObject = new URL(url);
-        const { parser, text } = await getRobots(urlObject);
-        return getRobotsTxtInfo(parser, text, url);
-    } catch {
-        return {
-            robotsAllowed: null,
-            robotsRule: '',
-        };
-    }
-}
-
-async function isInternalRobotsDisallowed(url, allowedHostname) {
-    try {
-        const absoluteUrl = normalizePageUrl(url);
-        if (!isSameHost(absoluteUrl, allowedHostname)) {
-            return false;
-        }
-        const fields = await getRobotsTxtFieldsForUrl(absoluteUrl);
-        return fields.robotsAllowed === false;
-    } catch {
-        return false;
-    }
-}
-
-function buildRobotsBlockedStub(link, robotsFields) {
-    return {
-        ...buildDiscoveredLinkResult(link),
-        ...robotsFields,
-        status: 0,
-        fetched: true,
-    };
-}
-
-function parseMetaRobotsDirective(content) {
-    const raw = String(content || '').trim();
-    if (!raw) {
-        return {
-            metaRobots: '',
-            metaRobotsStatus: 'allowed',
-            metaRobotsLabel: 'index, follow',
-            blocksFollow: false,
-        };
-    }
-
-    const tokens = raw.toLowerCase().split(/[,;\s]+/).filter(Boolean);
-    const hasNoindex = tokens.includes('noindex');
-    const hasNofollow = tokens.includes('nofollow');
-
-    if (hasNoindex && hasNofollow) {
-        return {
-            metaRobots: raw,
-            metaRobotsStatus: 'closed',
-            metaRobotsLabel: raw,
-            blocksFollow: true,
-        };
-    }
-    if (hasNoindex) {
-        return {
-            metaRobots: raw,
-            metaRobotsStatus: 'noindex',
-            metaRobotsLabel: raw,
-            blocksFollow: false,
-        };
-    }
-    if (hasNofollow) {
-        return {
-            metaRobots: raw,
-            metaRobotsStatus: 'nofollow',
-            metaRobotsLabel: raw,
-            blocksFollow: true,
-        };
-    }
-
-    return {
-        metaRobots: raw,
-        metaRobotsStatus: 'allowed',
-        metaRobotsLabel: raw,
-        blocksFollow: false,
-    };
-}
-
-function buildResultWithIndexing(robots, robotsText, url, fields, metaRobotsRaw = null) {
-    const metaFields = metaRobotsRaw === null
-        ? {
-            metaRobots: '',
-            metaRobotsStatus: 'none',
-            metaRobotsLabel: '',
-            blocksFollow: false,
-        }
-        : parseMetaRobotsDirective(metaRobotsRaw);
-
-    return buildSpiderResult({
-        ...getRobotsTxtInfo(robots, robotsText, url),
-        ...metaFields,
-        ...fields,
-    });
-}
-
-function sendRobotsBlockedResult(browserWindow, robots, robotsText, url, referrers) {
-    console.log(`Заблоковано robots.txt: ${url}`);
-    emitSpiderResult(browserWindow, buildResultWithIndexing(
-        robots,
-        robotsText,
-        url,
-        {
-            status: 0,
-            url,
-            title: '',
-            referrers,
-        }
-    ));
-}
-
-
-function normalizeReferrerMeta(linkMeta = {}) {
-    const meta = typeof linkMeta === 'string' ? { text: linkMeta } : (linkMeta || {});
-    return {
-        text: String(meta.text || '').trim().slice(0, 200),
-        rel: meta.rel || '',
-        tag: meta.tag || '',
-        kind: meta.kind || '',
-        relFollowAllowed: meta.relFollowAllowed ?? null,
-        relIndexAllowed: meta.relIndexAllowed ?? null,
-        relLabel: meta.relLabel || '',
-    };
-}
-
-function mergeReferrerMeta(targetMap, referrerUrl, linkMeta = {}) {
-    const incoming = normalizeReferrerMeta(linkMeta);
-    if (!targetMap.has(referrerUrl)) {
-        targetMap.set(referrerUrl, incoming);
-        return;
-    }
-    const existing = normalizeReferrerMeta(targetMap.get(referrerUrl));
-    let text = existing.text || '';
-    if (incoming.text && incoming.text !== text) {
-        if (!text) {
-            text = incoming.text;
-        } else if (!text.includes(incoming.text)) {
-            text = `${text}; ${incoming.text}`.slice(0, 200);
-        }
-    }
-    const mergeRelFlag = (left, right) => {
-        if (left === false || right === false) {
-            return false;
-        }
-        if (left === true || right === true) {
-            return true;
-        }
-        return null;
-    };
-    targetMap.set(referrerUrl, {
-        text,
-        rel: existing.rel || incoming.rel,
-        tag: existing.tag || incoming.tag,
-        kind: existing.kind || incoming.kind,
-        relFollowAllowed: mergeRelFlag(existing.relFollowAllowed, incoming.relFollowAllowed),
-        relIndexAllowed: mergeRelFlag(existing.relIndexAllowed, incoming.relIndexAllowed),
-        relLabel: existing.relLabel || incoming.relLabel,
-    });
-}
-
-function addReferrer(targetUrl, referrerUrl, linkMeta = {}) {
-    if (!referrersMap.has(targetUrl)) {
-        referrersMap.set(targetUrl, new Map());
-    }
-    try {
-        mergeReferrerMeta(referrersMap.get(targetUrl), normalizePageUrl(referrerUrl), linkMeta);
-    } catch {
-        mergeReferrerMeta(referrersMap.get(targetUrl), referrerUrl, linkMeta);
-    }
-}
-
-function referrerEntry(href, linkMeta = {}) {
-    const meta = normalizeReferrerMeta(linkMeta);
-    return {
-        href,
-        text: meta.text,
-        rel: meta.rel,
-        tag: meta.tag,
-        kind: meta.kind,
-        relFollowAllowed: meta.relFollowAllowed,
-        relIndexAllowed: meta.relIndexAllowed,
-        relLabel: meta.relLabel,
-    };
-}
-
-function getReferrersListForUrl(url) {
-    const refs = referrersMap.get(url);
-    if (!refs) {
-        return [];
-    }
-    return Array.from(refs.entries()).map(([href, meta]) => referrerEntry(href, meta));
-}
-
-function getReferrersSnapshot(url, fallbackReferrer = null) {
-    if (referrersMap.has(url)) {
-        return getReferrersListForUrl(url);
-    }
-    if (fallbackReferrer && fallbackReferrer !== 'N/A') {
-        return [referrerEntry(fallbackReferrer)];
-    }
-    return [];
-}
-
-function buildAllReferrersPayload() {
-    const payload = {};
-    for (const [link] of referrersMap.entries()) {
-        payload[link] = getReferrersListForUrl(link);
-    }
-    return payload;
-}
+const {
+    classifyOutlinkKind,
+    parseAnchorRel,
+    formatOutlinkTag,
+    isCrawlableLink,
+    collectPageLinks,
+} = require('./link-collector');
+const {
+    visitedUrls,
+    isPageLimitReached,
+    tryClaimUrl,
+    clearCrawlRuntime,
+    clearQueues,
+    getScanSession,
+    setScanSession,
+    clearScanSession,
+    setMaxPagesToVisit,
+    getMaxPagesToVisit,
+    getHtmlQueue,
+    getMediaQueue,
+} = require('./crawl-state');
+const {
+    buildSpiderResult,
+    parseMetaRobotsDirective,
+    buildResultWithIndexing,
+    getRobotsTxtInfo,
+} = require('./crawl-results');
+const {
+    addReferrer,
+    referrerEntry,
+    getReferrersListForUrl,
+    getReferrersSnapshot,
+    buildAllReferrersPayload,
+    getReferrersMapKeys,
+    clearReferrers,
+    normalizeReferrerMeta,
+    mergeReferrerMeta,
+} = require('./crawl-referrers');
+const {
+    USER_AGENT,
+    ROBOTS_UA,
+    FETCH_TIMEOUT_MS,
+    MAX_REDIRECT_HOPS,
+    setFetchForTests,
+    resetFetchForTests,
+    fetchPage,
+    timedFetch,
+    getRobots,
+    getRobotsTxtFieldsForUrl,
+    sendRobotsBlockedResult,
+    isInternalRobotsDisallowed,
+} = require('./crawl-network');
+const {
+    FALLBACK_SITEMAP_PATHS,
+    parseSitemapsFromRobotsTxt,
+    fetchSitemapPageUrls,
+    discoverSitemapUrls,
+    seedQueueFromSitemaps,
+} = require('./crawl-sitemap');
+const {
+    getQueueLength,
+    hasPendingWork,
+    dequeueNextUrl,
+    enqueueUrl,
+    enqueueProbeUrl,
+    isUrlQueued,
+    needsLinkProbe,
+    isLikelyMediaUrl,
+} = require('./crawl-queue');
+const {
+    probeDiscoveredLink,
+    probeExternalLink,
+    reportDiscoveredLinks,
+    buildDiscoveredLinkResult,
+    buildRobotsBlockedStub,
+} = require('./probe');
 
 async function buildReferrersEndPayload() {
     const referrers = buildAllReferrersPayload();
     const robotsByUrl = {};
 
-    for (const url of referrersMap.keys()) {
+    for (const url of getReferrersMapKeys()) {
         const fields = await getRobotsTxtFieldsForUrl(url);
         if (fields.robotsAllowed !== null || fields.robotsRule) {
             robotsByUrl[url] = fields;
@@ -722,444 +112,6 @@ async function buildReferrersEndPayload() {
     return { referrers, robotsByUrl };
 }
 
-function buildReferrerLinkMeta(link) {
-    return {
-        text: link.text || '',
-        rel: link.rel || '',
-        tag: link.tag || '',
-        kind: link.kind || '',
-        relFollowAllowed: link.relFollowAllowed,
-        relIndexAllowed: link.relIndexAllowed,
-        relLabel: link.relLabel || '',
-    };
-}
-
-
-function isLikelyMediaUrl(url) {
-    return MEDIA_URL_EXTENSIONS.has(getUrlExtension(url));
-}
-
-function getQueueLength() {
-    return htmlQueue.length + mediaQueue.length + probeQueue.length;
-}
-
-function isProbeUrlQueued(url) {
-    return probeQueue.some((item) => item.url === url);
-}
-
-function isUrlQueued(url) {
-    return htmlQueue.some((item) => item.url === url)
-        || mediaQueue.some((item) => item.url === url)
-        || isProbeUrlQueued(url);
-}
-
-function clearQueues() {
-    htmlQueue = [];
-    mediaQueue = [];
-    probeQueue = [];
-}
-
-function hasPendingWork() {
-    if (probeQueue.length > 0) {
-        return true;
-    }
-    if (isPageLimitReached()) {
-        return false;
-    }
-    return htmlQueue.length > 0 || mediaQueue.length > 0;
-}
-
-function needsLinkProbe(link) {
-    if (link.external) {
-        return true;
-    }
-    return !isCrawlableLink(link);
-}
-
-function dequeueNextUrl() {
-    if (!isPageLimitReached()) {
-        if (htmlQueue.length > 0) {
-            const item = htmlQueue.shift();
-            return { type: 'crawl', url: item.url, referrer: item.referrer };
-        }
-        if (mediaQueue.length > 0) {
-            const item = mediaQueue.shift();
-            return { type: 'crawl', url: item.url, referrer: item.referrer };
-        }
-    }
-    if (probeQueue.length > 0) {
-        const item = probeQueue.shift();
-        return {
-            type: 'probe',
-            url: item.url,
-            referrer: item.referrer,
-            link: item.link,
-        };
-    }
-    return null;
-}
-
-
-function parseSitemapsFromRobotsTxt(text) {
-    const sitemaps = [];
-    for (const line of text.split('\n')) {
-        const match = line.match(/^\s*Sitemap:\s*(\S+)/i);
-        if (match) {
-            sitemaps.push(match[1].trim());
-        }
-    }
-    return sitemaps;
-}
-
-async function getRobots(urlObject) {
-    const host = urlObject.host;
-    if (robotsCache.has(host)) {
-        return robotsCache.get(host);
-    }
-
-    const robotsUrl = `${urlObject.protocol}//${urlObject.host}/robots.txt`;
-    let text = '';
-    try {
-        const response = await fetchPage(robotsUrl);
-        if (response.ok) {
-            text = await response.text();
-        }
-    } catch (e) {
-        // robots.txt відсутній — вважаємо все дозволеним
-    }
-
-    const entry = {
-        parser: robotsParser(robotsUrl, text),
-        text,
-    };
-    robotsCache.set(host, entry);
-    return entry;
-}
-
-function isCrawlableLink(link) {
-    if (link.external) {
-        return false;
-    }
-    const tag = String(link.tag || '');
-    if (tag === 'a[href]' || tag === 'area[href]' || tag === 'form[action]') {
-        return true;
-    }
-    if (tag === 'iframe[src]' && link.kind === 'html') {
-        return true;
-    }
-    return false;
-}
-
-function buildDiscoveredLinkResult(link) {
-    return buildSpiderResult({
-        url: link.url,
-        status: '',
-        title: '',
-        text: String(link.text || '').trim(),
-        external: Boolean(link.external),
-        fetched: false,
-        kind: link.kind || '',
-        tag: link.tag || '',
-        rel: link.rel || '',
-        relFollowAllowed: link.relFollowAllowed,
-        relIndexAllowed: link.relIndexAllowed,
-        relLabel: link.relLabel || '',
-        referrers: getReferrersListForUrl(link.url),
-    });
-}
-
-function enqueueProbeUrl(url, sourceUrl, link) {
-    if (!needsLinkProbe(link)) {
-        return;
-    }
-    try {
-        const absoluteUrl = normalizePageUrl(url);
-        if (probedDiscoveredUrls.has(absoluteUrl) || isProbeUrlQueued(absoluteUrl)) {
-            return;
-        }
-        probeQueue.push({ url: absoluteUrl, referrer: sourceUrl, link });
-    } catch {
-        // невалідний URL
-    }
-}
-
-function buildProbeLinkFields(url, link, fields) {
-    return {
-        url,
-        title: '',
-        text: String(link.text || '').trim(),
-        external: Boolean(link.external),
-        fetched: true,
-        kind: link.kind || '',
-        tag: link.tag || '',
-        rel: link.rel || '',
-        relFollowAllowed: link.relFollowAllowed,
-        relIndexAllowed: link.relIndexAllowed,
-        relLabel: link.relLabel || '',
-        referrers: getReferrersListForUrl(url),
-        ...fields,
-    };
-}
-
-async function probeDiscoveredLink(url, referrer, link, browserWindow) {
-    if (probedDiscoveredUrls.has(url)) {
-        return;
-    }
-    probedDiscoveredUrls.add(url);
-
-    if (!link.external) {
-        const urlObject = new URL(url);
-        const { parser, text } = await getRobots(urlObject);
-        if (!parser.isAllowed(url, ROBOTS_UA)) {
-            sendRobotsBlockedResult(
-                browserWindow,
-                parser,
-                text,
-                url,
-                getReferrersListForUrl(url)
-            );
-            return;
-        }
-    }
-
-    const label = link.external ? 'зовнішнє посилання' : 'ресурс';
-    console.log(`Перевіряю ${label}: ${url}`);
-
-    try {
-        let currentUrl = url;
-        let timed = await timedFetch(currentUrl);
-        let response = timed.response;
-        let responseTimeMs = timed.getElapsedMs();
-        let hop = 0;
-
-        while (isRedirectStatus(response.status) && hop < MAX_REDIRECT_HOPS) {
-            const redirectUrl = resolveRedirectTarget(currentUrl, response.headers.get('location'));
-            if (!redirectUrl || redirectUrl === currentUrl) {
-                break;
-            }
-            currentUrl = redirectUrl;
-            hop++;
-            timed = await timedFetch(currentUrl);
-            response = timed.response;
-            responseTimeMs = timed.getElapsedMs();
-        }
-
-        const { parser, text } = await getRobots(new URL(currentUrl));
-        emitSpiderResult(browserWindow, buildResultWithIndexing(
-            parser,
-            text,
-            url,
-            buildProbeLinkFields(url, link, {
-                status: response.status,
-                contentType: getContentType(response),
-                responseTimeMs,
-                redirectUrl: currentUrl !== url ? currentUrl : undefined,
-            }),
-            getXRobotsTag(response) || null
-        ));
-    } catch (error) {
-        console.error(`Помилка перевірки ${label} ${url}: ${error.message}`);
-        const { parser, text } = await getRobots(new URL(url)).catch(() => ({ parser: null, text: '' }));
-        const fields = buildProbeLinkFields(url, link, { status: 'ERROR' });
-        if (parser) {
-            emitSpiderResult(browserWindow, buildResultWithIndexing(parser, text, url, fields));
-        } else {
-            emitSpiderResult(browserWindow, buildSpiderResult({
-                ...(await getRobotsTxtFieldsForUrl(url)),
-                ...fields,
-            }));
-        }
-    }
-}
-
-const probeExternalLink = probeDiscoveredLink;
-
-async function reportDiscoveredLinks(browserWindow, links, sourceUrl, allowedHostname, { follow = true } = {}) {
-    const stubs = [];
-    const filteredLinks = filterDiscoveredLinksViaHooks(
-        { sourceUrl, allowedHostname, follow, browserWindow },
-        links
-    );
-
-    for (const link of filteredLinks) {
-        const referrerMeta = buildReferrerLinkMeta(link);
-        const robotsFields = link.external
-            ? { robotsAllowed: null, robotsRule: '' }
-            : await getRobotsTxtFieldsForUrl(link.url);
-        const internalRobotsBlocked = !link.external && robotsFields.robotsAllowed === false;
-
-        if (follow && !link.external && isCrawlableLink(link)) {
-            if (internalRobotsBlocked) {
-                addReferrer(link.url, sourceUrl, referrerMeta);
-                if (!reportedStubUrls.has(link.url)) {
-                    reportedStubUrls.add(link.url);
-                    stubs.push(buildRobotsBlockedStub(link, robotsFields));
-                }
-                continue;
-            }
-            enqueueUrl(link.url, sourceUrl, allowedHostname, referrerMeta);
-            continue;
-        }
-
-        addReferrer(link.url, sourceUrl, referrerMeta);
-
-        if (!internalRobotsBlocked) {
-            enqueueProbeUrl(link.url, sourceUrl, link);
-        }
-
-        if (reportedStubUrls.has(link.url)) {
-            continue;
-        }
-
-        const crawlableInternal = follow && !link.external && isCrawlableLink(link);
-        if (crawlableInternal && (visitedUrls.has(link.url) || isUrlQueued(link.url))) {
-            continue;
-        }
-
-        reportedStubUrls.add(link.url);
-        if (internalRobotsBlocked) {
-            stubs.push(buildRobotsBlockedStub(link, robotsFields));
-        } else {
-            const stub = buildDiscoveredLinkResult(link);
-            Object.assign(stub, robotsFields);
-            stubs.push(stub);
-        }
-    }
-
-    if (stubs.length > 0) {
-        emitSpiderResultsBatch(browserWindow, stubs);
-    }
-}
-
-function enqueueUrl(url, referrer, allowedHostname, linkMeta = {}) {
-    try {
-        const absoluteUrl = normalizePageUrl(url);
-        if (!isSameHost(absoluteUrl, allowedHostname)) {
-            return;
-        }
-
-        if (referrer !== 'N/A') {
-            addReferrer(absoluteUrl, referrer, linkMeta);
-        }
-
-        if (!visitedUrls.has(absoluteUrl) && !isUrlQueued(absoluteUrl)) {
-            const targetQueue = isLikelyMediaUrl(absoluteUrl) ? mediaQueue : htmlQueue;
-            targetQueue.push({ url: absoluteUrl, referrer });
-        }
-    } catch (e) {
-        // невалідний URL
-    }
-}
-
-async function fetchSitemapPageUrls(sitemapUrl, allowedHostname, fetchedSitemaps) {
-    if (fetchedSitemaps.has(sitemapUrl)) {
-        return [];
-    }
-    fetchedSitemaps.add(sitemapUrl);
-
-    try {
-        const response = await fetchPage(sitemapUrl);
-        if (!response.ok) {
-            console.log(`Sitemap недоступний (${response.status}): ${sitemapUrl}`);
-            return [];
-        }
-
-        const xml = await response.text();
-        const $ = cheerio.load(xml, { xmlMode: true });
-        const pageUrls = [];
-        const isSitemapIndex = $('sitemapindex').length > 0 || /<sitemapindex[\s>]/i.test(xml);
-
-        if (isSitemapIndex) {
-            const nestedSitemaps = [];
-            $('sitemap loc, sitemap > loc').each((_, el) => {
-                const loc = $(el).text().trim();
-                if (loc) {
-                    nestedSitemaps.push(loc);
-                }
-            });
-
-            for (const nestedUrl of nestedSitemaps) {
-                const nestedPages = await fetchSitemapPageUrls(nestedUrl, allowedHostname, fetchedSitemaps);
-                pageUrls.push(...nestedPages);
-            }
-            return pageUrls;
-        }
-
-        const collectPageUrl = (loc) => {
-            if (!loc) {
-                return;
-            }
-            try {
-                const absoluteUrl = normalizePageUrl(loc);
-                if (isSameHost(absoluteUrl, allowedHostname)) {
-                    pageUrls.push(absoluteUrl);
-                }
-            } catch (e) {
-                // пропускаємо невалідні URL
-            }
-        };
-
-        $('url loc, url > loc').each((_, el) => collectPageUrl($(el).text().trim()));
-
-        if (pageUrls.length === 0) {
-            $('loc').each((_, el) => collectPageUrl($(el).text().trim()));
-        }
-
-        return pageUrls;
-    } catch (error) {
-        console.error(`Помилка читання sitemap ${sitemapUrl}: ${error.message}`);
-        return [];
-    }
-}
-
-async function discoverSitemapUrls(startUrl) {
-    const start = new URL(startUrl);
-    const origin = `${start.protocol}//${start.host}`;
-    const { text } = await getRobots(start);
-
-    const sitemapUrls = parseSitemapsFromRobotsTxt(text);
-    if (sitemapUrls.length === 0) {
-        for (const path of FALLBACK_SITEMAP_PATHS) {
-            sitemapUrls.push(new URL(path, origin).href);
-        }
-    }
-
-    return [...new Set(sitemapUrls)];
-}
-
-async function seedQueueFromSitemaps(startUrl, browserWindow) {
-    const start = new URL(startUrl);
-    const sitemapUrls = await discoverSitemapUrls(startUrl);
-    const fetchedSitemaps = new Set();
-    const pageUrls = new Set();
-
-    browserWindow.webContents.send('spider-progress', {
-        scanned: 0,
-        queue: 0,
-        status: `Пошук sitemap (${sitemapUrls.length})...`,
-    });
-
-    for (const sitemapUrl of sitemapUrls) {
-        const urls = await fetchSitemapPageUrls(sitemapUrl, start.hostname, fetchedSitemaps);
-        for (const pageUrl of urls) {
-            pageUrls.add(pageUrl);
-            if (await isInternalRobotsDisallowed(pageUrl, start.hostname)) {
-                continue;
-            }
-            enqueueUrl(pageUrl, sitemapUrl, start.hostname, 'sitemap');
-        }
-    }
-
-    console.log(`У sitemap знайдено сторінок: ${pageUrls.size}`);
-    return pageUrls.size;
-}
-
-/**
- * Основна функція сканування однієї сторінки
- * @param {string} url - URL для сканування
- * @param {string} referrer - URL, з якого перейшли на цю сторінку
- * @param {BrowserWindow} browserWindow - Вікно для надсилання результатів
- */
 function isSessionActive(session) {
     return session && !session.finished && !session.stopped;
 }
@@ -1173,7 +125,7 @@ async function crawl(url, referrer, browserWindow) {
         return;
     }
 
-    const session = scanSession;
+    const session = getScanSession();
     console.log(`Сканую: ${url}`);
 
     const urlObject = new URL(url);
@@ -1268,7 +220,7 @@ async function crawl(url, referrer, browserWindow) {
         const contentType = getContentType(response);
         const pageReferrers = currentUrl === url
             ? referrers
-            : (referrersMap.has(currentUrl)
+            : (getReferrersListForUrl(currentUrl).length > 0
                 ? getReferrersListForUrl(currentUrl)
                 : (previousUrl ? [referrerEntry(previousUrl)] : []));
 
@@ -1381,8 +333,6 @@ async function crawl(url, referrer, browserWindow) {
     }
 }
 
-let scanSession = null;
-
 function sendFinalProgress(session, endMessage) {
     session.browserWindow.webContents.send('spider-progress', {
         scanned: visitedUrls.size,
@@ -1404,8 +354,8 @@ function completeScan(session, endMessage) {
     }
     sendFinalProgress(session, endMessage);
     session.finished = true;
-    if (scanSession === session) {
-        scanSession = null;
+    if (getScanSession() === session) {
+        clearScanSession();
     }
 
     console.log(endMessage);
@@ -1417,12 +367,13 @@ function completeScan(session, endMessage) {
 }
 
 async function startSpider(startUrl, options, browserWindow) {
-    if (scanSession && !scanSession.finished) {
-        scanSession.stopped = true;
+    const existingSession = getScanSession();
+    if (existingSession && !existingSession.finished) {
+        existingSession.stopped = true;
     }
 
     const useSitemap = options?.useSitemap ?? false;
-    maxPagesToVisit = Math.max(0, parseInt(options?.maxPages, 10) || 0);
+    setMaxPagesToVisit(Math.max(0, parseInt(options?.maxPages, 10) || 0));
     const concurrency = Math.min(
         MAX_CONCURRENCY,
         Math.max(1, parseInt(options?.concurrency, 10) || 1)
@@ -1489,8 +440,8 @@ async function startSpider(startUrl, options, browserWindow) {
             this.browserWindow.webContents.send('spider-progress', {
                 scanned: visitedUrls.size,
                 queue: getQueueLength(),
-                queueHtml: htmlQueue.length,
-                queueMedia: mediaQueue.length,
+                queueHtml: getHtmlQueue().length,
+                queueMedia: getMediaQueue().length,
                 active: this.activeWorkers,
                 concurrency: this.concurrency,
                 paused: this.paused,
@@ -1499,7 +450,7 @@ async function startSpider(startUrl, options, browserWindow) {
             });
         },
         tryFinishOrPump() {
-            if (this.finished || scanSession !== this) {
+            if (this.finished || getScanSession() !== this) {
                 return;
             }
 
@@ -1531,13 +482,13 @@ async function startSpider(startUrl, options, browserWindow) {
                 let endMessage = 'Сканування завершено!';
                 const remaining = getQueueLength();
                 if (limitReached && remaining > 0) {
-                    endMessage = `Досягнуто ліміт ${maxPagesToVisit} стор. У черзі залишилось: ${remaining}`;
+                    endMessage = `Досягнуто ліміт ${getMaxPagesToVisit()} стор. У черзі залишилось: ${remaining}`;
                 }
                 completeScan(this, endMessage);
             }
         },
         pumpQueue() {
-            if (this.finished || scanSession !== this || this.paused || this.stopped) {
+            if (this.finished || getScanSession() !== this || this.paused || this.stopped) {
                 return;
             }
 
@@ -1563,7 +514,7 @@ async function startSpider(startUrl, options, browserWindow) {
                         console.error(`Помилка воркера для ${item.url}:`, err);
                     })
                     .finally(() => {
-                        if (scanSession !== this) {
+                        if (getScanSession() !== this) {
                             return;
                         }
                         this.activeWorkers--;
@@ -1577,18 +528,14 @@ async function startSpider(startUrl, options, browserWindow) {
         },
     };
 
-    scanSession = session;
+    setScanSession(session);
 
-    visitedUrls.clear();
-    reportedStubUrls.clear();
-    probedDiscoveredUrls.clear();
-    clearQueues();
-    referrersMap.clear();
-    robotsCache.clear();
+    clearCrawlRuntime();
+    clearReferrers();
 
     if (useSitemap) {
-        const sitemapPageCount = await seedQueueFromSitemaps(startUrl, browserWindow);
-        if (scanSession !== session) {
+        const sitemapPageCount = await seedQueueFromSitemaps(startUrl, browserWindow, getRobots);
+        if (getScanSession() !== session) {
             return;
         }
         session.sendProgress(
@@ -1598,32 +545,19 @@ async function startSpider(startUrl, options, browserWindow) {
         );
     }
 
-    if (scanSession !== session) {
+    if (getScanSession() !== session) {
         return;
     }
 
     enqueueUrl(startUrl, 'N/A', new URL(startUrl).hostname);
     session.pumpQueue();
 }
+
 function resetSpiderStateForTests() {
-    visitedUrls.clear();
-    reportedStubUrls.clear();
-    probedDiscoveredUrls.clear();
-    htmlQueue = [];
-    mediaQueue = [];
-    probeQueue = [];
-    maxPagesToVisit = 0;
-    robotsCache.clear();
-    referrersMap.clear();
-    scanSession = null;
-}
-
-function getScanSession() {
-    return scanSession;
-}
-
-function clearScanSession() {
-    scanSession = null;
+    clearCrawlRuntime();
+    clearReferrers();
+    setMaxPagesToVisit(0);
+    clearScanSession();
 }
 
 module.exports = {
@@ -1640,7 +574,7 @@ module.exports = {
     timedFetch,
     extractPageTitle,
     extractMetaDescription,
-    extractElementText,
+    extractElementText: require('./page-extractors').extractElementText,
     collectPageLinks,
     parseMetaRobotsDirective,
     parseAnchorRel,

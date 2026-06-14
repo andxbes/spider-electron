@@ -10,9 +10,29 @@ const TABLE_LAZY_SCROLL_THRESHOLD_PX = 160;
 const REFRESH_TABLE_DELAY_MS = 250;
 const STATUS_FILTER_REFRESH_EVERY_N_PAGES = 100;
 
+function escapeSelectorValue(value) {
+    if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
+        return CSS.escape(value);
+    }
+    return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+function applyResultsTdLayout(tdHtml, col) {
+    if (!tdHtml.startsWith('<td')) {
+        return tdHtml;
+    }
+    const layoutClass = col.cellNowrap ? 'results-td-compact' : 'results-td-wrap';
+    if (tdHtml.includes('class="')) {
+        return tdHtml.replace('class="', `class="${layoutClass} `);
+    }
+    return tdHtml.replace('<td', `<td class="${layoutClass}"`);
+}
+
 function createTableView(deps) {
     const {
         resultsTable,
+        resultsDataTable,
+        pagesTableHead,
         pagesTableScroll,
         filterCount,
         detailContent,
@@ -25,8 +45,8 @@ function createTableView(deps) {
         updateExportButton,
         syncSelectedRowUi,
         getSelectedUrl,
-        urlCellHtml,
         onSelectRow,
+        onCancelPendingScanRefresh,
     } = deps;
 
     let tableDisplayEntries = [];
@@ -55,7 +75,10 @@ function createTableView(deps) {
         if (getSelectedUrl() === data.url) {
             tr.classList.add('bg-blue-50');
         }
-        tr.innerHTML = columns.map((col) => col.renderCell(data, getTableContext(), displayIndex)).join('');
+        tr.innerHTML = columns.map((col) => applyResultsTdLayout(
+            col.renderCell(data, getTableContext(), displayIndex),
+            col
+        )).join('');
         tr.addEventListener('click', (e) => {
             if (e.target.closest('.url-copy, .url-open')) {
                 return;
@@ -160,6 +183,14 @@ function createTableView(deps) {
     function refreshTableIncremental(entries, poolSize) {
         tableDisplayEntries = entries;
 
+        for (let i = 0; i < Math.min(tableRenderedCount, entries.length); i++) {
+            const data = entries[i];
+            const tr = resultsTable.querySelector(`tr[data-url="${escapeSelectorValue(data.url)}"]`);
+            if (tr) {
+                tr.replaceWith(createTableRow(data, i + 1));
+            }
+        }
+
         if (tableRenderedCount < TABLE_VISIBLE_INITIAL) {
             const target = Math.min(TABLE_VISIBLE_INITIAL, entries.length);
             appendTableRows(entries, tableRenderedCount, target);
@@ -173,7 +204,15 @@ function createTableView(deps) {
         return getUiState() === 'running' && areDefaultTableFiltersActive();
     }
 
+    function renderTableHead() {
+        if (!pagesTableHead || !resultsDataTable) {
+            return;
+        }
+        renderResultsTableHead(resultsDataTable, pagesTableHead, getColumns(), deps.getSortState());
+    }
+
     function refreshTable() {
+        renderTableHead();
         const incremental = canIncrementallyRefreshTable();
         if (!incremental || deps.getScanResultsSize() % STATUS_FILTER_REFRESH_EVERY_N_PAGES === 0) {
             updateStatusFilterOptions();
@@ -226,6 +265,9 @@ function createTableView(deps) {
             clearTimeout(refreshTableTimer);
             refreshTableTimer = null;
         }
+        if (typeof onCancelPendingScanRefresh === 'function') {
+            onCancelPendingScanRefresh();
+        }
         tableLazyLoadToken += 1;
     }
 
@@ -251,19 +293,35 @@ function createTableView(deps) {
         });
     }
 
-    function updateSortIndicators() {
-        const sortState = deps.getSortState();
-        document.querySelectorAll('.sortable-th').forEach((th) => {
-            const col = th.dataset.sort;
-            const base = th.textContent.replace(/ [▲▼]$/, '');
-            if (sortState.column === col) {
-                th.textContent = `${base} ${sortState.direction === 'asc' ? '▲' : '▼'}`;
-                th.classList.add('bg-zinc-200', 'text-zinc-800');
-            } else {
-                th.textContent = base;
-                th.classList.remove('bg-zinc-200', 'text-zinc-800');
+    function bindTableHeadSort() {
+        if (!pagesTableHead || pagesTableHead.dataset.sortBound) {
+            return;
+        }
+        pagesTableHead.addEventListener('click', (event) => {
+            if (event.target.closest('.col-resize-handle')) {
+                return;
             }
+            const th = event.target.closest('.sortable-th');
+            if (!th) {
+                return;
+            }
+            const col = th.dataset.sort;
+            if (!col) {
+                return;
+            }
+            deps.onTableSortChange(col);
         });
+        pagesTableHead.dataset.sortBound = '1';
+    }
+
+    function bindTableChrome() {
+        bindScroll();
+        bindTableHeadSort();
+        if (resultsDataTable && pagesTableHead) {
+            bindResultsTableColumnResize(resultsDataTable, pagesTableHead, () => {
+                renderTableHead();
+            });
+        }
     }
 
     return {
@@ -271,8 +329,8 @@ function createTableView(deps) {
         requestRefreshTable,
         cancelPendingRefreshTable,
         resetTableRenderCache,
-        bindScroll,
-        updateSortIndicators,
+        bindTableChrome,
+        renderTableHead,
         getColumns,
     };
 }
