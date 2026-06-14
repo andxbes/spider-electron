@@ -10,6 +10,8 @@ const controlsIdle = document.getElementById('controlsIdle');
 const controlsRunning = document.getElementById('controlsRunning');
 const controlsPaused = document.getElementById('controlsPaused');
 const resultsTable = document.getElementById('resultsTable');
+const resultsDataTable = document.getElementById('resultsDataTable');
+const pagesTableHead = document.getElementById('pagesTableHead');
 const pagesTableScroll = document.getElementById('pagesTableScroll');
 const detailContent = document.getElementById('detailContent');
 const selectedUrlHint = document.getElementById('selectedUrlHint');
@@ -28,8 +30,35 @@ const sourceFilter = document.getElementById('sourceFilter');
 const tableSearch = document.getElementById('tableSearch');
 const filterCount = document.getElementById('filterCount');
 
-const scanResults = new Map();
-const insertionOrder = [];
+let scanHostname = '';
+const scanStore = createScanStore({
+    getScanHostname: () => getScanHostname(),
+});
+
+function getPresentationHelpers() {
+    return {
+        urlCellHtml,
+        getRowMetrics,
+        getDuplicateCounts: () => scanStore.getDuplicateCounts(),
+        getReferrersForUrl: (url) => scanStore.getReferrersForUrl(url),
+        getOutgoingLinksFrom: (url) => scanStore.getOutgoingLinksFrom(url),
+        getPageTitle,
+        shouldHavePageTitle,
+        getTextDuplicateCount,
+        getH1Count,
+        getH1Texts,
+        isDiscoveredOnly,
+        isExternalLink,
+        formatLinkKindLabel,
+        getResourceKind,
+        getLinkTag,
+        getResourceType,
+        formatCsvUrlListPreview,
+    };
+}
+
+registerDefaultUiPresentations(getPresentationHelpers);
+
 let selectedUrl = null;
 let activeTab = 'details';
 let sortState = { column: null, direction: 'asc' };
@@ -49,12 +78,8 @@ let activeSourceFilter = 'all';
 let activeSearchQuery = '';
 let searchRefreshTimer = null;
 const SEARCH_REFRESH_DELAY_MS = 200;
-let scanHostname = '';
 
-let duplicateCountsCache = null;
 let knownPresentContentTypesKey = '';
-let latestReferrersByUrl = new Map();
-let latestRobotsByUrl = new Map();
 /** @type {'idle' | 'running' | 'paused'} */
 let uiState = 'idle';
 let knownStatusCodes = new Set();
@@ -70,8 +95,6 @@ let tableDisplayEntries = [];
 let tableRenderedCount = 0;
 let tableLazyLoadToken = 0;
 let tableScrollRaf = null;
-/** @type {Map<string, object[]> | null} */
-let outgoingLinksByPageCache = null;
 let lastScanProgress = null;
 let workspacePersistTimer = null;
 const WORKSPACE_PERSIST_DELAY_MS = 200;
@@ -113,7 +136,7 @@ function passesTableFilters(data) {
 }
 
 function compareRows(a, b) {
-    return compareRowsImpl(a, b, sortState, insertionOrder);
+    return compareRowsImpl(a, b, sortState, scanStore.insertionOrder);
 }
 
 function compareLinkRows(a, b) {
@@ -140,57 +163,52 @@ const RESOURCE_TYPE_FILTER_OPTIONS = [
     { value: 'media', label: 'Media (зображення, відео, аудіо)' },
 ];
 
-function invalidateOutgoingLinksCache() {
-    outgoingLinksByPageCache = null;
-}
-
-function buildOutgoingLink(ref, targetEntry) {
-    const edgeHasRelMeta = Boolean(ref.rel)
-        || ref.relFollowAllowed !== null
-        || ref.relIndexAllowed !== null
-        || Boolean(ref.relLabel);
-    return normalizeLinkEntry({
-        ...targetEntry,
-        url: targetEntry.url,
-        text: ref.text || targetEntry.text || '',
-        tag: ref.tag || targetEntry.tag || '',
-        kind: ref.kind || targetEntry.kind || '',
-        rel: edgeHasRelMeta ? (ref.rel || '') : (targetEntry.rel || ''),
-        relFollowAllowed: edgeHasRelMeta
-            ? (ref.relFollowAllowed ?? null)
-            : (targetEntry.relFollowAllowed ?? null),
-        relIndexAllowed: edgeHasRelMeta
-            ? (ref.relIndexAllowed ?? null)
-            : (targetEntry.relIndexAllowed ?? null),
-        relLabel: edgeHasRelMeta ? (ref.relLabel || '') : (targetEntry.relLabel || ''),
-    });
-}
-
-function rebuildOutgoingLinksCache() {
-    const cache = new Map();
-    for (const entry of scanResults.values()) {
-        for (const ref of getReferrersForUrl(entry.url)) {
-            if (!ref.href) {
-                continue;
-            }
-            if (!cache.has(ref.href)) {
-                cache.set(ref.href, []);
-            }
-            cache.get(ref.href).push(buildOutgoingLink(ref, entry));
-        }
-    }
-    outgoingLinksByPageCache = cache;
+function getReferrersForUrl(url) {
+    return scanStore.getReferrersForUrl(url);
 }
 
 function getOutgoingLinksFrom(pageUrl) {
-    if (!outgoingLinksByPageCache) {
-        rebuildOutgoingLinksCache();
+    return scanStore.getOutgoingLinksFrom(pageUrl);
+}
+
+function getDuplicateCounts() {
+    return scanStore.getDuplicateCounts();
+}
+
+function invalidateOutgoingLinksCache() {
+    scanStore.invalidateOutgoingLinksCache();
+}
+
+function invalidateDuplicateCounts() {
+    scanStore.invalidateDuplicateCounts();
+}
+
+function materializeDiscoveredFromReferrers() {
+    return scanStore.materializeDiscoveredFromReferrers();
+}
+
+function reinferAllLinkKinds() {
+    scanStore.reinferAllLinkKinds();
+}
+
+function applyReferrersUpdate(payload) {
+    scanStore.applyReferrersUpdate(payload);
+
+    if (uiState === 'running') {
+        if (selectedUrl) {
+            renderDetailPanel();
+        }
+        return;
     }
-    return outgoingLinksByPageCache.get(pageUrl) || [];
+    requestRefreshTable({ immediate: true });
+    scheduleWorkspacePersist();
+    if (selectedUrl) {
+        renderDetailPanel();
+    }
 }
 
 function getScannableTablePool() {
-    const all = Array.from(scanResults.values());
+    const all = Array.from(scanStore.scanResults.values());
     if (uiState === 'running') {
         return all.filter((data) => data.fetched !== false);
     }
@@ -206,115 +224,7 @@ function getTableEntries() {
 }
 
 function getRowData(url) {
-    return scanResults.get(url) || null;
-}
-
-function getReferrersForUrl(url) {
-    let raw = [];
-    if (latestReferrersByUrl.has(url)) {
-        raw = latestReferrersByUrl.get(url);
-    } else {
-        const data = scanResults.get(url);
-        if (data?.referrers?.length) {
-            raw = data.referrers;
-        }
-    }
-    return raw.map(normalizeReferrerEntry).filter((entry) => entry.href);
-}
-
-function rebuildLatestReferrersFromResults() {
-    latestReferrersByUrl = new Map();
-    latestRobotsByUrl = new Map();
-    for (const [url, data] of scanResults.entries()) {
-        if (data.referrers?.length) {
-            latestReferrersByUrl.set(url, data.referrers);
-        }
-    }
-}
-
-function mergeRobotsFieldsIfMissing(data, robotsFields) {
-    if (!robotsFields || (robotsFields.robotsAllowed == null && !robotsFields.robotsRule)) {
-        return data;
-    }
-    if (data.robotsAllowed != null || data.robotsRule) {
-        return data;
-    }
-    return {
-        ...data,
-        robotsAllowed: robotsFields.robotsAllowed,
-        robotsRule: robotsFields.robotsRule,
-    };
-}
-
-function materializeDiscoveredFromReferrers() {
-    let changed = false;
-    for (const [url, refs] of latestReferrersByUrl.entries()) {
-        if (scanResults.has(url)) {
-            continue;
-        }
-        const refText = refs[0]?.text || '';
-        const robotsFields = latestRobotsByUrl.get(url) || {};
-        if (upsertScanResult({
-            url,
-            status: '',
-            title: '',
-            text: refText,
-            external: isExternalUrl(url),
-            fetched: false,
-            kind: '',
-            tag: '',
-            referrers: refs,
-            ...robotsFields,
-        }, { deferUi: true })) {
-            changed = true;
-        }
-    }
-    if (changed) {
-        reinferAllLinkKinds();
-        invalidateOutgoingLinksCache();
-    }
-    return changed;
-}
-
-function applyReferrersUpdate(payload) {
-    const referrersPayload = payload?.referrers ?? payload;
-    const robotsPayload = payload?.robotsByUrl ?? {};
-    latestReferrersByUrl = new Map();
-    latestRobotsByUrl = new Map(Object.entries(robotsPayload));
-    for (const [url, refs] of Object.entries(referrersPayload || {})) {
-        const normalized = Array.isArray(refs)
-            ? refs.map(normalizeReferrerEntry).filter((entry) => entry.href)
-            : [];
-        latestReferrersByUrl.set(url, normalized);
-    }
-
-    for (const [url, data] of scanResults.entries()) {
-        if (latestReferrersByUrl.has(url)) {
-            data.referrers = latestReferrersByUrl.get(url);
-        }
-        const merged = mergeRobotsFieldsIfMissing(data, latestRobotsByUrl.get(url));
-        if (merged !== data) {
-            scanResults.set(url, normalizeLinkEntry(merged));
-        }
-    }
-    materializeDiscoveredFromReferrers();
-    invalidateOutgoingLinksCache();
-
-    if (uiState === 'running') {
-        if (selectedUrl) {
-            renderDetailPanel();
-        }
-        return;
-    }
-    requestRefreshTable({ immediate: true });
-    scheduleWorkspacePersist();
-    if (selectedUrl) {
-        renderDetailPanel();
-    }
-}
-
-function invalidateDuplicateCounts() {
-    duplicateCountsCache = null;
+    return scanStore.scanResults.get(url) || null;
 }
 
 function cancelPendingScanRefresh() {
@@ -361,7 +271,7 @@ function applyActiveFiltersToDom() {
 
 function collectPresentContentTypes() {
     const present = new Set();
-    for (const entry of scanResults.values()) {
+    for (const entry of scanStore.scanResults.values()) {
         present.add(getResourceKind(entry));
     }
     return present;
@@ -414,26 +324,13 @@ function getLinkKind(entry) {
 const getOutlinkKind = getLinkKind;
 const getOutlinkTag = getLinkTag;
 
-function getDuplicateCounts() {
-    const entries = Array.from(scanResults.values());
-    if (!duplicateCountsCache) {
-        duplicateCountsCache = {
-            h1: buildH1DuplicateCounts(entries),
-            title: buildFieldDuplicateCounts((data) => getPageTitle(data), entries),
-            description: buildFieldDuplicateCounts((data) => (
-                shouldHavePageTitle(data) ? String(data.metaDescription || '').trim() : ''
-            ), entries),
-        };
-    }
-    return duplicateCountsCache;
-}
-
 function setScanHostnameFromUrl(startUrl) {
     try {
         scanHostname = new URL(startUrl).hostname;
     } catch {
         scanHostname = '';
     }
+    scanStore.setScanHostname(scanHostname);
 }
 
 function getScanHostname() {
@@ -456,7 +353,7 @@ function getDisplayedResults() {
     if (sortState.column) {
         entries.sort(compareRows);
     } else {
-        entries.sort((a, b) => insertionOrder.indexOf(a.url) - insertionOrder.indexOf(b.url));
+        entries.sort((a, b) => scanStore.insertionOrder.indexOf(a.url) - scanStore.insertionOrder.indexOf(b.url));
     }
     return entries;
 }
@@ -467,7 +364,7 @@ function updateStatusFilterOptions({ force = false } = {}) {
     }
 
     const numericStatuses = new Set();
-    for (const data of scanResults.values()) {
+    for (const data of scanStore.scanResults.values()) {
         if (typeof data.status === 'number') {
             numericStatuses.add(data.status);
         }
@@ -586,8 +483,8 @@ function urlCellHtml(url) {
     if (!url) {
         return '<span class="text-zinc-400 italic">—</span>';
     }
-    return `<span class="inline-flex items-start gap-1 min-w-0 max-w-full">
-        <span class="text-blue-700 break-all">${escapeHtml(url)}</span>
+    return `<span class="flex flex-wrap items-start gap-x-1 gap-y-0.5 min-w-0 w-full">
+        <span class="text-blue-700 break-all min-w-0">${escapeHtml(url)}</span>
         ${urlActionButtons(url)}
     </span>`;
 }
@@ -612,7 +509,7 @@ function updateExportButton() {
     const canExport = uiState === 'idle' || uiState === 'paused';
     const hasVisibleRows = getFilteredResults().length > 0;
     exportButton.disabled = !hasVisibleRows;
-    exportButton.classList.toggle('hidden', !canExport || scanResults.size === 0);
+    exportButton.classList.toggle('hidden', !canExport || scanStore.scanResults.size === 0);
 }
 
 function updateUrlInputProgress(progress = null) {
@@ -696,11 +593,7 @@ function scheduleStartupTableRefresh() {
 }
 
 function clearScanData() {
-    invalidateDuplicateCounts();
-    latestReferrersByUrl = new Map();
-    latestRobotsByUrl = new Map();
-    scanResults.clear();
-    insertionOrder.length = 0;
+    scanStore.clearData();
     resetTableRenderCache();
     selectedUrl = null;
     sortState = { column: null, direction: 'asc' };
@@ -723,8 +616,8 @@ function clearScanResults() {
 function collectWorkspaceSnapshot() {
     return {
         ...buildWorkspaceSnapshot({
-            scanResults,
-            insertionOrder,
+            scanResults: scanStore.scanResults,
+            insertionOrder: scanStore.insertionOrder,
             startUrl: urlInput.value.trim(),
             lastScanProgress,
             selectedUrl,
@@ -747,7 +640,7 @@ function persistWorkspaceNow() {
         clearTimeout(workspacePersistTimer);
         workspacePersistTimer = null;
     }
-    if (scanResults.size === 0) {
+    if (scanStore.scanResults.size === 0) {
         clearWorkspaceSession();
         return;
     }
@@ -825,27 +718,21 @@ function populateScanResults(normalized) {
     const seen = new Set();
     for (const url of normalized.insertionOrder) {
         if (resultMap.has(url) && !seen.has(url)) {
-            insertionOrder.push(url);
-            scanResults.set(url, resultMap.get(url));
+            scanStore.insertionOrder.push(url);
+            scanStore.scanResults.set(url, resultMap.get(url));
             seen.add(url);
         }
     }
     for (const [url, entry] of resultMap) {
         if (!seen.has(url)) {
-            insertionOrder.push(url);
-            scanResults.set(url, entry);
+            scanStore.insertionOrder.push(url);
+            scanStore.scanResults.set(url, entry);
             seen.add(url);
         }
     }
-    rebuildLatestReferrersFromResults();
+    scanStore.rebuildLatestReferrersFromResults();
     reinferAllLinkKinds();
     rebuildContentTypeFilterOptions({ preserveValue: true, force: true });
-}
-
-function reinferAllLinkKinds() {
-    for (const [url, entry] of scanResults.entries()) {
-        scanResults.set(url, normalizeLinkEntry(entry));
-    }
 }
 
 function restoreWorkspaceFromSession() {
@@ -870,7 +757,7 @@ function restoreWorkspaceFromSession() {
     lastScanProgress = workspace.lastScanProgress || null;
     scheduleStartupTableRefresh();
     updateUrlInputProgress(lastScanProgress);
-    statusScanned.textContent = `Проскановано: ${scanResults.size}`;
+    statusScanned.textContent = `Проскановано: ${scanStore.scanResults.size}`;
     statusQueue.textContent = 'У черзі: 0';
     if (statusActive) {
         statusActive.textContent = 'Активних: 0';
@@ -882,7 +769,7 @@ function restoreWorkspaceFromSession() {
         statusText.textContent = workspace.statusHint;
     }
 
-    if (workspace.selectedUrl && scanResults.has(workspace.selectedUrl)) {
+    if (workspace.selectedUrl && scanStore.scanResults.has(workspace.selectedUrl)) {
         selectRow(workspace.selectedUrl);
     }
 
@@ -909,47 +796,74 @@ async function beginScan(startUrl, { clearResults = true } = {}) {
 }
 
 function updateSortIndicators() {
-    document.querySelectorAll('.sortable-th').forEach((th) => {
-        const col = th.dataset.sort;
-        const base = th.textContent.replace(/ [▲▼]$/, '');
-        if (sortState.column === col) {
-            th.textContent = `${base} ${sortState.direction === 'asc' ? '▲' : '▼'}`;
-            th.classList.add('bg-zinc-200', 'text-zinc-800');
-        } else {
-            th.textContent = base;
-            th.classList.remove('bg-zinc-200', 'text-zinc-800');
-        }
+    renderTableHead();
+}
+
+function applyResultsTdLayout(tdHtml, col) {
+    if (!tdHtml.startsWith('<td')) {
+        return tdHtml;
+    }
+    const layoutClass = col.cellNowrap ? 'results-td-compact' : 'results-td-wrap';
+    if (tdHtml.includes('class="')) {
+        return tdHtml.replace('class="', `class="${layoutClass} `);
+    }
+    return tdHtml.replace('<td', `<td class="${layoutClass}"`);
+}
+
+function renderTableHead() {
+    if (!pagesTableHead || !resultsDataTable) {
+        return;
+    }
+    const columns = resolveTableColumns({
+        helpers: getPresentationHelpers(),
+        sortState,
     });
+    renderResultsTableHead(resultsDataTable, pagesTableHead, columns, sortState);
+}
+
+function bindTableHeadSort() {
+    if (!pagesTableHead || pagesTableHead.dataset.sortBound) {
+        return;
+    }
+    pagesTableHead.addEventListener('click', (event) => {
+        if (event.target.closest('.col-resize-handle')) {
+            return;
+        }
+        const th = event.target.closest('.sortable-th');
+        if (!th) {
+            return;
+        }
+        const col = th.dataset.sort;
+        if (!col) {
+            return;
+        }
+        if (sortState.column === col) {
+            sortState.direction = sortState.direction === 'asc' ? 'desc' : 'asc';
+        } else {
+            sortState.column = col;
+            sortState.direction = 'asc';
+        }
+        updateSortIndicators();
+        requestRefreshTable({ immediate: true });
+    });
+    pagesTableHead.dataset.sortBound = '1';
 }
 
 function createTableRow(data, displayIndex) {
-    const { inCount, linkCount, internalCount, externalCount } = getRowMetrics(data);
-    const dupCounts = getDuplicateCounts();
-    const linksTitle = `Всього: ${linkCount}, внутрішніх: ${internalCount}, зовнішніх: ${externalCount}`;
-    const descDup = getTextDuplicateCount(data.metaDescription, dupCounts.description);
-    const pageTitle = getPageTitle(data);
+    const columns = resolveTableColumns({
+        helpers: getPresentationHelpers(),
+        sortState,
+    });
     const tr = document.createElement('tr');
     tr.dataset.url = data.url;
     tr.className = 'border-b border-zinc-100 cursor-pointer hover:bg-zinc-50';
     if (selectedUrl === data.url) {
         tr.classList.add('bg-blue-50');
     }
-    tr.innerHTML = `
-        <td class="p-2 text-zinc-400">${displayIndex}</td>
-        <td class="p-2">${urlCellHtml(data.url)}</td>
-        <td class="p-2"><span class="font-mono font-semibold ${statusRowClass(data.status)}">${escapeHtml(data.status)}</span></td>
-        <td class="p-2 font-mono text-zinc-600" title="${escapeHtml(data.contentType || '')}">${data.contentType ? escapeHtml(truncate(data.contentType, 28)) : '<span class="text-zinc-400 italic">—</span>'}</td>
-        <td class="p-2 text-right">${formatResponseTimeMs(data.responseTimeMs)}</td>
-        <td class="p-2">${metaRobotsCellHtml(data)}</td>
-        <td class="p-2">${robotsTxtCellHtml(data)}</td>
-        <td class="p-2">${h1CellHtml(data, dupCounts)}</td>
-        <td class="p-2" title="${escapeHtml(pageTitle)}">${pageTitle ? escapeHtml(truncate(pageTitle, 50)) : '<span class="text-zinc-400 italic">—</span>'}${titleCellBadge(data, dupCounts)}</td>
-        <td class="p-2" title="${escapeHtml(data.metaDescription)}">${data.metaDescription ? escapeHtml(truncate(data.metaDescription, 60)) : '<span class="text-zinc-400 italic">—</span>'}${shouldHavePageTitle(data) ? duplicateCountBadge(descDup) : ''}</td>
-        <td class="p-2 text-center" title="${escapeHtml(linksTitle)}">${linkCount}</td>
-        <td class="p-2 text-center">${inCount}</td>
-        <td class="p-2 text-center text-emerald-700">${internalCount}</td>
-        <td class="p-2 text-center${externalCount > 0 ? ' text-amber-700 font-semibold' : ''}">${externalCount}</td>
-    `;
+    tr.innerHTML = columns.map((col) => applyResultsTdLayout(
+        col.renderCell(data, { helpers: getPresentationHelpers() }, displayIndex),
+        col
+    )).join('');
     tr.addEventListener('click', (e) => {
         if (e.target.closest('.url-copy, .url-open')) {
             return;
@@ -1032,6 +946,14 @@ function renderTableInitialChunk(entries) {
 function refreshTableIncremental(entries, poolSize) {
     tableDisplayEntries = entries;
 
+    for (let i = 0; i < Math.min(tableRenderedCount, entries.length); i++) {
+        const data = entries[i];
+        const tr = resultsTable.querySelector(`tr[data-url="${CSS.escape(data.url)}"]`);
+        if (tr) {
+            tr.replaceWith(createTableRow(data, i + 1));
+        }
+    }
+
     if (tableRenderedCount < TABLE_VISIBLE_INITIAL) {
         const target = Math.min(TABLE_VISIBLE_INITIAL, entries.length);
         appendTableRows(entries, tableRenderedCount, target);
@@ -1042,8 +964,9 @@ function refreshTableIncremental(entries, poolSize) {
 }
 
 function refreshTable() {
+    renderTableHead();
     const incremental = canIncrementallyRefreshTable();
-    if (!incremental || scanResults.size % STATUS_FILTER_REFRESH_EVERY_N_PAGES === 0) {
+    if (!incremental || scanStore.scanResults.size % STATUS_FILTER_REFRESH_EVERY_N_PAGES === 0) {
         updateStatusFilterOptions();
     }
 
@@ -1117,29 +1040,13 @@ function requestRefreshTable({ immediate = false } = {}) {
 }
 
 function upsertScanResult(incoming, { deferUi = false } = {}) {
-    const data = normalizeLinkEntry(incoming);
-    const existing = scanResults.get(data.url);
-    if (existing && existing.fetched !== false && data.fetched === false) {
-        const enrichesResource = isJavascriptResource(data) || isCssResource(data) || isMediaResource(data);
-        const enrichesCrawledAsset = existing
-            && !isHtmlContentType(existing.contentType || '')
-            && (data.kind || data.tag);
-        if (existing && (enrichesResource || enrichesCrawledAsset)) {
-            scanResults.set(data.url, normalizeLinkEntry({
-                ...existing,
-                kind: data.kind || existing.kind,
-                tag: data.tag || existing.tag,
-                text: data.text || existing.text,
-            }));
-            return true;
-        }
+    const { isNew, changed } = scanStore.upsertRaw(incoming, { deferUi });
+    if (!changed) {
         return false;
     }
-    const isNew = !existing;
-    if (isNew) {
-        insertionOrder.push(data.url);
-    }
-    scanResults.set(data.url, data);
+    const data = scanStore.scanResults.get(
+        (typeof incoming === 'object' && incoming.url) ? incoming.url : incoming
+    ) || normalizeLinkEntry(incoming);
 
     if (uiState === 'running') {
         if (data.fetched !== false) {
@@ -1298,20 +1205,6 @@ if (tableSearch) {
     });
 }
 
-document.querySelectorAll('.sortable-th').forEach((th) => {
-    th.addEventListener('click', () => {
-        const col = th.dataset.sort;
-        if (sortState.column === col) {
-            sortState.direction = sortState.direction === 'asc' ? 'desc' : 'asc';
-        } else {
-            sortState.column = col;
-            sortState.direction = 'asc';
-        }
-        updateSortIndicators();
-        requestRefreshTable({ immediate: true });
-    });
-});
-
 function selectRow(url) {
     selectedUrl = url;
     document.querySelectorAll('#resultsTable tr').forEach((tr) => {
@@ -1391,88 +1284,6 @@ function renderLinkTable(links, emptyText, caption = '') {
     </table>`;
 }
 
-function buildDetailRows(data) {
-    if (isDiscoveredOnly(data)) {
-        return [
-            ['Address', urlCellHtml(data.url)],
-            ['Тип', escapeHtml(formatLinkKindLabel(getResourceKind(data)))],
-            ['Тег', escapeHtml(getLinkTag(data))],
-            ['Текст', data.text ? escapeHtml(data.text) : '<span class="text-zinc-400 italic">—</span>'],
-            ['Джерело', isExternalLink(data) ? 'Зовнішнє' : 'Внутрішнє'],
-            ['Завантажено', '<span class="text-zinc-500 italic">ні (лише знайдено)</span>'],
-            ['Вхідних посилань', String(getReferrersForUrl(data.url).length)],
-        ];
-    }
-
-    const h1List = (data.headings || []).filter((h) => h.level === 1);
-    const h1 = h1List[0];
-    const h2List = (data.headings || []).filter((h) => h.level === 2);
-    const { inCount, linkCount, externalCount } = getRowMetrics(data);
-    const internalCount = linkCount - externalCount;
-
-    const rows = [
-        ['Address', urlCellHtml(data.url)],
-        ['Status Code', escapeHtml(data.status)],
-        ['Content-Type', escapeHtml(data.contentType) || '<span class="text-zinc-400 italic">—</span>'],
-        ['Response Time (ms)', data.responseTimeMs ?? '—'],
-        ['Resource Type', escapeHtml(formatLinkKindLabel(getResourceKind(data)))],
-        ['Title', getPageTitle(data) ? escapeHtml(getPageTitle(data)) : '<span class="text-zinc-400 italic">—</span>'],
-        ['Title Length', getPageTitle(data) ? String(getPageTitle(data).length) : '0'],
-        ['Meta Description', escapeHtml(data.metaDescription) || '<span class="text-zinc-400 italic">—</span>'],
-        ['Meta Description Length', data.metaDescription ? String(data.metaDescription.length) : '0'],
-        ['Canonical', data.metaCanonical ? urlCellHtml(data.metaCanonical) : '<span class="text-zinc-400 italic">—</span>'],
-        ['Meta robots', formatMetaRobotsDetail(data)],
-        ['Robots.txt', formatRobotsTxtDetail(data)],
-        ['H1 Count', String(getH1Count(data))],
-        [
-            'H1',
-            h1List.length
-                ? h1List.map((h) => escapeHtml(h.text)).join('<br>')
-                : '<span class="text-zinc-400 italic">—</span>',
-        ],
-        [
-            'H2',
-            h2List.length
-                ? h2List.map((h) => escapeHtml(h.text)).join('<br>')
-                : '<span class="text-zinc-400 italic">—</span>',
-        ],
-        ['Вихідних посилань', String(linkCount)],
-        ['Зовнішніх посилань', externalCount > 0 ? String(externalCount) : '<span class="text-zinc-400 italic">0</span>'],
-        ['Внутрішніх посилань', String(internalCount)],
-        ['Вхідних посилань', String(inCount)],
-    ];
-
-    const dupCounts = getDuplicateCounts();
-    const titleDup = getTextDuplicateCount(getPageTitle(data), dupCounts.title);
-    const descDup = getTextDuplicateCount(data.metaDescription, dupCounts.description);
-    if (titleDup > 1) {
-        rows.push(['Дублікатів Title', `<span class="text-amber-600 font-semibold">${titleDup} сторінок</span>`]);
-    }
-    if (shouldHavePageTitle(data) && descDup > 1) {
-        rows.push(['Дублікатів Meta Description', `<span class="text-amber-600 font-semibold">${descDup} сторінок</span>`]);
-    }
-    const h1DupEntries = getH1Texts(data)
-        .map((text) => ({
-            text,
-            count: getTextDuplicateCount(text, dupCounts.h1),
-        }))
-        .filter((entry) => entry.count > 1);
-    if (h1DupEntries.length) {
-        rows.push([
-            'Дублікатів H1',
-            h1DupEntries
-                .map((entry) => `${escapeHtml(entry.text)} — ${entry.count} стор.`)
-                .join('<br>'),
-        ]);
-    }
-
-    if (data.redirectUrl) {
-        rows.push(['Redirect URL', urlCellHtml(data.redirectUrl)]);
-    }
-
-    return rows;
-}
-
 function getFilteredOutgoingLinks(pageUrl) {
     let links = getOutgoingLinksFrom(pageUrl);
     if (activeSourceFilter === 'external') {
@@ -1494,7 +1305,8 @@ function renderDetailPanel() {
     }
 
     if (activeTab === 'details') {
-        detailContent.innerHTML = renderDetailTable(buildDetailRows(data));
+        const rows = resolveDetailRows({ data, helpers: getPresentationHelpers() });
+        detailContent.innerHTML = renderDetailTable(rows);
     } else if (activeTab === 'inlinks') {
         const inlinks = getReferrersForUrl(data.url);
         detailContent.innerHTML = renderLinkTable(
@@ -1517,50 +1329,12 @@ function renderDetailPanel() {
 }
 
 exportButton.addEventListener('click', () => {
-    const bom = '\uFEFF';
     const entries = getDisplayedResults();
     if (entries.length === 0) {
         alert('Немає рядків для експорту за поточними фільтрами.');
         return;
     }
-
-    const headers = ['URL', 'Status', 'Meta Robots', 'Robots.txt Rule', 'Robots.txt Allowed', 'H1 Count', 'Content-Type', 'Response Time (ms)', 'Resource Type', 'Title', 'Meta Description', 'Canonical', 'Link Count', 'Internal Links', 'External Links', 'Redirect URL', 'Referrers', 'Outlinks', 'Headings'];
-    const csvRows = [headers.join(',')];
-
-    for (const data of entries) {
-        const metrics = getRowMetrics(data);
-        const referrers = formatCsvUrlListPreview(getReferrersForUrl(data.url));
-        const outlinks = formatCsvUrlListPreview(getOutgoingLinksFrom(data.url).map((link) => link.url));
-        const headings = data.headings ? data.headings.map((h) => `H${h.level}: ${h.text}`).join('; ') : '';
-        const row = [
-            `"${(data.url || '').replace(/"/g, '""')}"`,
-            `"${(data.status || '')}"`,
-            `"${(data.metaRobotsLabel || data.metaRobots || '').replace(/"/g, '""')}"`,
-            `"${(data.robotsRule || '').replace(/"/g, '""')}"`,
-            `"${data.robotsAllowed === false ? 'Заборонено' : (data.robotsAllowed ? 'Дозволено' : '')}"`,
-            `"${getH1Count(data)}"`,
-            `"${(data.contentType || '').replace(/"/g, '""')}"`,
-            `"${data.responseTimeMs ?? ''}"`,
-            `"${getResourceType(data)}"`,
-            `"${getPageTitle(data).replace(/"/g, '""')}"`,
-            `"${(data.metaDescription || '').replace(/"/g, '""')}"`,
-            `"${(data.metaCanonical || '').replace(/"/g, '""')}"`,
-            `"${metrics.linkCount}"`,
-            `"${metrics.internalCount}"`,
-            `"${metrics.externalCount}"`,
-            `"${(data.redirectUrl || '').replace(/"/g, '""')}"`,
-            `"${referrers.replace(/"/g, '""')}"`,
-            `"${outlinks.replace(/"/g, '""')}"`,
-            `"${headings.replace(/"/g, '""')}"`,
-        ];
-        csvRows.push(row.join(','));
-    }
-
-    const blob = new Blob([bom + csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `spider_filtered_${new Date().toISOString().slice(0, 10)}.csv`;
-    link.click();
+    exportFilteredResultsToCsv(entries, { helpers: getPresentationHelpers() });
 });
 
 document.addEventListener('click', (e) => {
@@ -1597,13 +1371,13 @@ async function ensureCanReplaceSession(actionLabel) {
 }
 
 async function saveSessionDumpToFile() {
-    if (scanResults.size === 0) {
+    if (scanStore.scanResults.size === 0) {
         alert('Немає результатів для збереження.');
         return;
     }
     const payload = buildSessionDumpPayload({
-        scanResults,
-        insertionOrder,
+        scanResults: scanStore.scanResults,
+        insertionOrder: scanStore.insertionOrder,
         startUrl: urlInput.value.trim(),
         uiState,
         lastScanProgress,
@@ -1629,7 +1403,7 @@ function applySessionDump(dump, filePath = '') {
     requestRefreshTable({ immediate: true });
     setUIState('idle');
     updateUrlInputProgress(normalized.progressAtSave);
-    statusScanned.textContent = `Проскановано: ${scanResults.size}`;
+    statusScanned.textContent = `Проскановано: ${scanStore.scanResults.size}`;
     statusQueue.textContent = 'У черзі: 0';
     if (statusActive) {
         statusActive.textContent = 'Активних: 0';
@@ -1638,8 +1412,8 @@ function applySessionDump(dump, filePath = '') {
         statusRate.textContent = 'Швидкість: —';
     }
     statusText.textContent = filePath
-        ? `Завантажено дамп (${scanResults.size} URL): ${filePath}`
-        : `Завантажено дамп: ${scanResults.size} URL`;
+        ? `Завантажено дамп (${scanStore.scanResults.size} URL): ${filePath}`
+        : `Завантажено дамп: ${scanStore.scanResults.size} URL`;
     persistWorkspaceNow();
 }
 
@@ -1733,14 +1507,14 @@ function finalizeScanUi(message) {
     }
     lastScanProgress = {
         ...(lastScanProgress || {}),
-        scanned: lastScanProgress?.scanned ?? scanResults.size,
+        scanned: lastScanProgress?.scanned ?? scanStore.scanResults.size,
         queue: 0,
         active: 0,
         finished: true,
         status: message,
     };
     statusText.textContent = message;
-    const fetchedCount = Array.from(scanResults.values()).filter((row) => row.fetched !== false).length;
+    const fetchedCount = Array.from(scanStore.scanResults.values()).filter((row) => row.fetched !== false).length;
     statusScanned.textContent = `Проскановано: ${fetchedCount}`;
     statusQueue.textContent = 'У черзі: 0';
     if (statusActive) {
@@ -1889,6 +1663,11 @@ function initDetailPanelResize() {
 function runStartup() {
     initDetailPanelResize();
     setUIState('idle');
+    renderTableHead();
+    bindTableHeadSort();
+    bindResultsTableColumnResize(resultsDataTable, pagesTableHead, () => {
+        renderTableHead();
+    });
 
     requestAnimationFrame(() => {
         requestAnimationFrame(() => {

@@ -74,7 +74,7 @@ function metaRobotsCellHtml(data) {
     const title = status === 'allowed'
         ? 'Дозволено для індексації та обходу'
         : 'Закрито (noindex / nofollow)';
-    return `<span class="${cls} font-medium" title="${escapeHtml(title)}: ${escapeHtml(label)}">${escapeHtml(truncate(label, 28))}</span>`;
+    return `<span class="${cls} font-medium" title="${escapeHtml(title)}: ${escapeHtml(label)}">${escapeHtml(label)}</span>`;
 }
 
 function formatResponseTimeMs(ms) {
@@ -99,7 +99,7 @@ function robotsTxtCellHtml(data) {
     const rule = data.robotsRule || (allowed ? 'Дозволено' : 'Заборонено');
     const cls = indexingStateClass('robots', null, data.robotsAllowed);
     const title = allowed ? `Дозволено: ${rule}` : `Заборонено: ${rule}`;
-    return `<span class="${cls} font-medium" title="${escapeHtml(title)}">${escapeHtml(truncate(rule, 32))}</span>`;
+    return `<span class="${cls} font-medium" title="${escapeHtml(title)}">${escapeHtml(rule)}</span>`;
 }
 
 function statusSortValue(status) {
@@ -409,7 +409,7 @@ function h1CellHtml(data, dupCounts) {
     const extra = h1Texts.length > 1
         ? `<span class="text-zinc-400 ml-1" title="${fullTitle}">+${h1Texts.length - 1}</span>`
         : '';
-    return `<span title="${fullTitle}">${escapeHtml(truncate(primary, 50))}</span>${duplicateCountBadge(h1Dup)}${extra}`;
+    return `<span title="${fullTitle}">${escapeHtml(primary)}</span>${duplicateCountBadge(h1Dup)}${extra}`;
 }
 
 function normalizeSourceFilter(value) {

@@ -3,6 +3,22 @@ const robotsParser = require('robots-parser');
 const { fetch: undiciFetch } = require('undici');
 const { MAX_CONCURRENCY } = require('./settings-persistence');
 const {
+    extractPageTitle,
+    extractMetaDescription,
+    extractElementText,
+    collectMetaAttributeValues,
+    extractMetaRobotsRaw,
+    getXRobotsTag,
+} = require('./page-extractors');
+const {
+    emitSpiderResult,
+    emitSpiderResultsBatch,
+    extractPageViaHooks,
+    filterDiscoveredLinksViaHooks,
+} = require('./crawl-hooks');
+require('./crawl-defaults');
+require('./plugins');
+const {
     normalizePageUrl,
     getUrlExtension,
     getUrlPathnameLower,
@@ -97,62 +113,6 @@ async function timedFetch(url) {
 }
 
 
-
-
-
-const EXTRACT_TEXT_REMOVE_SELECTOR = 'script, style, svg, noscript, template, iframe, [aria-hidden="true"]';
-
-function normalizeExtractedText(text) {
-    return String(text || '').replace(/\s+/g, ' ').trim();
-}
-
-function extractElementText($, el) {
-    const clone = $(el).clone();
-    clone.find(EXTRACT_TEXT_REMOVE_SELECTOR).remove();
-    return normalizeExtractedText(clone.text());
-}
-
-function collectMetaAttributeValues($, selector) {
-    const values = [];
-    const seen = new Set();
-    $(selector).each((_, el) => {
-        const value = ($(el).attr('content') || '').trim();
-        if (!value) {
-            return;
-        }
-        const key = value.toLowerCase();
-        if (seen.has(key)) {
-            return;
-        }
-        seen.add(key);
-        values.push(value);
-    });
-    return values;
-}
-
-function extractPageTitle($) {
-    let titleEl = $('head > title').first();
-    if (!titleEl.length) {
-        // $('title').text() зливає ВСІ <title> на сторінці — беремо лише перший.
-        titleEl = $('title').first();
-    }
-    let title = titleEl.length ? extractElementText($, titleEl.get(0)) : '';
-    if (!title) {
-        title = ($('head meta[property="og:title"]').attr('content')
-            || $('meta[property="og:title"]').attr('content')
-            || $('meta[name="twitter:title"]').attr('content')
-            || '').trim();
-    }
-    return title;
-}
-
-function extractMetaDescription($) {
-    const values = collectMetaAttributeValues($, 'head meta[name="description"]');
-    if (!values.length) {
-        return collectMetaAttributeValues($, 'meta[name="description"]').join('; ');
-    }
-    return values.join('; ');
-}
 
 
 
@@ -486,18 +446,6 @@ function collectPageLinks($, currentUrl, allowedHostname) {
     return links;
 }
 
-function extractMetaRobotsRaw($, response) {
-    let values = collectMetaAttributeValues($, 'head meta[name="robots"], head meta[name="googlebot"]');
-    if (!values.length) {
-        values = collectMetaAttributeValues($, 'meta[name="robots"], meta[name="googlebot"]');
-    }
-    const xRobots = getXRobotsTag(response).trim();
-    if (xRobots && !values.some((value) => value.toLowerCase() === xRobots.toLowerCase())) {
-        values.push(xRobots);
-    }
-    return values.join('; ');
-}
-
 function buildSpiderResult(overrides) {
     return {
         metaDescription: '',
@@ -516,10 +464,6 @@ function buildSpiderResult(overrides) {
         headings: [],
         ...overrides,
     };
-}
-
-function getXRobotsTag(response) {
-    return response.headers.get('x-robots-tag') || '';
 }
 
 function getRobotsTxtInfo(robots, robotsText, url) {
@@ -651,7 +595,7 @@ function buildResultWithIndexing(robots, robotsText, url, fields, metaRobotsRaw 
 
 function sendRobotsBlockedResult(browserWindow, robots, robotsText, url, referrers) {
     console.log(`Заблоковано robots.txt: ${url}`);
-    browserWindow.webContents.send('spider-result', buildResultWithIndexing(
+    emitSpiderResult(browserWindow, buildResultWithIndexing(
         robots,
         robotsText,
         url,
@@ -1001,7 +945,7 @@ async function probeDiscoveredLink(url, referrer, link, browserWindow) {
         }
 
         const { parser, text } = await getRobots(new URL(currentUrl));
-        browserWindow.webContents.send('spider-result', buildResultWithIndexing(
+        emitSpiderResult(browserWindow, buildResultWithIndexing(
             parser,
             text,
             url,
@@ -1018,9 +962,9 @@ async function probeDiscoveredLink(url, referrer, link, browserWindow) {
         const { parser, text } = await getRobots(new URL(url)).catch(() => ({ parser: null, text: '' }));
         const fields = buildProbeLinkFields(url, link, { status: 'ERROR' });
         if (parser) {
-            browserWindow.webContents.send('spider-result', buildResultWithIndexing(parser, text, url, fields));
+            emitSpiderResult(browserWindow, buildResultWithIndexing(parser, text, url, fields));
         } else {
-            browserWindow.webContents.send('spider-result', buildSpiderResult({
+            emitSpiderResult(browserWindow, buildSpiderResult({
                 ...(await getRobotsTxtFieldsForUrl(url)),
                 ...fields,
             }));
@@ -1032,8 +976,12 @@ const probeExternalLink = probeDiscoveredLink;
 
 async function reportDiscoveredLinks(browserWindow, links, sourceUrl, allowedHostname, { follow = true } = {}) {
     const stubs = [];
+    const filteredLinks = filterDiscoveredLinksViaHooks(
+        { sourceUrl, allowedHostname, follow, browserWindow },
+        links
+    );
 
-    for (const link of links) {
+    for (const link of filteredLinks) {
         const referrerMeta = buildReferrerLinkMeta(link);
         const robotsFields = link.external
             ? { robotsAllowed: null, robotsRule: '' }
@@ -1079,7 +1027,7 @@ async function reportDiscoveredLinks(browserWindow, links, sourceUrl, allowedHos
     }
 
     if (stubs.length > 0) {
-        browserWindow.webContents.send('spider-results-batch', stubs);
+        emitSpiderResultsBatch(browserWindow, stubs);
     }
 }
 
@@ -1249,7 +1197,7 @@ async function crawl(url, referrer, browserWindow) {
         while (isRedirectStatus(response.status) && hop < MAX_REDIRECT_HOPS) {
             const redirectUrl = resolveRedirectTarget(currentUrl, response.headers.get('location'));
 
-            browserWindow.webContents.send('spider-result', buildResultWithIndexing(robots, robotsText, currentUrl, {
+            emitSpiderResult(browserWindow, buildResultWithIndexing(robots, robotsText, currentUrl, {
                 status: response.status,
                 url: currentUrl,
                 title: '',
@@ -1306,7 +1254,7 @@ async function crawl(url, referrer, browserWindow) {
         }
 
         if (isRedirectStatus(response.status)) {
-            browserWindow.webContents.send('spider-result', buildResultWithIndexing(robots, robotsText, currentUrl, {
+            emitSpiderResult(browserWindow, buildResultWithIndexing(robots, robotsText, currentUrl, {
                 status: response.status,
                 url: currentUrl,
                 title: '',
@@ -1325,7 +1273,7 @@ async function crawl(url, referrer, browserWindow) {
                 : (previousUrl ? [referrerEntry(previousUrl)] : []));
 
         if (!response.ok) {
-            browserWindow.webContents.send('spider-result', buildResultWithIndexing(
+            emitSpiderResult(browserWindow, buildResultWithIndexing(
                 robots,
                 robotsText,
                 currentUrl,
@@ -1343,7 +1291,7 @@ async function crawl(url, referrer, browserWindow) {
         }
 
         if (!isHtmlContent(contentType)) {
-            browserWindow.webContents.send('spider-result', buildResultWithIndexing(
+            emitSpiderResult(browserWindow, buildResultWithIndexing(
                 robots,
                 robotsText,
                 currentUrl,
@@ -1364,27 +1312,25 @@ async function crawl(url, referrer, browserWindow) {
         responseTimeMs = timed.getElapsedMs();
         const $ = cheerio.load(html);
 
-        const title = extractPageTitle($);
-        const description = extractMetaDescription($);
-        const canonical = $('link[rel="canonical"]').attr('href') || '';
-        const pageLinks = collectPageLinks($, currentUrl, urlObject.hostname);
-
-        const headings = [];
-        $('h1, h2, h3, h4, h5, h6').each((i, el) => {
-            const text = extractElementText($, el);
-            if (!text) {
-                return;
-            }
-            headings.push({
-                level: parseInt(el.tagName.substring(1)),
-                text,
-            });
+        const pageFields = extractPageViaHooks({
+            $,
+            response,
+            url: currentUrl,
+            hostname: urlObject.hostname,
+            robots,
+            robotsText,
         });
-
-        const metaRobotsRaw = extractMetaRobotsRaw($, response);
+        const {
+            metaRobotsRaw = '',
+            title = '',
+            metaDescription = '',
+            metaCanonical = '',
+            headings = [],
+            ...pluginPageFields
+        } = pageFields;
         const metaRobotsParsed = parseMetaRobotsDirective(metaRobotsRaw);
 
-        browserWindow.webContents.send('spider-result', buildResultWithIndexing(
+        emitSpiderResult(browserWindow, buildResultWithIndexing(
             robots,
             robotsText,
             currentUrl,
@@ -1393,18 +1339,20 @@ async function crawl(url, referrer, browserWindow) {
                 url: currentUrl,
                 title: title || '',
                 referrers: pageReferrers,
-                metaDescription: description,
-                metaCanonical: canonical,
+                metaDescription: metaDescription || '',
+                metaCanonical: metaCanonical || '',
                 contentType: contentType || 'text/html',
                 external: false,
                 fetched: true,
-                headings: headings,
+                headings: headings || [],
                 responseTimeMs,
+                ...pluginPageFields,
             },
             metaRobotsRaw
         ));
 
         if (!isSessionPaused(session) && !session?.stopped) {
+            const pageLinks = collectPageLinks($, currentUrl, urlObject.hostname);
             await reportDiscoveredLinks(
                 browserWindow,
                 pageLinks,
@@ -1419,7 +1367,7 @@ async function crawl(url, referrer, browserWindow) {
     } catch (error) {
         console.error(`Помилка під час сканування ${url}: ${error.message}`);
         const errorReferrers = getReferrersSnapshot(url, referrer);
-        browserWindow.webContents.send('spider-result', buildResultWithIndexing(
+        emitSpiderResult(browserWindow, buildResultWithIndexing(
             robots,
             robotsText,
             url,
@@ -1692,6 +1640,7 @@ module.exports = {
     timedFetch,
     extractPageTitle,
     extractMetaDescription,
+    extractElementText,
     collectPageLinks,
     parseMetaRobotsDirective,
     parseAnchorRel,
@@ -1734,6 +1683,11 @@ module.exports = {
     isHtmlContent,
     collectMetaAttributeValues,
     extractMetaRobotsRaw,
+    getXRobotsTag,
+    crawlHookRegistry: require('./crawl-hooks').crawlHookRegistry,
+    CRAWL_HOOKS: require('./crawl-hooks').CRAWL_HOOKS,
+    emitSpiderResult,
+    extractPageViaHooks,
     reportDiscoveredLinks,
     buildDiscoveredLinkResult,
 };

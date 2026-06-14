@@ -85,10 +85,26 @@ function loadRendererScripts() {
     };
     ctx.window.api = ctx.api;
 
+    const sharedRoot = path.join(__dirname, '../../src/shared');
     const root = path.join(__dirname, '../../src/renderer');
     const sandbox = vm.createContext(ctx);
-    for (const file of ['ui-logic.js', 'session-dump.js', 'settings-store.js', 'renderer.js']) {
-        vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), sandbox, { filename: file });
+    const files = [
+        path.join(sharedRoot, 'hook-registry.js'),
+        path.join(root, 'ui-logic.js'),
+        path.join(root, 'ui-hooks.js'),
+        path.join(root, 'ui-defaults.js'),
+        path.join(root, 'plugins', 'og-meta.js'),
+        path.join(root, 'scan-store.js'),
+        path.join(root, 'table-column-layout.js'),
+        path.join(root, 'table-view.js'),
+        path.join(root, 'detail-panel.js'),
+        path.join(root, 'export-csv.js'),
+        path.join(root, 'session-dump.js'),
+        path.join(root, 'settings-store.js'),
+        path.join(root, 'renderer.js'),
+    ];
+    for (const file of files) {
+        vm.runInContext(fs.readFileSync(file, 'utf8'), sandbox, { filename: path.basename(file) });
     }
     return ctx;
 }

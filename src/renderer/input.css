@@ -67,4 +67,64 @@
   body.settings-modal-open {
     overflow: hidden;
   }
+
+  .results-table-wrap {
+    @apply overflow-auto flex-grow min-h-0;
+  }
+
+  .results-data-table {
+    width: max-content;
+    min-width: 100%;
+    table-layout: fixed;
+    border-collapse: collapse;
+  }
+
+  .results-data-table th.results-th,
+  .results-data-table td {
+    overflow: hidden;
+    vertical-align: top;
+  }
+
+  .results-data-table th.results-th {
+    @apply relative;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    line-height: 1.25;
+  }
+
+  .results-data-table td.results-td-wrap {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .results-data-table td.results-td-wrap .text-blue-700 {
+    overflow-wrap: anywhere;
+    word-break: break-all;
+  }
+
+  .results-data-table td.results-td-compact {
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .results-data-table .col-resize-handle {
+    @apply absolute top-0 right-0 h-full cursor-col-resize select-none;
+    width: 5px;
+    touch-action: none;
+  }
+
+  .results-data-table .col-resize-handle:hover,
+  .results-data-table .col-resize-handle:active {
+    @apply bg-blue-400/50;
+  }
+
+  body.table-col-resizing {
+    @apply select-none cursor-col-resize;
+  }
+
+  body.table-col-resizing * {
+    cursor: col-resize !important;
+  }
 }

@@ -164,25 +164,10 @@
             <span id="filterCount" class="text-zinc-400 whitespace-nowrap"></span>
           </div>
         </div>
-        <div id="pagesTableScroll" class="overflow-auto flex-grow min-h-0">
-          <table class="w-full text-xs border-collapse">
+        <div id="pagesTableScroll" class="results-table-wrap">
+          <table id="resultsDataTable" class="results-data-table text-xs">
             <thead id="pagesTableHead" class="sticky top-0 bg-zinc-100 border-b border-zinc-300 z-10">
-              <tr class="text-left text-zinc-600">
-                <th class="sortable-th p-2 font-semibold w-8 cursor-pointer select-none hover:bg-zinc-200" data-sort="index" title="Сортувати">#</th>
-                <th class="sortable-th p-2 font-semibold min-w-[200px] cursor-pointer select-none hover:bg-zinc-200" data-sort="url" title="Сортувати">Address</th>
-                <th class="sortable-th p-2 font-semibold w-16 cursor-pointer select-none hover:bg-zinc-200" data-sort="status" title="Сортувати">Status</th>
-                <th class="sortable-th p-2 font-semibold min-w-[110px] cursor-pointer select-none hover:bg-zinc-200" data-sort="contentType" title="Сортувати">Content-Type</th>
-                <th class="sortable-th p-2 font-semibold w-20 cursor-pointer select-none hover:bg-zinc-200" data-sort="responseTime" title="Сортувати">Час (мс)</th>
-                <th class="p-2 font-semibold min-w-[100px]" title="Meta robots">Meta robots</th>
-                <th class="p-2 font-semibold min-w-[120px]" title="Правило robots.txt">Robots.txt</th>
-                <th class="sortable-th p-2 font-semibold min-w-[140px] cursor-pointer select-none hover:bg-zinc-200" data-sort="h1" title="Сортувати">H1</th>
-                <th class="sortable-th p-2 font-semibold min-w-[140px] cursor-pointer select-none hover:bg-zinc-200" data-sort="title" title="Сортувати">Title</th>
-                <th class="sortable-th p-2 font-semibold min-w-[160px] cursor-pointer select-none hover:bg-zinc-200" data-sort="metaDescription" title="Сортувати">Meta Description</th>
-                <th class="sortable-th p-2 font-semibold w-14 cursor-pointer select-none hover:bg-zinc-200" data-sort="links" title="Сортувати">Links</th>
-                <th class="sortable-th p-2 font-semibold w-14 cursor-pointer select-none hover:bg-zinc-200" data-sort="inlinks" title="Сортувати">In</th>
-                <th class="sortable-th p-2 font-semibold w-14 cursor-pointer select-none hover:bg-zinc-200" data-sort="internalLinks" title="Сортувати">Внутр.</th>
-                <th class="sortable-th p-2 font-semibold w-14 cursor-pointer select-none hover:bg-zinc-200" data-sort="externalLinks" title="Сортувати">Зовн.</th>
-              </tr>
+              <tr class="text-left text-zinc-600"></tr>
             </thead>
             <tbody id="resultsTable"></tbody>
           </table>
@@ -349,9 +334,18 @@
       </div>
     </div>
 
+    <script src="../shared/hook-registry.js"></script>
     <script src="./settings-store.js"></script>
     <script src="./settings.js"></script>
     <script src="./ui-logic.js"></script>
+    <script src="./ui-hooks.js"></script>
+    <script src="./ui-defaults.js"></script>
+    <script src="./plugins/og-meta.js"></script>
+    <script src="./scan-store.js"></script>
+    <script src="./table-column-layout.js"></script>
+    <script src="./table-view.js"></script>
+    <script src="./detail-panel.js"></script>
+    <script src="./export-csv.js"></script>
     <script src="./session-dump.js"></script>
     <script src="./renderer.js"></script>
   </body>

@@ -39,6 +39,9 @@ function cloneResultEntry(data) {
             ))
             : [],
         headings: Array.isArray(data.headings) ? data.headings.map((heading) => ({ ...heading })) : [],
+        ogTitle: data.ogTitle ?? '',
+        ogDescription: data.ogDescription ?? '',
+        ogImage: data.ogImage ?? '',
     };
 }
 
