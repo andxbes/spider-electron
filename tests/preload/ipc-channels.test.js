@@ -23,6 +23,7 @@ describe('preload IPC whitelist', () => {
     it('invoke channels include settings and session', () => {
         const channels = readChannelList('preload', /validInvokeChannels = \[([\s\S]*?)\]/);
         for (const expected of [
+            'app:getAbout',
             'settings:get',
             'settings:save',
             'spider-pause',
@@ -42,6 +43,7 @@ describe('preload IPC whitelist', () => {
             'spider-end',
             'spider-progress',
             'spider-referrers-update',
+            'about-show',
         ]) {
             assert.ok(channels.includes(expected), `missing ${expected}`);
         }

@@ -1,6 +1,7 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { app, dialog, Menu, BrowserWindow } = require('electron');
+const { sendAboutShow } = require('./app-about');
 
 const DUMP_VERSION = 1;
 const DUMP_FILTER = {
@@ -152,13 +153,29 @@ function createApplicationMenu(getMainWindow) {
                 { role: 'toggleDevTools', label: 'Інструменти розробника' },
             ],
         },
+        {
+            label: 'Про програму',
+            submenu: [
+                {
+                    label: 'Про Electron Web Spider…',
+                    click: () => {
+                        sendAboutShow(getMainWindow());
+                    },
+                },
+            ],
+        },
     ];
 
     if (process.platform === 'darwin') {
         template.unshift({
             label: app.getName(),
             submenu: [
-                { role: 'about' },
+                {
+                    label: 'Про Spider',
+                    click: () => {
+                        sendAboutShow(getMainWindow());
+                    },
+                },
                 { type: 'separator' },
                 { role: 'services' },
                 { type: 'separator' },

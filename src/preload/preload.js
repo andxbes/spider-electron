@@ -9,8 +9,10 @@ const validReceiveChannels = [
     'spider-referrers-update',
     'session-dump-request-save',
     'session-dump-loaded',
+    'about-show',
 ];
 const validInvokeChannels = [
+    'app:getAbout',
     'settings:get',
     'settings:save',
     'shell:open-external',
@@ -48,6 +50,12 @@ contextBridge.exposeInMainWorld('api', {
             return ipcRenderer.invoke('shell:open-external', url);
         }
         return Promise.resolve({ ok: false });
+    },
+    getAboutInfo: () => {
+        if (validInvokeChannels.includes('app:getAbout')) {
+            return ipcRenderer.invoke('app:getAbout');
+        }
+        return Promise.resolve({ name: '', version: '', author: '', email: '' });
     },
     getSettings: () => {
         if (validInvokeChannels.includes('settings:get')) {
@@ -106,6 +114,11 @@ contextBridge.exposeInMainWorld('api', {
     onSessionDumpLoaded: (callback) => {
         if (validReceiveChannels.includes('session-dump-loaded')) {
             ipcRenderer.on('session-dump-loaded', (event, ...args) => callback(...args));
+        }
+    },
+    onAboutShow: (callback) => {
+        if (validReceiveChannels.includes('about-show')) {
+            ipcRenderer.on('about-show', (event, ...args) => callback(...args));
         }
     },
 });

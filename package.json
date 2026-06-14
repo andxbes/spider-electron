@@ -2,7 +2,7 @@
   "name": "spider-electron",
   "version": "1.0.0",
   "description": "A simple web spider built with Electron",
-  "author": "andxbes",
+  "author": "andxbes <andxbes@gmail.com>",
   "main": "src/main/main.js",
   "scripts": {
     "postinstall": "node node_modules/electron/install.js",

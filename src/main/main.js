@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const { URL } = require('node:url');
 const { getSettingsPath, loadSettings, saveSettings } = require('./settings-persistence');
 const { registerSessionDumpHandlers, createApplicationMenu } = require('./session-dump');
+const { registerAboutHandlers } = require('./app-about');
 
 if (process.platform === 'linux') {
     app.commandLine.appendSwitch('class', 'spider-electron');
@@ -50,6 +51,7 @@ app.whenReady().then(() => {
         app.setAppUserModelId('spider-electron');
     }
     registerSessionDumpHandlers(ipcMain);
+    registerAboutHandlers(ipcMain);
     createApplicationMenu(() => mainWindow);
     createWindow();
 

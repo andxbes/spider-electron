@@ -334,9 +334,63 @@
       </div>
     </div>
 
+    <div
+      id="aboutModal"
+      class="settings-modal hidden"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="aboutModalTitle"
+      aria-hidden="true"
+    >
+      <div class="settings-modal-backdrop" data-about-close tabindex="-1"></div>
+      <div class="settings-modal-panel">
+        <div class="bg-white border border-zinc-300 rounded-md shadow-lg max-w-md w-full">
+          <div class="flex items-center justify-between gap-3 border-b border-zinc-200 px-4 py-3 sm:px-6">
+            <h2 id="aboutModalTitle" class="text-lg font-bold text-zinc-700">Про програму</h2>
+            <button
+              type="button"
+              class="px-2 py-1 text-sm text-zinc-500 hover:text-zinc-800 rounded-md hover:bg-zinc-100"
+              data-about-close
+              aria-label="Закрити"
+            >
+              ✕
+            </button>
+          </div>
+          <div class="p-4 sm:p-6 space-y-4 text-sm text-zinc-700">
+            <p class="text-base font-semibold text-zinc-800" id="aboutAppName">Electron Web Spider</p>
+            <p>
+              <span class="text-zinc-500">Версія:</span>
+              <span id="aboutVersion" class="font-medium">—</span>
+            </p>
+            <p>
+              <span class="text-zinc-500">Автор:</span>
+              <a
+                id="aboutAuthorLink"
+                href="mailto:andxbes@gmail.com"
+                class="text-blue-700 hover:underline font-medium"
+              >andxbes</a>
+            </p>
+            <p class="text-zinc-500 text-xs pt-2 border-t border-zinc-100">
+              Desktop-краулер для аналізу внутрішніх посилань сайту.
+            </p>
+            <div class="flex justify-end pt-2">
+              <button
+                type="button"
+                class="px-4 py-2 text-zinc-600 border border-zinc-300 rounded-md hover:bg-zinc-50"
+                data-about-close
+              >
+                Закрити
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <script src="../shared/hook-registry.js"></script>
     <script src="./settings-store.js"></script>
     <script src="./settings.js"></script>
+    <script src="./about.js"></script>
     <script src="./ui-logic.js"></script>
     <script src="./ui-hooks.js"></script>
     <script src="./ui-defaults.js"></script>

@@ -1,6 +1,6 @@
 # Spider-Electron — внутрішня документація
 
-> Останнє оновлення: 2026-06-14 (фаза 3 main: crawl-state, crawl-queue, crawl-referrers, crawl-sitemap, probe)  
+> Останнє оновлення: 2026-06-14 (модальне «Про програму» в меню Файл, версія з package.json)  
 > Короткий довідник для розробки та правок. Детальніше про підтримку — [DOC_MAINTENANCE.md](./DOC_MAINTENANCE.md).
 
 ## Що це
@@ -19,6 +19,7 @@ src/
 │   └── hook-registry.js   # Реєстр хуків (waterfall / filter / tap)
 ├── main/
 │   ├── main.js            # Electron lifecycle + IPC
+│   ├── app-about.js       # Метадані застосунку (версія, автор)
 │   ├── spider-logic.js  # Оркестратор: crawl, startSpider (~620 рядків)
 │   ├── crawl-state.js   # Mutable state: visited, queues, session
 │   ├── crawl-network.js # Fetch, robots.txt, таймаути
@@ -222,6 +223,8 @@ Renderer
 | R → M | `spider-pause` / `spider-resume` / `spider-stop` | керування скануванням |
 | R → M | `shell:open-external` | відкрити URL у браузері |
 | R ↔ M | `settings:get` / `settings:save` | налаштування (файл у userData) |
+| R ↔ M | `app:getAbout` | `{ name, version, author, email }` — версія з `package.json` через `app.getVersion()` |
+| M → R | `about-show` | відкрити модальне «Про програму» (меню «Про програму») |
 | M → R | `spider-result` | один об'єкт посилання (завантажене) |
 | M → R | `spider-results-batch` | масив знайдених, не завантажених посилань |
 | M → R | `spider-progress` | `{ scanned, queue, active?, status?, finished? }` |
