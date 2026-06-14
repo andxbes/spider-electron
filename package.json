@@ -1,6 +1,6 @@
 {
   "name": "spider-electron",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A simple web spider built with Electron",
   "author": "andxbes <andxbes@gmail.com>",
   "main": "src/main/main.js",
