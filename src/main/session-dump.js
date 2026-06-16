@@ -9,9 +9,15 @@ const DUMP_FILTER = {
     extensions: ['spider.json', 'json'],
 };
 
-function defaultDumpFileName() {
+function defaultDumpFileName(startUrl) {
+    let host = '';
+    try {
+        host = new URL(startUrl).hostname.replace(/[^a-zA-Z0-9.-]/g, '_');
+    } catch {
+        host = 'scan';
+    }
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-    return `spider-dump-${stamp}.spider.json`;
+    return `spider_${host}_${stamp}.spider.json`;
 }
 
 function getWindowFromEvent(event) {
@@ -40,7 +46,7 @@ function registerSessionDumpHandlers(ipcMain) {
 
         const { canceled, filePath } = await dialog.showSaveDialog(browserWindow, {
             title: 'Зберегти дамп сканування',
-            defaultPath: defaultDumpFileName(),
+            defaultPath: defaultDumpFileName(payload?.startUrl || ''),
             filters: [DUMP_FILTER],
         });
 

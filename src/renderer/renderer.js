@@ -463,7 +463,7 @@ exportButton.addEventListener('click', () => {
         alert('Немає рядків для експорту за поточними фільтрами.');
         return;
     }
-    exportFilteredResultsToCsv(entries, { helpers: getPresentationHelpers() });
+    exportFilteredResultsToCsv(entries, { helpers: getPresentationHelpers(), startUrl: urlInput.value.trim() });
 });
 
 document.addEventListener('click', (e) => {

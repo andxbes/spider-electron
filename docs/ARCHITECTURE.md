@@ -1,6 +1,6 @@
 # Spider-Electron — внутрішня документація
 
-> Останнє оновлення: 2026-06-14 (модальне «Про програму» в меню Файл, версія з package.json)  
+> Останнє оновлення: 2026-06-16 (іменування CSV/дампу: hostname + datetime; preconnect/dns-prefetch не збираються)  
 > Короткий довідник для розробки та правок. Детальніше про підтримку — [DOC_MAINTENANCE.md](./DOC_MAINTENANCE.md).
 
 ## Що це
@@ -295,7 +295,12 @@ Renderer
 
 - BOM `\uFEFF` для Excel/кирилиці.
 - Експорт відфільтрованих сторінок; колонки включають Internal Links, External Links.
-- Файл: `spider_filtered_YYYY-MM-DD.csv`.
+- Файл: `spider_<hostname>_YYYY-MM-DDTHH-MM-SS.csv` — hostname сканованого сайту + час запуску.
+- Дамп: `spider_<hostname>_YYYY-MM-DDTHH-MM-SS.spider.json` — аналогічно.
+
+## Збір посилань (link-collector.js)
+
+- `<link rel="preconnect">` і `<link rel="dns-prefetch">` пропускаються під час `collectPageLinks` — вони не є адресами URL-ресурсів.
 
 ## Залежності
 

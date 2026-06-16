@@ -276,6 +276,10 @@ function collectPageLinks($, currentUrl, allowedHostname) {
         const el = $(link);
         const rel = el.attr('rel') || '';
         const relLower = rel.toLowerCase();
+        // preconnect і dns-prefetch не є URL-ресурсами — пропускаємо
+        if (relLower.includes('preconnect') || relLower.includes('dns-prefetch')) {
+            return;
+        }
         const as = el.attr('as') || '';
         let element = 'link';
         if (relLower.includes('stylesheet')) {
