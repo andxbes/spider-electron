@@ -55,6 +55,8 @@ describe('settings-persistence', () => {
             maxPages: 10,
             concurrency: 2,
             respectRobotsTxt: true,
+            userAgentPreset: 'spider',
+            userAgentCustom: '',
             authType: 'basic',
             authUsername: 'admin',
             authPassword: 'secret',

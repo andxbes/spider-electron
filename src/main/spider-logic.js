@@ -66,13 +66,14 @@ const {
     mergeReferrerMeta,
 } = require('./crawl-referrers');
 const {
-    USER_AGENT,
-    ROBOTS_UA,
+    DEFAULT_USER_AGENT,
     FETCH_TIMEOUT_MS,
     setFetchForTests,
     resetFetchForTests,
     setScanAuthContext,
     clearScanAuthContext,
+    setScanUserAgent,
+    clearScanUserAgent,
     fetchPage,
     timedFetch,
     getRobots,
@@ -82,6 +83,7 @@ const {
     shouldBlockByRobotsTxt,
 } = require('./crawl-network');
 const { normalizeAuthSettings } = require('./http-auth');
+const { resolveUserAgent } = require('../shared/user-agents');
 const {
     FALLBACK_SITEMAP_PATHS,
     parseSitemapsFromRobotsTxt,
@@ -426,6 +428,7 @@ function completeScan(session, endMessage) {
     if (getScanSession() === session) {
         clearScanSession();
         clearScanAuthContext();
+        clearScanUserAgent();
     }
 
     console.log(endMessage);
@@ -608,6 +611,7 @@ async function startSpider(startUrl, options, browserWindow) {
         ...normalizeAuthSettings(options),
     });
     setRespectRobotsTxt(options?.respectRobotsTxt !== false);
+    setScanUserAgent(resolveUserAgent(options));
 
     if (useSitemap) {
         const sitemapPageCount = await seedQueueFromSitemaps(startUrl, browserWindow, getRobots);
@@ -635,12 +639,12 @@ function resetSpiderStateForTests() {
     setMaxPagesToVisit(0);
     clearScanSession();
     clearScanAuthContext();
+    clearScanUserAgent();
     setRespectRobotsTxt(true);
 }
 
 module.exports = {
-    USER_AGENT,
-    ROBOTS_UA,
+    DEFAULT_USER_AGENT,
     FETCH_TIMEOUT_MS,
     MAX_REDIRECT_HOPS,
     FALLBACK_SITEMAP_PATHS,

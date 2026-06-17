@@ -4,6 +4,10 @@ function getSettingsFormElements(form) {
         respectRobotsTxtInput: form.querySelector('#respectRobotsTxt'),
         maxPagesInput: form.querySelector('#maxPages'),
         concurrencyInput: form.querySelector('#concurrency'),
+        userAgentPresetInput: form.querySelector('#userAgentPreset'),
+        userAgentCustomFields: form.querySelector('#userAgentCustomFields'),
+        userAgentCustomInput: form.querySelector('#userAgentCustom'),
+        userAgentPreview: form.querySelector('#userAgentPreview'),
         authTypeInput: form.querySelector('#authType'),
         authBasicFields: form.querySelector('#authBasicFields'),
         authBearerFields: form.querySelector('#authBearerFields'),
@@ -13,6 +17,42 @@ function getSettingsFormElements(form) {
         saveStatus: form.querySelector('#saveStatus'),
         settingsPathHint: form.querySelector('#settingsPathHint'),
     };
+}
+
+function populateUserAgentPresetSelect(selectEl, selectedId) {
+    if (!selectEl || !USER_AGENT_PRESETS) {
+        return;
+    }
+    selectEl.replaceChildren();
+    for (const preset of USER_AGENT_PRESETS) {
+        const option = document.createElement('option');
+        option.value = preset.id;
+        option.textContent = preset.label;
+        selectEl.appendChild(option);
+    }
+    const presetId = isValidUserAgentPresetId(selectedId)
+        ? selectedId
+        : DEFAULT_USER_AGENT_PRESET_ID;
+    selectEl.value = presetId;
+}
+
+function getUserAgentSettingsFromElements(elements) {
+    return {
+        userAgentPreset: elements.userAgentPresetInput?.value || DEFAULT_USER_AGENT_PRESET_ID,
+        userAgentCustom: elements.userAgentCustomInput?.value || '',
+    };
+}
+
+function syncUserAgentFields(elements) {
+    const isCustom = elements.userAgentPresetInput?.value === CUSTOM_USER_AGENT_PRESET_ID;
+    if (elements.userAgentCustomFields) {
+        elements.userAgentCustomFields.classList.toggle('hidden', !isCustom);
+    }
+    if (elements.userAgentPreview && typeof resolveUserAgent === 'function') {
+        elements.userAgentPreview.textContent = resolveUserAgent(
+            getUserAgentSettingsFromElements(elements)
+        );
+    }
 }
 
 function syncAuthFieldsVisibility(elements) {
@@ -29,6 +69,11 @@ async function populateSettingsForm(form) {
     const elements = getSettingsFormElements(form);
     const loaded = await loadSettings();
     const path = await getSettingsFilePath();
+
+    populateUserAgentPresetSelect(elements.userAgentPresetInput, loaded.userAgentPreset);
+    if (elements.userAgentCustomInput) {
+        elements.userAgentCustomInput.value = loaded.userAgentCustom || '';
+    }
 
     elements.useSitemapInput.checked = loaded.useSitemap;
     if (elements.respectRobotsTxtInput) {
@@ -48,6 +93,7 @@ async function populateSettingsForm(form) {
     if (elements.authTokenInput) {
         elements.authTokenInput.value = loaded.authToken || '';
     }
+    syncUserAgentFields(elements);
     syncAuthFieldsVisibility(elements);
 
     if (elements.settingsPathHint && path) {
@@ -58,17 +104,26 @@ async function populateSettingsForm(form) {
 function bindSettingsForm(form) {
     const elements = getSettingsFormElements(form);
 
+    elements.userAgentPresetInput?.addEventListener('change', () => {
+        syncUserAgentFields(elements);
+    });
+    elements.userAgentCustomInput?.addEventListener('input', () => {
+        syncUserAgentFields(elements);
+    });
+
     elements.authTypeInput?.addEventListener('change', () => {
         syncAuthFieldsVisibility(elements);
     });
 
     form.addEventListener('submit', async (event) => {
         event.preventDefault();
+        const userAgentSettings = getUserAgentSettingsFromElements(elements);
         const { filePath } = await saveSettings({
             useSitemap: elements.useSitemapInput.checked,
             respectRobotsTxt: elements.respectRobotsTxtInput?.checked !== false,
             maxPages: elements.maxPagesInput.value,
             concurrency: elements.concurrencyInput.value,
+            ...userAgentSettings,
             authType: elements.authTypeInput?.value || 'none',
             authUsername: elements.authUsernameInput?.value || '',
             authPassword: elements.authPasswordInput?.value || '',
@@ -113,7 +168,7 @@ function initSettingsModal() {
         modal.classList.remove('hidden');
         modal.setAttribute('aria-hidden', 'false');
         document.body.classList.add('settings-modal-open');
-        const firstField = form.querySelector('input, button');
+        const firstField = form.querySelector('input, button, select, textarea');
         firstField?.focus();
     }
 

@@ -2,6 +2,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { app } = require('electron');
 const { AUTH_TYPES, normalizeAuthSettings } = require('./http-auth');
+const { normalizeUserAgentSettings } = require('../shared/user-agents');
 
 const DEFAULT_CONCURRENCY = 3;
 const MAX_CONCURRENCY = 50;
@@ -11,6 +12,8 @@ const DEFAULT_SETTINGS = {
     maxPages: 0,
     concurrency: DEFAULT_CONCURRENCY,
     respectRobotsTxt: true,
+    userAgentPreset: 'spider',
+    userAgentCustom: '',
     authType: AUTH_TYPES.NONE,
     authUsername: '',
     authPassword: '',
@@ -31,6 +34,7 @@ function normalizeSettings(raw) {
             Math.max(1, Number.isNaN(concurrency) ? DEFAULT_CONCURRENCY : concurrency)
         ),
         respectRobotsTxt: raw?.respectRobotsTxt !== false,
+        ...normalizeUserAgentSettings(raw),
         ...normalizeAuthSettings(raw),
     };
 }

@@ -1,4 +1,13 @@
-const ROBOTS_UA = 'MyElectronSpider/1.0';
+const DEFAULT_ROBOTS_UA = 'MyElectronSpider/1.0';
+let activeRobotsUa = DEFAULT_ROBOTS_UA;
+
+function setActiveRobotsUserAgent(userAgent) {
+    activeRobotsUa = String(userAgent || '').trim() || DEFAULT_ROBOTS_UA;
+}
+
+function getActiveRobotsUserAgent() {
+    return activeRobotsUa;
+}
 
 function buildSpiderResult(overrides) {
     return {
@@ -69,7 +78,8 @@ function parseMetaRobotsDirective(content) {
 }
 
 function getRobotsTxtInfo(robots, robotsText, url) {
-    const allowed = robots.isAllowed(url, ROBOTS_UA);
+    const robotsUa = getActiveRobotsUserAgent();
+    const allowed = robots.isAllowed(url, robotsUa);
     if (allowed === undefined) {
         return {
             robotsAllowed: null,
@@ -77,7 +87,7 @@ function getRobotsTxtInfo(robots, robotsText, url) {
         };
     }
 
-    const lineNumber = robots.getMatchingLineNumber(url, ROBOTS_UA);
+    const lineNumber = robots.getMatchingLineNumber(url, robotsUa);
     let robotsRule = '';
 
     if (lineNumber > 0 && robotsText) {
@@ -113,7 +123,9 @@ function buildResultWithIndexing(robots, robotsText, url, fields, metaRobotsRaw 
 }
 
 module.exports = {
-    ROBOTS_UA,
+    DEFAULT_ROBOTS_UA,
+    getActiveRobotsUserAgent,
+    setActiveRobotsUserAgent,
     buildSpiderResult,
     parseMetaRobotsDirective,
     getRobotsTxtInfo,

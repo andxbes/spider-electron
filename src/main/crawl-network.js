@@ -5,18 +5,20 @@ const { getAuthHeadersForUrl } = require('./http-auth');
 const { emitSpiderResult } = require('./crawl-hooks');
 const { robotsCache, getRespectRobotsTxt } = require('./crawl-state');
 const {
-    ROBOTS_UA,
+    getActiveRobotsUserAgent,
+    setActiveRobotsUserAgent,
     buildSpiderResult,
     buildResultWithIndexing,
     getRobotsTxtInfo,
 } = require('./crawl-results');
+const { DEFAULT_USER_AGENT } = require('../shared/user-agents');
 
-const USER_AGENT = 'MyElectronSpider/1.0 (+https://github.com/your-repo)';
 const FETCH_TIMEOUT_MS = 5000;
 const { MAX_REDIRECT_HOPS } = require('../shared/redirect-chain');
 
 let fetchImpl = undiciFetch;
 let scanAuthContext = null;
+let scanUserAgent = DEFAULT_USER_AGENT;
 
 function setScanAuthContext(context) {
     scanAuthContext = context;
@@ -28,6 +30,19 @@ function clearScanAuthContext() {
 
 function getScanAuthContext() {
     return scanAuthContext;
+}
+
+function setScanUserAgent(userAgent) {
+    scanUserAgent = String(userAgent || '').trim() || DEFAULT_USER_AGENT;
+    setActiveRobotsUserAgent(scanUserAgent);
+}
+
+function getScanUserAgent() {
+    return scanUserAgent;
+}
+
+function clearScanUserAgent() {
+    setScanUserAgent(DEFAULT_USER_AGENT);
 }
 
 function setFetchForTests(fn) {
@@ -45,7 +60,7 @@ function fetchPage(url) {
     return fetchImpl(url, {
         signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
         redirect: 'manual',
-        headers: { 'User-Agent': USER_AGENT, ...authHeaders },
+        headers: { 'User-Agent': getScanUserAgent(), ...authHeaders },
     });
 }
 
@@ -102,7 +117,7 @@ function shouldBlockByRobotsTxt(parser, url) {
     if (!getRespectRobotsTxt()) {
         return false;
     }
-    return !parser.isAllowed(url, ROBOTS_UA);
+    return !parser.isAllowed(url, getActiveRobotsUserAgent());
 }
 
 async function isInternalRobotsDisallowed(url, allowedHostname) {
@@ -137,8 +152,10 @@ function sendRobotsBlockedResult(browserWindow, robots, robotsText, url, referre
 }
 
 module.exports = {
-    USER_AGENT,
-    ROBOTS_UA,
+    DEFAULT_USER_AGENT,
+    getScanUserAgent,
+    setScanUserAgent,
+    clearScanUserAgent,
     FETCH_TIMEOUT_MS,
     MAX_REDIRECT_HOPS,
     setFetchForTests,

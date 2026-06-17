@@ -556,6 +556,39 @@ describe('spider-logic', () => {
         assert.deepEqual(urls, ['https://example.com/a']);
     });
 
+    it('startSpider sends custom user agent from settings', async () => {
+        const win = mockWindow();
+        const userAgents = [];
+        setFetchForTests(async (url, options) => {
+            userAgents.push(options?.headers?.['User-Agent']);
+            if (url.includes('robots.txt')) {
+                return mockResponse({ status: 404 });
+            }
+            return mockResponse({
+                status: 200,
+                headers: { 'content-type': 'text/html' },
+                body: '<html><head><title>Root</title></head></html>',
+            });
+        });
+
+        await startSpider('https://example.com/', {
+            maxPages: 1,
+            concurrency: 1,
+            userAgentPreset: 'custom',
+            userAgentCustom: 'TestCrawler/9.9',
+        }, win);
+
+        const deadline = Date.now() + 3000;
+        while (Date.now() < deadline) {
+            if (!getScanSession()) {
+                break;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+
+        assert.ok(userAgents.some((ua) => ua === 'TestCrawler/9.9'));
+    });
+
     it('startSpider completes small site scan', async () => {
         const win = mockWindow();
         setFetchForTests(async (url) => {

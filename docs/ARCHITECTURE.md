@@ -1,6 +1,6 @@
 # Spider-Electron — внутрішня документація
 
-> Останнє оновлення: 2026-06-17 (опція respectRobotsTxt — обхід без дотримання Disallow, мета robots.txt лишається)  
+> Останнє оновлення: 2026-06-17 (налаштування User-Agent: браузери, боти, власний рядок)  
 > Короткий довідник для розробки та правок. Детальніше про підтримку — [DOC_MAINTENANCE.md](./DOC_MAINTENANCE.md).
 
 ## Що це
@@ -16,6 +16,7 @@ assets/
 src/
 ├── shared/
 │   ├── url-utils.js       # URL-утиліти (main + тести)
+│   ├── user-agents.js     # Пресети User-Agent (main + renderer)
 │   └── hook-registry.js   # Реєстр хуків (waterfall / filter / tap)
 ├── main/
 │   ├── main.js            # Electron lifecycle + IPC
@@ -199,7 +200,7 @@ Renderer
 
 1. Skip, якщо URL вже в `visitedUrls` або ліміт досягнуто.
 2. Перевірка **robots.txt** (внутрішні URL) — якщо `Disallow` і увімкнено `respectRobotsTxt` (за замовч.), HTTP-запит **не** виконується: ні `crawl`, ні `probe`; `status: 0`. Якщо `respectRobotsTxt: false` — сторінки скануються, але `robotsAllowed` / `robotsRule` у результаті лишаються. Зовнішні URL перевіряються по HTTP навіть при забороні в robots.txt їхнього хоста.
-3. `fetch` з timeout 5s, `redirect: 'manual'`, User-Agent `MyElectronSpider/1.0`; за наявності в налаштуваннях — `Authorization` (Basic або Bearer) **лише для URL з hostname скану** (`http-auth.js` + `setScanAuthContext` при `startSpider`).
+3. `fetch` з timeout 5s, `redirect: 'manual'`, User-Agent з налаштувань (`user-agents.js`, пресет або власний); за наявності — `Authorization` (Basic/Bearer) **лише для URL з hostname скану**.
 4. **3xx** — фіксація `redirectUrl`, ланцюг до **20** переходів (`redirect-chain.js`); метадані на стартовому URL; при циклі або перевищенні ліміту — `redirectInfinite`. Enqueue цілі (лише той самий `hostname`); ціль redirect теж перевіряється robots.txt перед fetch.
 5. **4xx/5xx** — `status` = код відповіді, `title` порожній.
 6. **200** — cheerio: title, meta description, canonical, headings, link count → `spider-result`.
@@ -215,7 +216,7 @@ Renderer
 | `maxPages` (опція UI) | 0 = без ліміту | renderer → main |
 | `concurrency` (опція UI) | 1–50, за замовч. 3 | паралельних `crawl()` |
 | HTTP timeout | 5000 ms | ~98 |
-| User-Agent | `MyElectronSpider/1.0` | ~81, ~101 |
+| User-Agent | з налаштувань (`userAgentPreset` / `userAgentCustom`) | `user-agents.js`, `setScanUserAgent` |
 | Область обходу | один `hostname` | ~146, ~210 |
 
 Зміни цих параметрів — правити `main.js` і оновити цю таблицю.
@@ -224,7 +225,7 @@ Renderer
 
 | Напрямок | Канал | Payload |
 |----------|-------|---------|
-| R → M | `start-spider` | `{ startUrl, options: { useSitemap?, respectRobotsTxt?, maxPages?, concurrency?, authType?, authUsername?, authPassword?, authToken? } }` |
+| R → M | `start-spider` | `{ startUrl, options: { useSitemap?, respectRobotsTxt?, userAgentPreset?, userAgentCustom?, maxPages?, concurrency?, authType?, authUsername?, authPassword?, authToken? } }` |
 | R → M | `spider-pause` / `spider-resume` / `spider-stop` | керування скануванням |
 | R → M | `shell:open-external` | відкрити URL у браузері |
 | R ↔ M | `settings:get` / `settings:save` | налаштування у `userData/settings.json` (див. нижче) |
@@ -246,6 +247,8 @@ Renderer
 |------|-----|------|
 | `useSitemap` | boolean | Спочатку sitemap, потім обхід посилань |
 | `respectRobotsTxt` | boolean | `true` (за замовч.) — не сканувати URL з Disallow; `false` — сканувати, але показувати правило в UI |
+| `userAgentPreset` | string | `spider`, `chrome-win`, `googlebot`, `custom`, … — див. `src/shared/user-agents.js` |
+| `userAgentCustom` | string | Власний User-Agent, якщо `userAgentPreset === 'custom'` |
 | `maxPages` | number | 0 = без ліміту |
 | `concurrency` | number | 1–50, паралельних `crawl()` |
 | `authType` | `'none'` \| `'basic'` \| `'bearer'` | Серверна автентифікація |
@@ -371,6 +374,7 @@ npm run make:mac       # macOS zip (з Linux); dmg — лише збірка н�
 - **Runner:** вбудований `node:test` + `node:assert/strict` (без додаткових dev-залежностей).
 - **Команда:** `npm test` — `scripts/run-tests.mjs` знаходить усі `tests/**/*.test.js` і запускає `node --test` (glob у npm-скрипті ненадійний).
 - **Покриття:**
+  - `shared/user-agents` — пресети UA, resolve для fetch і robots.txt;
   - `shared/url-utils` — нормалізація URL, redirect, content-type;
   - `shared/hook-registry` — waterfall, filter, unregister;
   - `main/crawl-hooks` — extract, emit, filter links;

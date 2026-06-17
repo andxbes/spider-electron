@@ -32,7 +32,6 @@ const {
     isUrlQueued,
 } = require('./crawl-queue');
 const {
-    ROBOTS_UA,
     MAX_REDIRECT_HOPS,
     timedFetch,
     getRobots,

@@ -325,6 +325,34 @@
 
             <section>
               <h3 class="text-sm font-semibold text-zinc-500 uppercase tracking-wide mb-3">
+                HTTP-запити
+              </h3>
+              <label for="userAgentPreset" class="block font-medium mb-1">User-Agent</label>
+              <select
+                id="userAgentPreset"
+                class="w-full p-2 border border-zinc-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white"
+              ></select>
+              <p class="text-sm text-zinc-500 mt-1">
+                Браузери, пошукові боти або власний рядок. Використовується в усіх запитах і для
+                перевірки правил у robots.txt.
+              </p>
+              <div id="userAgentCustomFields" class="hidden mt-4">
+                <label for="userAgentCustom" class="block font-medium mb-1">Власний User-Agent</label>
+                <textarea
+                  id="userAgentCustom"
+                  rows="2"
+                  class="w-full p-2 border border-zinc-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none font-mono text-sm"
+                  placeholder="Mozilla/5.0 ..."
+                ></textarea>
+              </div>
+              <p class="text-xs text-zinc-400 mt-2">
+                Поточний:
+                <code id="userAgentPreview" class="block mt-1 text-zinc-500 break-all"></code>
+              </p>
+            </section>
+
+            <section>
+              <h3 class="text-sm font-semibold text-zinc-500 uppercase tracking-wide mb-3">
                 Серверна автентифікація
               </h3>
               <label for="authType" class="block font-medium mb-1">Тип</label>
@@ -453,6 +481,7 @@
     </div>
 
     <script src="../shared/hook-registry.js"></script>
+    <script src="../shared/user-agents.js"></script>
     <script src="./settings-store.js"></script>
     <script src="./settings.js"></script>
     <script src="./about.js"></script>

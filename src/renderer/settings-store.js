@@ -3,6 +3,8 @@ const DEFAULT_SETTINGS = {
     maxPages: 0,
     concurrency: 3,
     respectRobotsTxt: true,
+    userAgentPreset: 'spider',
+    userAgentCustom: '',
     authType: 'none',
     authUsername: '',
     authPassword: '',

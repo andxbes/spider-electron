@@ -454,6 +454,8 @@ async function beginScan(startUrl, { clearResults = true } = {}) {
     window.api.startSpider(startUrl, {
         useSitemap: settings.useSitemap,
         respectRobotsTxt: settings.respectRobotsTxt,
+        userAgentPreset: settings.userAgentPreset,
+        userAgentCustom: settings.userAgentCustom,
         maxPages: settings.maxPages,
         concurrency: settings.concurrency,
         authType: settings.authType,
