@@ -109,6 +109,39 @@ describe('ui-logic', () => {
         assert.equal(rows[0].status, 200);
     });
 
+    it('compareRowsImpl sorts by inCount using row metrics', () => {
+        const rows = [
+            { url: 'https://b' },
+            { url: 'https://a' },
+            { url: 'https://c' },
+        ];
+        const helpers = {
+            getRowMetrics: (data) => ({
+                inCount: data.url === 'https://a' ? 0 : (data.url === 'https://b' ? 3 : 1),
+                linkCount: 0,
+                internalCount: 0,
+                externalCount: 0,
+            }),
+        };
+        rows.sort((a, b) => compareRowsImpl(
+            a,
+            b,
+            { column: 'inCount', direction: 'asc' },
+            [],
+            helpers,
+        ));
+        assert.deepEqual(rows.map((row) => row.url), ['https://a', 'https://c', 'https://b']);
+    });
+
+    it('compareRowsImpl sorts by responseTimeMs', () => {
+        const rows = [
+            { url: 'https://slow', responseTimeMs: 900 },
+            { url: 'https://fast', responseTimeMs: 120 },
+        ];
+        rows.sort((a, b) => compareRowsImpl(a, b, { column: 'responseTimeMs', direction: 'asc' }, []));
+        assert.equal(rows[0].url, 'https://fast');
+    });
+
     it('duplicateCountBadge hidden for single occurrence', () => {
         assert.equal(duplicateCountBadge(1), '');
         assert.match(duplicateCountBadge(3), /×3/);

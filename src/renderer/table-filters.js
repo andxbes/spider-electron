@@ -22,6 +22,7 @@ function createTableFilters(deps) {
         onPersistWorkspace,
         isExternalLink,
         compareRowsImpl,
+        getRowMetrics,
         invalidateDuplicateCounts,
     } = deps;
 
@@ -149,7 +150,13 @@ function createTableFilters(deps) {
         const entries = getFilteredResults();
         const sortState = getSortState();
         if (sortState.column) {
-            entries.sort((a, b) => compareRowsImpl(a, b, sortState, scanStore.insertionOrder));
+            entries.sort((a, b) => compareRowsImpl(
+                a,
+                b,
+                sortState,
+                scanStore.insertionOrder,
+                { getRowMetrics },
+            ));
         } else {
             entries.sort((a, b) => (
                 scanStore.insertionOrder.indexOf(a.url) - scanStore.insertionOrder.indexOf(b.url)

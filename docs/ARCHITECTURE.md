@@ -1,6 +1,6 @@
 # Spider-Electron — внутрішня документація
 
-> Останнє оновлення: 2026-06-16 (іменування CSV/дампу: hostname + datetime; preconnect/dns-prefetch не збираються)  
+> Останнє оновлення: 2026-06-17 (сортування таблиці: `sortKey` колонок узгоджено з `compareRowsImpl`, метрики посилань через `getRowMetrics`)  
 > Короткий довідник для розробки та правок. Детальніше про підтримку — [DOC_MAINTENANCE.md](./DOC_MAINTENANCE.md).
 
 ## Що це
@@ -89,7 +89,7 @@ tests/
 | `crawl-hooks.js` | Точки розширення збору; `emitSpiderResult` перед IPC |
 | `hook-registry.js` | Універсальний реєстр хуків (main + renderer) |
 | `preload.js` | Whitelist каналів IPC, `window.api` |
-| `ui-logic.js` | Фільтри, класифікація ресурсів, rel/meta, дублікати, сортування |
+| `ui-logic.js` | Фільтри, класифікація ресурсів, rel/meta, дублікати, сортування (`compareRowsImpl` — ключі як у `sortKey` колонок) |
 | `scan-store.js` | `Map` результатів, referrers, upsert з `ui:transformResult`; при повторному upsert збережені HTML-поля (title, meta, headings, OG) не затираються порожніми значеннями |
 | `ui-hooks.js` / `ui-defaults.js` | Колонки таблиці, рядки деталей, CSV — через хуки |
 | `table-filters.js` | Стан фільтрів таблиці, `getDisplayedResults`, прив'язка до DOM |

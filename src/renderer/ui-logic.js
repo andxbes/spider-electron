@@ -109,6 +109,19 @@ function statusSortValue(status) {
     return 5000;
 }
 
+function metaRobotsSortValue(data) {
+    const status = data.metaRobotsStatus || 'none';
+    if (status === 'none') return 0;
+    if (status === 'allowed') return 1;
+    return 2;
+}
+
+function robotsTxtSortValue(data) {
+    if (data.robotsAllowed === null && !data.robotsRule) return 0;
+    if (data.robotsAllowed !== false) return 1;
+    return 2;
+}
+
 function getUrlExtension(url) {
     try {
         const pathname = new URL(url).pathname;
@@ -994,11 +1007,14 @@ function getRowMetricsImpl(data, helpers = {}) {
     };
 }
 
-function compareRowsImpl(a, b, sortState = { column: null, direction: 'asc' }, insertionOrder = []) {
+function compareRowsImpl(a, b, sortState = { column: null, direction: 'asc' }, insertionOrder = [], helpers = {}) {
     const { column, direction } = sortState;
     const mul = direction === 'asc' ? 1 : -1;
-    const ma = getRowMetricsImpl(a);
-    const mb = getRowMetricsImpl(b);
+    const getMetrics = helpers.getRowMetrics
+        ? helpers.getRowMetrics
+        : (data) => getRowMetricsImpl(data, helpers);
+    const ma = getMetrics(a);
+    const mb = getMetrics(b);
 
     let va;
     let vb;
@@ -1019,9 +1035,18 @@ function compareRowsImpl(a, b, sortState = { column: null, direction: 'asc' }, i
             va = (a.contentType || '').toLowerCase();
             vb = (b.contentType || '').toLowerCase();
             break;
+        case 'responseTimeMs':
         case 'responseTime':
             va = a.responseTimeMs ?? -1;
             vb = b.responseTimeMs ?? -1;
+            break;
+        case 'metaRobots':
+            va = metaRobotsSortValue(a);
+            vb = metaRobotsSortValue(b);
+            break;
+        case 'robotsTxt':
+            va = robotsTxtSortValue(a);
+            vb = robotsTxtSortValue(b);
             break;
         case 'title':
             va = getPageTitle(a).toLowerCase();
@@ -1035,21 +1060,33 @@ function compareRowsImpl(a, b, sortState = { column: null, direction: 'asc' }, i
             va = (a.metaDescription || '').toLowerCase();
             vb = (b.metaDescription || '').toLowerCase();
             break;
+        case 'linkCount':
         case 'links':
             va = ma.linkCount;
             vb = mb.linkCount;
             break;
+        case 'inCount':
         case 'inlinks':
             va = ma.inCount;
             vb = mb.inCount;
             break;
+        case 'internalCount':
         case 'internalLinks':
             va = ma.internalCount;
             vb = mb.internalCount;
             break;
+        case 'externalCount':
         case 'externalLinks':
             va = ma.externalCount;
             vb = mb.externalCount;
+            break;
+        case 'ogTitle':
+            va = (a.ogTitle || '').toLowerCase();
+            vb = (b.ogTitle || '').toLowerCase();
+            break;
+        case 'ogImage':
+            va = (a.ogImage || '').toLowerCase();
+            vb = (b.ogImage || '').toLowerCase();
             break;
         default:
             va = insertionOrder.indexOf(a.url);

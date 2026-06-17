@@ -232,6 +232,7 @@ const tableFilters = createTableFilters({
     onPersistWorkspace: scheduleWorkspacePersist,
     isExternalLink,
     compareRowsImpl,
+    getRowMetrics,
     invalidateDuplicateCounts,
     onTableHeadRefresh: () => tableView.renderTableHead(),
 });
