@@ -241,10 +241,6 @@ function buildDefaultDetailRows(data, ctx) {
         ]);
     }
 
-    if (data.redirectUrl) {
-        rows.push(['Redirect URL', urlCellHtml(data.redirectUrl)]);
-    }
-
     return rows;
 }
 

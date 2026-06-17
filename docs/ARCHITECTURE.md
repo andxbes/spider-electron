@@ -1,6 +1,6 @@
 # Spider-Electron — внутрішня документація
 
-> Останнє оновлення: 2026-06-17 (сортування таблиці: `sortKey` колонок узгоджено з `compareRowsImpl`, метрики посилань через `getRowMetrics`)  
+> Останнє оновлення: 2026-06-17 (модуль redirect-chain: ланцюги редиректів, ліміт 20, колонка таблиці)  
 > Короткий довідник для розробки та правок. Детальніше про підтримку — [DOC_MAINTENANCE.md](./DOC_MAINTENANCE.md).
 
 ## Що це
@@ -153,12 +153,15 @@ uiHookRegistry.register(UI_HOOKS.TABLE_COLUMNS, (ctx, cols) => [
 | Плагін | Main | Renderer |
 |--------|------|----------|
 | `og-meta` | `src/main/plugins/og-meta.js` | `src/renderer/plugins/og-meta.js` |
+| `redirect-chain` | `src/shared/redirect-chain.js` + `src/main/plugins/redirect-chain.js` | `src/renderer/plugins/redirect-chain.js` |
 
 **Підключення main:** `src/main/plugins/index.js` → `require('./plugins')` у `spider-logic.js` (після `crawl-defaults`).
 
-**Підключення renderer:** `<script src="./plugins/og-meta.js">` у `index.html` (після `ui-defaults.js`).
+**Підключення renderer:** `<script src="../shared/redirect-chain.js">`, плагіни в `index.html` (після `ui-defaults.js`).
 
-**og-meta** збирає `og:title`, `og:description`, `og:image` через `crawl:extractPage`; додаткові поля з extractors потрапляють у `spider-result` через spread `pluginPageFields` у `crawl()`. UI: колонки «OG Title» / «OG Image», рядки в деталях, колонки CSV. Заголовки таблиці (`#pagesTableHead`) будуються динамічно з `ui:tableColumns` — плагіни додають колонки без правки `index.html`.
+**og-meta** збирає `og:title`, `og:description`, `og:image` через `crawl:extractPage`; додаткові поля з extractors потрапляють у `spider-result` через spread `pluginPageFields` у `crawl()`. UI: колонки «OG Title» / «OG Image», рядки в деталях, колонки CSV.
+
+**redirect-chain** (`src/shared/redirect-chain.js`): відстеження ланцюгів редиректів під час `crawl` / `probe`, ліміт **20** переходів (`MAX_REDIRECT_HOPS`), виявлення циклів (перше повторення URL). Метадані на **початковому** URL: `redirectHopCount`, `redirectFinalUrl`, `redirectChain`, `redirectInfinite`, `redirectLoopStartUrl`. UI: колонка «Редирект» (жовтий — 2+ переходи, червоний — цикл/∞), деталі з кінцевим URL і ланцюгом, колонки CSV.
 
 Новий плагін:
 1. `src/main/plugins/my-plugin.js` + рядок у `plugins/index.js`
@@ -195,7 +198,7 @@ Renderer
 1. Skip, якщо URL вже в `visitedUrls` або ліміт досягнуто.
 2. Перевірка **robots.txt** (внутрішні URL) — якщо `Disallow`, HTTP-запит **не** виконується: ні `crawl`, ні `probe`; `status: 0`. Зовнішні URL перевіряються по HTTP навіть при забороні в robots.txt їхнього хоста.
 3. `fetch` з timeout 5s, `redirect: 'manual'`, User-Agent `MyElectronSpider/1.0`.
-4. **3xx** — фіксація `redirectUrl`, enqueue цілі (лише той самий `hostname`); ціль redirect теж перевіряється robots.txt перед fetch.
+4. **3xx** — фіксація `redirectUrl`, ланцюг до **20** переходів (`redirect-chain.js`); метадані на стартовому URL; при циклі або перевищенні ліміту — `redirectInfinite`. Enqueue цілі (лише той самий `hostname`); ціль redirect теж перевіряється robots.txt перед fetch.
 5. **4xx/5xx** — `status` = код відповіді, `title` порожній.
 6. **200** — cheerio: title, meta description, canonical, headings, link count → `spider-result`.
 7. Якщо `<meta name="robots" content="nofollow">` — не додає нові посилання.
@@ -260,6 +263,11 @@ Renderer
   metaCanonical?: string,
   headings?: [{ level: number, text: string }],
   redirectUrl?: string,
+  redirectHopCount?: number,
+  redirectFinalUrl?: string,
+  redirectInfinite?: boolean,
+  redirectChain?: string[],
+  redirectLoopStartUrl?: string,
   rel?: string,
   relFollowAllowed?: boolean | null,
   relIndexAllowed?: boolean | null,

@@ -4,6 +4,7 @@ const {
     resolveRedirectTarget,
     getContentType,
 } = require('../shared/url-utils');
+const { createRedirectChainTracker } = require('../shared/redirect-chain');
 const { isCrawlableLink } = require('./link-collector');
 const {
     emitSpiderResult,
@@ -112,18 +113,40 @@ async function probeDiscoveredLink(url, referrer, link, browserWindow) {
         let timed = await timedFetch(currentUrl);
         let response = timed.response;
         let responseTimeMs = timed.getElapsedMs();
-        let hop = 0;
+        const redirectTracker = createRedirectChainTracker(url, MAX_REDIRECT_HOPS);
 
-        while (isRedirectStatus(response.status) && hop < MAX_REDIRECT_HOPS) {
+        while (isRedirectStatus(response.status) && redirectTracker.canFollow()) {
             const redirectUrl = resolveRedirectTarget(currentUrl, response.headers.get('location'));
             if (!redirectUrl || redirectUrl === currentUrl) {
+                if (redirectUrl === currentUrl) {
+                    redirectTracker.markInfinite(currentUrl);
+                }
                 break;
             }
+            if (redirectTracker.chainUrls.includes(redirectUrl)) {
+                redirectTracker.recordHop({
+                    from: currentUrl,
+                    to: redirectUrl,
+                    status: response.status,
+                    responseTimeMs,
+                });
+                redirectTracker.markInfinite(redirectUrl);
+                break;
+            }
+            redirectTracker.recordHop({
+                from: currentUrl,
+                to: redirectUrl,
+                status: response.status,
+                responseTimeMs,
+            });
             currentUrl = redirectUrl;
-            hop++;
             timed = await timedFetch(currentUrl);
             response = timed.response;
             responseTimeMs = timed.getElapsedMs();
+        }
+
+        if (isRedirectStatus(response.status) && !redirectTracker.infinite) {
+            redirectTracker.markInfinite();
         }
 
         const { parser, text } = await getRobots(new URL(currentUrl));
@@ -136,6 +159,7 @@ async function probeDiscoveredLink(url, referrer, link, browserWindow) {
                 contentType: getContentType(response),
                 responseTimeMs,
                 redirectUrl: currentUrl !== url ? currentUrl : undefined,
+                ...redirectTracker.toFields(),
             }),
             getXRobotsTag(response) || null
         ));

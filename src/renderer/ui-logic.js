@@ -1,5 +1,12 @@
 /* eslint-disable no-redeclare */
 (function initUiLogic(root) {
+if (typeof require !== 'undefined') {
+    try {
+        require('../shared/redirect-chain');
+    } catch {
+        // redirect-chain.js підключається окремим <script> у renderer
+    }
+}
 const OUTLINK_KIND_LABELS = {
     html: 'HTML',
     javascript: 'JavaScript',
@@ -1087,6 +1094,10 @@ function compareRowsImpl(a, b, sortState = { column: null, direction: 'asc' }, i
         case 'ogImage':
             va = (a.ogImage || '').toLowerCase();
             vb = (b.ogImage || '').toLowerCase();
+            break;
+        case 'redirectHopCount':
+            va = redirectHopCountSortValue(a);
+            vb = redirectHopCountSortValue(b);
             break;
         default:
             va = insertionOrder.indexOf(a.url);

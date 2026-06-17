@@ -12,7 +12,7 @@ const {
 
 const USER_AGENT = 'MyElectronSpider/1.0 (+https://github.com/your-repo)';
 const FETCH_TIMEOUT_MS = 5000;
-const MAX_REDIRECT_HOPS = 10;
+const { MAX_REDIRECT_HOPS } = require('../shared/redirect-chain');
 
 let fetchImpl = undiciFetch;
 

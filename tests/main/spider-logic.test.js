@@ -194,9 +194,14 @@ describe('spider-logic', () => {
 
         await crawl('https://example.com/old', 'N/A', win);
         const results = win._events.filter((e) => e.channel === 'spider-result');
-        assert.equal(results.length, 2);
-        assert.equal(results[0].payload.status, 301);
-        assert.equal(results[1].payload.title, 'New');
+        assert.equal(results.length, 3);
+        const oldRedirect = results.find((e) => (
+            e.payload.url === 'https://example.com/old' && e.payload.redirectHopCount === 1
+        ));
+        assert.ok(oldRedirect);
+        assert.equal(oldRedirect.payload.status, 301);
+        assert.equal(oldRedirect.payload.redirectFinalUrl, 'https://example.com/new');
+        assert.equal(results.find((e) => e.payload.title === 'New')?.payload.status, 200);
     });
 
     it('crawl skips robots-blocked URL with status 0 without fetch', async () => {

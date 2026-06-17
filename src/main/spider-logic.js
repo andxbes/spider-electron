@@ -22,6 +22,10 @@ const {
     isHtmlContent,
 } = require('../shared/url-utils');
 const {
+    createRedirectChainTracker,
+    MAX_REDIRECT_HOPS,
+} = require('../shared/redirect-chain');
+const {
     classifyOutlinkKind,
     parseAnchorRel,
     formatOutlinkTag,
@@ -63,7 +67,6 @@ const {
     USER_AGENT,
     ROBOTS_UA,
     FETCH_TIMEOUT_MS,
-    MAX_REDIRECT_HOPS,
     setFetchForTests,
     resetFetchForTests,
     fetchPage,
@@ -144,9 +147,23 @@ async function crawl(url, referrer, browserWindow) {
         let response = timed.response;
         let responseTimeMs = timed.getElapsedMs();
         let previousUrl = null;
-        let hop = 0;
+        const redirectTracker = createRedirectChainTracker(url, MAX_REDIRECT_HOPS);
 
-        while (isRedirectStatus(response.status) && hop < MAX_REDIRECT_HOPS) {
+        function emitRedirectChainSummary() {
+            if (redirectTracker.hopCount === 0 && !redirectTracker.infinite) {
+                return;
+            }
+            emitSpiderResult(browserWindow, buildResultWithIndexing(robots, robotsText, url, {
+                status: redirectTracker.firstHopStatus ?? response.status,
+                url,
+                title: '',
+                referrers,
+                responseTimeMs: redirectTracker.firstHopResponseTimeMs ?? responseTimeMs,
+                ...redirectTracker.toFields(),
+            }));
+        }
+
+        while (isRedirectStatus(response.status) && redirectTracker.canFollow()) {
             const redirectUrl = resolveRedirectTarget(currentUrl, response.headers.get('location'));
 
             emitSpiderResult(browserWindow, buildResultWithIndexing(robots, robotsText, currentUrl, {
@@ -159,30 +176,67 @@ async function crawl(url, referrer, browserWindow) {
             }));
 
             if (!redirectUrl) {
+                emitRedirectChainSummary();
                 return;
             }
 
             if (redirectUrl === currentUrl) {
+                redirectTracker.markInfinite(currentUrl);
+                emitRedirectChainSummary();
+                return;
+            }
+
+            if (redirectTracker.chainUrls.includes(redirectUrl)) {
+                redirectTracker.recordHop({
+                    from: currentUrl,
+                    to: redirectUrl,
+                    status: response.status,
+                    responseTimeMs,
+                });
+                redirectTracker.markInfinite(redirectUrl);
+                emitRedirectChainSummary();
                 return;
             }
 
             if (isSessionPaused(session)) {
+                redirectTracker.recordHop({
+                    from: currentUrl,
+                    to: redirectUrl,
+                    status: response.status,
+                    responseTimeMs,
+                });
+                emitRedirectChainSummary();
                 return;
             }
 
             try {
                 if (!isSameHost(redirectUrl, urlObject.hostname)) {
+                    redirectTracker.recordHop({
+                        from: currentUrl,
+                        to: redirectUrl,
+                        status: response.status,
+                        responseTimeMs,
+                    });
+                    emitRedirectChainSummary();
                     return;
                 }
             } catch {
+                emitRedirectChainSummary();
                 return;
             }
 
+            redirectTracker.recordHop({
+                from: currentUrl,
+                to: redirectUrl,
+                status: response.status,
+                responseTimeMs,
+            });
             previousUrl = currentUrl;
             currentUrl = redirectUrl;
-            hop++;
 
             if (visitedUrls.has(currentUrl)) {
+                redirectTracker.markInfinite(currentUrl);
+                emitRedirectChainSummary();
                 return;
             }
             visitedUrls.add(currentUrl);
@@ -197,6 +251,7 @@ async function crawl(url, referrer, browserWindow) {
                     currentUrl,
                     [referrerEntry(previousUrl)]
                 );
+                emitRedirectChainSummary();
                 return;
             }
 
@@ -206,6 +261,7 @@ async function crawl(url, referrer, browserWindow) {
         }
 
         if (isRedirectStatus(response.status)) {
+            redirectTracker.markInfinite();
             emitSpiderResult(browserWindow, buildResultWithIndexing(robots, robotsText, currentUrl, {
                 status: response.status,
                 url: currentUrl,
@@ -214,7 +270,12 @@ async function crawl(url, referrer, browserWindow) {
                 redirectUrl: resolveRedirectTarget(currentUrl, response.headers.get('location')),
                 responseTimeMs,
             }));
+            emitRedirectChainSummary();
             return;
+        }
+
+        if (redirectTracker.hopCount > 0) {
+            emitRedirectChainSummary();
         }
 
         const contentType = getContentType(response);
