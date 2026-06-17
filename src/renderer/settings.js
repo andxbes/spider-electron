@@ -3,9 +3,25 @@ function getSettingsFormElements(form) {
         useSitemapInput: form.querySelector('#useSitemap'),
         maxPagesInput: form.querySelector('#maxPages'),
         concurrencyInput: form.querySelector('#concurrency'),
+        authTypeInput: form.querySelector('#authType'),
+        authBasicFields: form.querySelector('#authBasicFields'),
+        authBearerFields: form.querySelector('#authBearerFields'),
+        authUsernameInput: form.querySelector('#authUsername'),
+        authPasswordInput: form.querySelector('#authPassword'),
+        authTokenInput: form.querySelector('#authToken'),
         saveStatus: form.querySelector('#saveStatus'),
         settingsPathHint: form.querySelector('#settingsPathHint'),
     };
+}
+
+function syncAuthFieldsVisibility(elements) {
+    const authType = elements.authTypeInput?.value || 'none';
+    if (elements.authBasicFields) {
+        elements.authBasicFields.classList.toggle('hidden', authType !== 'basic');
+    }
+    if (elements.authBearerFields) {
+        elements.authBearerFields.classList.toggle('hidden', authType !== 'bearer');
+    }
 }
 
 async function populateSettingsForm(form) {
@@ -16,6 +32,19 @@ async function populateSettingsForm(form) {
     elements.useSitemapInput.checked = loaded.useSitemap;
     elements.maxPagesInput.value = loaded.maxPages || '';
     elements.concurrencyInput.value = loaded.concurrency || 3;
+    if (elements.authTypeInput) {
+        elements.authTypeInput.value = loaded.authType || 'none';
+    }
+    if (elements.authUsernameInput) {
+        elements.authUsernameInput.value = loaded.authUsername || '';
+    }
+    if (elements.authPasswordInput) {
+        elements.authPasswordInput.value = loaded.authPassword || '';
+    }
+    if (elements.authTokenInput) {
+        elements.authTokenInput.value = loaded.authToken || '';
+    }
+    syncAuthFieldsVisibility(elements);
 
     if (elements.settingsPathHint && path) {
         elements.settingsPathHint.textContent = path;
@@ -25,12 +54,20 @@ async function populateSettingsForm(form) {
 function bindSettingsForm(form) {
     const elements = getSettingsFormElements(form);
 
+    elements.authTypeInput?.addEventListener('change', () => {
+        syncAuthFieldsVisibility(elements);
+    });
+
     form.addEventListener('submit', async (event) => {
         event.preventDefault();
         const { filePath } = await saveSettings({
             useSitemap: elements.useSitemapInput.checked,
             maxPages: elements.maxPagesInput.value,
             concurrency: elements.concurrencyInput.value,
+            authType: elements.authTypeInput?.value || 'none',
+            authUsername: elements.authUsernameInput?.value || '',
+            authPassword: elements.authPasswordInput?.value || '',
+            authToken: elements.authTokenInput?.value || '',
         });
         if (elements.settingsPathHint && filePath) {
             elements.settingsPathHint.textContent = filePath;

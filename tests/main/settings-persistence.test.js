@@ -40,13 +40,36 @@ describe('settings-persistence', () => {
     });
 
     it('saveSettings and loadSettings round-trip', async () => {
-        await settingsModule.saveSettings({ useSitemap: true, maxPages: 10, concurrency: 2 });
+        await settingsModule.saveSettings({
+            useSitemap: true,
+            maxPages: 10,
+            concurrency: 2,
+            authType: 'basic',
+            authUsername: 'admin',
+            authPassword: 'secret',
+            authToken: '',
+        });
         const loaded = await settingsModule.loadSettings();
         assert.deepEqual(loaded, {
             useSitemap: true,
             maxPages: 10,
             concurrency: 2,
+            authType: 'basic',
+            authUsername: 'admin',
+            authPassword: 'secret',
+            authToken: '',
         });
+    });
+
+    it('normalizeSettings normalizes auth fields', () => {
+        const normalized = settingsModule.normalizeSettings({
+            authType: 'invalid',
+            authUsername: '  user ',
+            authToken: ' token ',
+        });
+        assert.equal(normalized.authType, 'none');
+        assert.equal(normalized.authUsername, 'user');
+        assert.equal(normalized.authToken, 'token');
     });
 
     it('loadSettings returns defaults when file missing', async () => {

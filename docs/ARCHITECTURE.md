@@ -1,6 +1,6 @@
 # Spider-Electron — внутрішня документація
 
-> Останнє оновлення: 2026-06-17 (redirect-chain: приховування проміжних URL у таблиці)  
+> Останнє оновлення: 2026-06-17 (серверна автентифікація HTTP Basic / Bearer у налаштуваннях)  
 > Короткий довідник для розробки та правок. Детальніше про підтримку — [DOC_MAINTENANCE.md](./DOC_MAINTENANCE.md).
 
 ## Що це
@@ -22,7 +22,8 @@ src/
 │   ├── app-about.js       # Метадані застосунку (версія, автор)
 │   ├── spider-logic.js  # Оркестратор: crawl, startSpider (~620 рядків)
 │   ├── crawl-state.js   # Mutable state: visited, queues, session
-│   ├── crawl-network.js # Fetch, robots.txt, таймаути
+│   ├── crawl-network.js # Fetch, robots.txt, таймаути, auth-заголовки
+│   ├── http-auth.js       # HTTP Basic / Bearer для fetch
 │   ├── crawl-results.js # buildSpiderResult, meta robots parsing
 │   ├── crawl-referrers.js # referrersMap, add/merge referrers
 │   ├── crawl-queue.js   # html/media/probe черги, enqueue/dequeue
@@ -78,7 +79,8 @@ tests/
 | `main.js` | Electron lifecycle, IPC handlers |
 | `spider-logic.js` | Оркестратор: `crawl`, `startSpider`, re-export для тестів |
 | `crawl-state.js` | `visitedUrls`, черги, `scanSession`, `tryClaimUrl` |
-| `crawl-network.js` | `fetchPage`, `getRobots`, `getRobotsTxtFieldsForUrl` |
+| `crawl-network.js` | `fetchPage`, `getRobots`, auth-контекст скану (`setScanAuthContext`) |
+| `http-auth.js` | `getAuthHeadersForUrl` — Basic/Bearer лише для hostname скану |
 | `crawl-results.js` | `buildSpiderResult`, `parseMetaRobotsDirective`, indexing |
 | `crawl-referrers.js` | `referrersMap`, `addReferrer`, `getReferrersSnapshot` |
 | `crawl-queue.js` | `enqueueUrl`, `dequeueNextUrl`, `hasPendingWork`, media queue |
@@ -197,7 +199,7 @@ Renderer
 
 1. Skip, якщо URL вже в `visitedUrls` або ліміт досягнуто.
 2. Перевірка **robots.txt** (внутрішні URL) — якщо `Disallow`, HTTP-запит **не** виконується: ні `crawl`, ні `probe`; `status: 0`. Зовнішні URL перевіряються по HTTP навіть при забороні в robots.txt їхнього хоста.
-3. `fetch` з timeout 5s, `redirect: 'manual'`, User-Agent `MyElectronSpider/1.0`.
+3. `fetch` з timeout 5s, `redirect: 'manual'`, User-Agent `MyElectronSpider/1.0`; за наявності в налаштуваннях — `Authorization` (Basic або Bearer) **лише для URL з hostname скану** (`http-auth.js` + `setScanAuthContext` при `startSpider`).
 4. **3xx** — фіксація `redirectUrl`, ланцюг до **20** переходів (`redirect-chain.js`); метадані на стартовому URL; при циклі або перевищенні ліміту — `redirectInfinite`. Enqueue цілі (лише той самий `hostname`); ціль redirect теж перевіряється robots.txt перед fetch.
 5. **4xx/5xx** — `status` = код відповіді, `title` порожній.
 6. **200** — cheerio: title, meta description, canonical, headings, link count → `spider-result`.
@@ -222,10 +224,10 @@ Renderer
 
 | Напрямок | Канал | Payload |
 |----------|-------|---------|
-| R → M | `start-spider` | `{ startUrl, options: { useSitemap?, maxPages?, concurrency? } }` |
+| R → M | `start-spider` | `{ startUrl, options: { useSitemap?, maxPages?, concurrency?, authType?, authUsername?, authPassword?, authToken? } }` |
 | R → M | `spider-pause` / `spider-resume` / `spider-stop` | керування скануванням |
 | R → M | `shell:open-external` | відкрити URL у браузері |
-| R ↔ M | `settings:get` / `settings:save` | налаштування (файл у userData) |
+| R ↔ M | `settings:get` / `settings:save` | налаштування у `userData/settings.json` (див. нижче) |
 | R ↔ M | `app:getAbout` | `{ name, version, author, email }` — версія з `package.json` через `app.getVersion()` |
 | M → R | `about-show` | відкрити модальне «Про програму» (меню «Про програму») |
 | M → R | `spider-result` | один об'єкт посилання (завантажене) |
@@ -235,6 +237,22 @@ Renderer
 | M → R | `spider-end` | `message: string` |
 
 Нові канали — додати в `preload.js` (`validSendChannels` / `validReceiveChannels`) і в `contextBridge`.
+
+## Налаштування (`settings.json`)
+
+Зберігаються в `userData` через `settings-persistence.js`. Поля:
+
+| Поле | Тип | Опис |
+|------|-----|------|
+| `useSitemap` | boolean | Спочатку sitemap, потім обхід посилань |
+| `maxPages` | number | 0 = без ліміту |
+| `concurrency` | number | 1–50, паралельних `crawl()` |
+| `authType` | `'none'` \| `'basic'` \| `'bearer'` | Серверна автентифікація |
+| `authUsername` | string | Логін для Basic |
+| `authPassword` | string | Пароль для Basic (у файлі як є) |
+| `authToken` | string | Bearer-токен |
+
+При старті скану renderer передає ці поля в `start-spider`; main встановлює auth-контекст для hostname стартового URL. Зовнішні URL (probe) заголовок не отримують.
 
 ## Модель даних `spider-result`
 
@@ -357,6 +375,7 @@ npm run make:mac       # macOS zip (з Linux); dmg — лише збірка н�
   - `main/crawl-hooks` — extract, emit, filter links;
   - `main/spider-logic` — парсинг HTML, robots/meta, черга, crawl/startSpider (mock fetch);
   - `main/settings-persistence` — normalize/save/load (mock `electron.app`);
+  - `main/http-auth` — Basic/Bearer, обмеження за hostname;
   - `main/session-dump` — валідація дампу;
   - `renderer/ui-logic` — фільтри, класифікація, сортування, CSV preview;
   - `renderer/ui-hooks` — патерн розширення колонок;

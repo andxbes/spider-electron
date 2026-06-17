@@ -1,6 +1,7 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { app } = require('electron');
+const { AUTH_TYPES, normalizeAuthSettings } = require('./http-auth');
 
 const DEFAULT_CONCURRENCY = 3;
 const MAX_CONCURRENCY = 50;
@@ -9,6 +10,10 @@ const DEFAULT_SETTINGS = {
     useSitemap: false,
     maxPages: 0,
     concurrency: DEFAULT_CONCURRENCY,
+    authType: AUTH_TYPES.NONE,
+    authUsername: '',
+    authPassword: '',
+    authToken: '',
 };
 
 function getSettingsPath() {
@@ -24,6 +29,7 @@ function normalizeSettings(raw) {
             MAX_CONCURRENCY,
             Math.max(1, Number.isNaN(concurrency) ? DEFAULT_CONCURRENCY : concurrency)
         ),
+        ...normalizeAuthSettings(raw),
     };
 }
 

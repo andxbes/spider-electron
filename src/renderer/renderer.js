@@ -455,6 +455,10 @@ async function beginScan(startUrl, { clearResults = true } = {}) {
         useSitemap: settings.useSitemap,
         maxPages: settings.maxPages,
         concurrency: settings.concurrency,
+        authType: settings.authType,
+        authUsername: settings.authUsername,
+        authPassword: settings.authPassword,
+        authToken: settings.authToken,
     });
 }
 

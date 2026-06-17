@@ -70,6 +70,8 @@ const {
     FETCH_TIMEOUT_MS,
     setFetchForTests,
     resetFetchForTests,
+    setScanAuthContext,
+    clearScanAuthContext,
     fetchPage,
     timedFetch,
     getRobots,
@@ -77,6 +79,7 @@ const {
     sendRobotsBlockedResult,
     isInternalRobotsDisallowed,
 } = require('./crawl-network');
+const { normalizeAuthSettings } = require('./http-auth');
 const {
     FALLBACK_SITEMAP_PATHS,
     parseSitemapsFromRobotsTxt,
@@ -420,6 +423,7 @@ function completeScan(session, endMessage) {
     session.finished = true;
     if (getScanSession() === session) {
         clearScanSession();
+        clearScanAuthContext();
     }
 
     console.log(endMessage);
@@ -442,6 +446,11 @@ async function startSpider(startUrl, options, browserWindow) {
         MAX_CONCURRENCY,
         Math.max(1, parseInt(options?.concurrency, 10) || 1)
     );
+    const scanHostname = new URL(startUrl).hostname;
+    setScanAuthContext({
+        hostname: scanHostname,
+        ...normalizeAuthSettings(options),
+    });
 
     const session = {
         browserWindow,
@@ -622,6 +631,7 @@ function resetSpiderStateForTests() {
     clearReferrers();
     setMaxPagesToVisit(0);
     clearScanSession();
+    clearScanAuthContext();
 }
 
 module.exports = {

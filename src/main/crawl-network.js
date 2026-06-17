@@ -1,6 +1,7 @@
 const robotsParser = require('robots-parser');
 const { fetch: undiciFetch } = require('undici');
 const { normalizePageUrl, isSameHost } = require('../shared/url-utils');
+const { getAuthHeadersForUrl } = require('./http-auth');
 const { emitSpiderResult } = require('./crawl-hooks');
 const { robotsCache } = require('./crawl-state');
 const {
@@ -15,6 +16,19 @@ const FETCH_TIMEOUT_MS = 5000;
 const { MAX_REDIRECT_HOPS } = require('../shared/redirect-chain');
 
 let fetchImpl = undiciFetch;
+let scanAuthContext = null;
+
+function setScanAuthContext(context) {
+    scanAuthContext = context;
+}
+
+function clearScanAuthContext() {
+    scanAuthContext = null;
+}
+
+function getScanAuthContext() {
+    return scanAuthContext;
+}
 
 function setFetchForTests(fn) {
     fetchImpl = fn;
@@ -25,10 +39,13 @@ function resetFetchForTests() {
 }
 
 function fetchPage(url) {
+    const authHeaders = scanAuthContext
+        ? getAuthHeadersForUrl(url, scanAuthContext.hostname, scanAuthContext)
+        : {};
     return fetchImpl(url, {
         signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
         redirect: 'manual',
-        headers: { 'User-Agent': USER_AGENT },
+        headers: { 'User-Agent': USER_AGENT, ...authHeaders },
     });
 }
 
@@ -116,6 +133,9 @@ module.exports = {
     MAX_REDIRECT_HOPS,
     setFetchForTests,
     resetFetchForTests,
+    setScanAuthContext,
+    clearScanAuthContext,
+    getScanAuthContext,
     fetchPage,
     timedFetch,
     getRobots,
