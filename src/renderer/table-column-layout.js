@@ -102,7 +102,7 @@ function buildHeadCellHtml(col, sortState, savedWidths) {
         ? ` ${sortState.direction === 'asc' ? '▲' : '▼'}`
         : '';
     const activeClass = sortState.column === col.sortKey ? ' bg-zinc-200 text-zinc-800' : '';
-    return `<th data-col-id="${col.id}" style="width:${width}px" class="${col.thClass || 'sortable-th p-2 font-semibold cursor-pointer select-none hover:bg-zinc-200'}${activeClass} results-th" data-sort="${escapeHtml(col.sortKey)}" title="Сортувати">${escapeHtml(label)}${sortSuffix}${resizeHandle}</th>`;
+    return `<th data-col-id="${col.id}" style="width:${width}px" class="${col.thClass || 'sortable-th p-2 font-semibold cursor-pointer select-none hover:bg-zinc-200'}${activeClass} results-th" data-sort="${escapeHtml(col.sortKey)}" title="${escapeHtml(label)}">${escapeHtml(label)}${sortSuffix}${resizeHandle}</th>`;
 }
 
 function renderResultsTableHead(tableEl, headEl, columns, sortState) {

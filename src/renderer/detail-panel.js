@@ -78,11 +78,11 @@ function createDetailPanel(deps) {
         return `${captionHtml}<table class="w-full border-collapse">
         <thead class="bg-zinc-50 sticky top-0">
             <tr class="text-left text-zinc-500">
-                <th class="${sortThClass}${activeSortClass('url')}" data-sort="url" title="Сортувати">${linkTableSortIndicator('url', 'URL', linkTableSortState)}</th>
-                <th class="${sortThClass} min-w-[110px]${activeSortClass('tag')}" data-sort="tag" title="Сортувати">${linkTableSortIndicator('tag', 'Тег', linkTableSortState)}</th>
-                <th class="${sortThClass} min-w-[90px]${activeSortClass('rel')}" data-sort="rel" title="Сортувати">${linkTableSortIndicator('rel', 'rel', linkTableSortState)}</th>
-                <th class="${sortThClass} w-24${activeSortClass('follow')}" data-sort="follow" title="Сортувати">${linkTableSortIndicator('follow', 'Перехід', linkTableSortState)}</th>
-                <th class="${sortThClass} w-1/3${activeSortClass('text')}" data-sort="text" title="Сортувати">${linkTableSortIndicator('text', 'Текст посилання', linkTableSortState)}</th>
+                <th class="${sortThClass}${activeSortClass('url')}" data-sort="url" title="URL">${linkTableSortIndicator('url', 'URL', linkTableSortState)}</th>
+                <th class="${sortThClass} min-w-[110px]${activeSortClass('tag')}" data-sort="tag" title="Тег">${linkTableSortIndicator('tag', 'Тег', linkTableSortState)}</th>
+                <th class="${sortThClass} min-w-[90px]${activeSortClass('rel')}" data-sort="rel" title="rel">${linkTableSortIndicator('rel', 'rel', linkTableSortState)}</th>
+                <th class="${sortThClass} w-24${activeSortClass('follow')}" data-sort="follow" title="Перехід">${linkTableSortIndicator('follow', 'Перехід', linkTableSortState)}</th>
+                <th class="${sortThClass} w-1/3${activeSortClass('text')}" data-sort="text" title="Текст посилання">${linkTableSortIndicator('text', 'Текст посилання', linkTableSortState)}</th>
             </tr>
         </thead>
         <tbody>${rows}</tbody>
