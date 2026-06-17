@@ -24,6 +24,7 @@ const {
 const {
     createRedirectChainTracker,
     MAX_REDIRECT_HOPS,
+    redirectHopOnlyFields,
 } = require('../shared/redirect-chain');
 const {
     classifyOutlinkKind,
@@ -173,6 +174,7 @@ async function crawl(url, referrer, browserWindow) {
                 referrers: previousUrl === null ? referrers : [referrerEntry(previousUrl)],
                 redirectUrl: redirectUrl,
                 responseTimeMs,
+                ...redirectHopOnlyFields(url, currentUrl),
             }));
 
             if (!redirectUrl) {
@@ -269,6 +271,7 @@ async function crawl(url, referrer, browserWindow) {
                 referrers: previousUrl === null ? referrers : [referrerEntry(previousUrl)],
                 redirectUrl: resolveRedirectTarget(currentUrl, response.headers.get('location')),
                 responseTimeMs,
+                ...redirectHopOnlyFields(url, currentUrl),
             }));
             emitRedirectChainSummary();
             return;

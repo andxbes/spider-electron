@@ -89,4 +89,47 @@ describe('redirect-chain', () => {
         assert.equal(hasRedirectChainData({ redirectHopCount: 1 }), true);
         assert.equal(hasRedirectChainData({ redirectInfinite: true }), true);
     });
+
+    it('shouldShowInResultsTable hides redirect intermediates but keeps start and final', () => {
+        const entries = [
+            {
+                url: 'https://example.com/a',
+                status: 301,
+                redirectChain: ['https://example.com/a', 'https://example.com/b', 'https://example.com/c'],
+                redirectHopCount: 2,
+            },
+            {
+                url: 'https://example.com/b',
+                status: 301,
+                redirectHopOnly: true,
+            },
+            {
+                url: 'https://example.com/c',
+                status: 200,
+                fetched: true,
+            },
+        ];
+        const { shouldShowInResultsTable, isUrlRedirectIntermediate } = require('../../src/shared/redirect-chain');
+        assert.equal(isUrlRedirectIntermediate('https://example.com/b', entries), true);
+        assert.equal(shouldShowInResultsTable(entries[0], entries), true);
+        assert.equal(shouldShowInResultsTable(entries[1], entries), false);
+        assert.equal(shouldShowInResultsTable(entries[2], entries), true);
+    });
+
+    it('shouldShowInResultsTable keeps page that was both intermediate and crawled with 200', () => {
+        const entries = [
+            {
+                url: 'https://example.com/b',
+                status: 200,
+                fetched: true,
+                title: 'Page B',
+            },
+            {
+                url: 'https://example.com/a',
+                redirectChain: ['https://example.com/a', 'https://example.com/b', 'https://example.com/c'],
+            },
+        ];
+        const { shouldShowInResultsTable } = require('../../src/shared/redirect-chain');
+        assert.equal(shouldShowInResultsTable(entries[0], entries), true);
+    });
 });

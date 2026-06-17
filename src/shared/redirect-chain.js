@@ -131,6 +131,51 @@ function formatRedirectCellLabel(data) {
     return String(hops);
 }
 
+function isUrlRedirectIntermediate(url, allEntries = []) {
+    if (!url) {
+        return false;
+    }
+    const rows = Array.isArray(allEntries)
+        ? allEntries
+        : Array.from(allEntries?.values?.() || []);
+    for (const row of rows) {
+        const chain = row?.redirectChain;
+        if (!Array.isArray(chain) || chain.length < 3) {
+            continue;
+        }
+        const index = chain.indexOf(url);
+        if (index > 0 && index < chain.length - 1) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function shouldShowInResultsTable(data, allEntries = []) {
+    if (!data?.url) {
+        return false;
+    }
+    const status = data.status;
+    const isSuccessPage = data.fetched !== false
+        && typeof status === 'number'
+        && status >= 200
+        && status < 300;
+    if (isSuccessPage) {
+        return true;
+    }
+    if (data.redirectHopOnly) {
+        return false;
+    }
+    if (isUrlRedirectIntermediate(data.url, allEntries)) {
+        return false;
+    }
+    return true;
+}
+
+function redirectHopOnlyFields(startUrl, currentUrl) {
+    return startUrl !== currentUrl ? { redirectHopOnly: true } : {};
+}
+
 const exported = {
     MAX_REDIRECT_HOPS,
     createRedirectChainTracker,
@@ -140,10 +185,13 @@ const exported = {
     redirectHopCountSortValue,
     formatRedirectChainTooltip,
     formatRedirectCellLabel,
+    isUrlRedirectIntermediate,
+    shouldShowInResultsTable,
+    redirectHopOnlyFields,
 };
 
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = exported;
 }
-Object.assign(typeof globalThis !== 'undefined' ? globalThis : root, exported);
+Object.assign(root, exported);
 })(typeof globalThis !== 'undefined' ? globalThis : {});

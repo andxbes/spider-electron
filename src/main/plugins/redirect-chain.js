@@ -9,6 +9,7 @@ function withRedirectDefaults(fields) {
         redirectInfinite: false,
         redirectChain: [],
         redirectLoopStartUrl: '',
+        redirectHopOnly: false,
         ...fields,
     };
 }

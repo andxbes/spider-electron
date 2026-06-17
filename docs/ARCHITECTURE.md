@@ -1,6 +1,6 @@
 # Spider-Electron — внутрішня документація
 
-> Останнє оновлення: 2026-06-17 (модуль redirect-chain: ланцюги редиректів, ліміт 20, колонка таблиці)  
+> Останнє оновлення: 2026-06-17 (redirect-chain: приховування проміжних URL у таблиці)  
 > Короткий довідник для розробки та правок. Детальніше про підтримку — [DOC_MAINTENANCE.md](./DOC_MAINTENANCE.md).
 
 ## Що це
@@ -161,7 +161,7 @@ uiHookRegistry.register(UI_HOOKS.TABLE_COLUMNS, (ctx, cols) => [
 
 **og-meta** збирає `og:title`, `og:description`, `og:image` через `crawl:extractPage`; додаткові поля з extractors потрапляють у `spider-result` через spread `pluginPageFields` у `crawl()`. UI: колонки «OG Title» / «OG Image», рядки в деталях, колонки CSV.
 
-**redirect-chain** (`src/shared/redirect-chain.js`): відстеження ланцюгів редиректів під час `crawl` / `probe`, ліміт **20** переходів (`MAX_REDIRECT_HOPS`), виявлення циклів (перше повторення URL). Метадані на **початковому** URL: `redirectHopCount`, `redirectFinalUrl`, `redirectChain`, `redirectInfinite`, `redirectLoopStartUrl`. UI: колонка «Редирект» (жовтий — 2+ переходи, червоний — цикл/∞), деталі з кінцевим URL і ланцюгом, колонки CSV.
+**redirect-chain** (`src/shared/redirect-chain.js`): відстеження ланцюгів редиректів під час `crawl` / `probe`, ліміт **20** переходів (`MAX_REDIRECT_HOPS`), виявлення циклів (перше повторення URL). Метадані на **початковому** URL: `redirectHopCount`, `redirectFinalUrl`, `redirectChain`, `redirectInfinite`, `redirectLoopStartUrl`. Проміжні URL (`redirectHopOnly` / серединa `redirectChain`) **приховані** в основній таблиці; стартовий і кінцевий URL залишаються. UI: колонка «Редирект» (жовтий — 2+ переходи, червоний — цикл/∞), деталі з кінцевим URL і ланцюгом, колонки CSV.
 
 Новий плагін:
 1. `src/main/plugins/my-plugin.js` + рядок у `plugins/index.js`

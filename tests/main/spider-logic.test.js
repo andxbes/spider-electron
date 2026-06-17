@@ -201,7 +201,36 @@ describe('spider-logic', () => {
         assert.ok(oldRedirect);
         assert.equal(oldRedirect.payload.status, 301);
         assert.equal(oldRedirect.payload.redirectFinalUrl, 'https://example.com/new');
+        assert.equal(oldRedirect.payload.redirectHopOnly, false);
         assert.equal(results.find((e) => e.payload.title === 'New')?.payload.status, 200);
+    });
+
+    it('crawl marks redirect intermediates as redirectHopOnly', async () => {
+        const win = mockWindow();
+        setFetchForTests(async (url) => {
+            if (url.includes('robots.txt')) {
+                return mockResponse({ status: 404 });
+            }
+            if (url.endsWith('/hop1')) {
+                return mockResponse({ status: 302, headers: { location: '/hop2' } });
+            }
+            if (url.endsWith('/hop2')) {
+                return mockResponse({ status: 302, headers: { location: '/final' } });
+            }
+            return mockResponse({
+                status: 200,
+                headers: { 'content-type': 'text/html' },
+                body: '<html><head><title>Final</title></head></html>',
+            });
+        });
+
+        await crawl('https://example.com/hop1', 'N/A', win);
+        const hop2 = win._events.find((e) => e.payload.url === 'https://example.com/hop2');
+        assert.ok(hop2);
+        assert.equal(hop2.payload.redirectHopOnly, true);
+        const finalPage = win._events.find((e) => e.payload.title === 'Final');
+        assert.ok(finalPage);
+        assert.notEqual(finalPage.payload.redirectHopOnly, true);
     });
 
     it('crawl skips robots-blocked URL with status 0 without fetch', async () => {

@@ -22,6 +22,7 @@ function cloneResultEntry(data) {
         redirectInfinite: Boolean(data.redirectInfinite),
         redirectChain: Array.isArray(data.redirectChain) ? [...data.redirectChain] : [],
         redirectLoopStartUrl: data.redirectLoopStartUrl ?? '',
+        redirectHopOnly: Boolean(data.redirectHopOnly),
         external: Boolean(data.external),
         fetched: data.fetched ?? (data.status !== '' && data.status !== undefined && data.status !== null),
         kind: data.kind ?? '',

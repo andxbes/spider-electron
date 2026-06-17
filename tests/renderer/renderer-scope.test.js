@@ -90,6 +90,7 @@ function loadRendererScripts() {
     const sandbox = vm.createContext(ctx);
     const files = [
         path.join(sharedRoot, 'hook-registry.js'),
+        path.join(sharedRoot, 'redirect-chain.js'),
         path.join(root, 'ui-logic.js'),
         path.join(root, 'ui-hooks.js'),
         path.join(root, 'ui-defaults.js'),

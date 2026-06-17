@@ -2,6 +2,13 @@
  * Table filter state, DOM sync, and filtered result queries.
  */
 (function initTableFilters(root) {
+if (typeof require !== 'undefined') {
+    try {
+        require('../shared/redirect-chain');
+    } catch {
+        // redirect-chain.js підключається окремим <script> у renderer
+    }
+}
 const RESOURCE_TYPE_FILTER_OPTIONS = [
     { value: 'all', label: 'Усі' },
     { value: 'html', label: 'HTML' },
@@ -124,11 +131,12 @@ function createTableFilters(deps) {
     }
 
     function getTableEntries() {
-        const all = getScannableTablePool();
+        const pool = getScannableTablePool();
+        const visible = pool.filter((data) => shouldShowInResultsTable(data, pool));
         if (activeContentFilter === 'all') {
-            return all;
+            return visible;
         }
-        return all.filter((data) => matchesResourceTypeFilterImpl(data, activeContentFilter));
+        return visible.filter((data) => matchesResourceTypeFilterImpl(data, activeContentFilter));
     }
 
     function getFilteredResults() {
