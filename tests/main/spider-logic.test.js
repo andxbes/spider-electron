@@ -260,6 +260,35 @@ describe('spider-logic', () => {
         assert.equal(getQueueLength(), 0);
     });
 
+    it('crawl fetches robots-blocked URL when respectRobotsTxt is disabled', async () => {
+        const { setRespectRobotsTxt } = require('../../src/main/crawl-state');
+        setRespectRobotsTxt(false);
+        const win = mockWindow();
+        let pageFetchCount = 0;
+        setFetchForTests(async (url) => {
+            if (url.includes('robots.txt')) {
+                return mockResponse({
+                    status: 200,
+                    body: 'User-agent: MyElectronSpider/1.0\nDisallow: /secret\n',
+                });
+            }
+            pageFetchCount += 1;
+            return mockResponse({
+                status: 200,
+                headers: { 'content-type': 'text/html' },
+                body: '<html><head><title>Hidden Title</title></head></html>',
+            });
+        });
+
+        await crawl('https://example.com/secret', 'N/A', win);
+        const result = win._events.find((e) => e.channel === 'spider-result');
+        assert.equal(pageFetchCount, 1);
+        assert.equal(result.payload.status, 200);
+        assert.equal(result.payload.title, 'Hidden Title');
+        assert.equal(result.payload.robotsAllowed, false);
+        assert.match(result.payload.robotsRule, /Disallow/i);
+    });
+
     it('fetchSitemapPageUrls parses urlset', async () => {
         setFetchForTests(async () => mockResponse({
             status: 200,
@@ -429,6 +458,102 @@ describe('spider-logic', () => {
         assert.equal(result.payload.fetched, true);
         assert.equal(result.payload.relLabel, 'nofollow');
         assert.notEqual(result.payload.robotsAllowed, undefined);
+    });
+
+    it('startSpider honors respectRobotsTxt false after runtime reset', async () => {
+        const win = mockWindow();
+        setFetchForTests(async (url) => {
+            if (url.includes('robots.txt')) {
+                return mockResponse({
+                    status: 200,
+                    body: 'User-agent: MyElectronSpider/1.0\nDisallow: /\n',
+                });
+            }
+            return mockResponse({
+                status: 200,
+                headers: { 'content-type': 'text/html' },
+                body: '<html><head><title>Root</title></head></html>',
+            });
+        });
+
+        await startSpider('https://example.com/', {
+            maxPages: 1,
+            concurrency: 1,
+            respectRobotsTxt: false,
+        }, win);
+
+        const deadline = Date.now() + 3000;
+        while (Date.now() < deadline) {
+            if (!getScanSession()) {
+                break;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+
+        const home = win._events.find((e) => (
+            e.channel === 'spider-result'
+            && e.payload.url === 'https://example.com/'
+            && e.payload.title === 'Root'
+        ));
+        assert.ok(home);
+        assert.equal(home.payload.robotsAllowed, false);
+    });
+
+    it('startSpider sends basic auth for scan hostname', async () => {
+        const win = mockWindow();
+        const authHeaders = [];
+        setFetchForTests(async (url, options) => {
+            if (url.includes('example.com') && !url.includes('other.com')) {
+                authHeaders.push(options?.headers?.Authorization);
+            }
+            if (url.includes('robots.txt')) {
+                return mockResponse({ status: 404 });
+            }
+            return mockResponse({
+                status: 200,
+                headers: { 'content-type': 'text/html' },
+                body: '<html><head><title>Root</title></head></html>',
+            });
+        });
+
+        await startSpider('https://example.com/', {
+            maxPages: 1,
+            concurrency: 1,
+            authType: 'basic',
+            authUsername: 'admin',
+            authPassword: 'secret',
+        }, win);
+
+        const deadline = Date.now() + 3000;
+        while (Date.now() < deadline) {
+            if (!getScanSession()) {
+                break;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+
+        const expected = `Basic ${Buffer.from('admin:secret').toString('base64')}`;
+        assert.ok(authHeaders.some((header) => header === expected));
+    });
+
+    it('fetchSitemapPageUrls follows same-host redirect', async () => {
+        setFetchForTests(async (url) => {
+            if (url.endsWith('/sitemap.xml')) {
+                return mockResponse({ status: 301, headers: { location: '/sitemap_real.xml' } });
+            }
+            if (url.endsWith('/sitemap_real.xml')) {
+                return mockResponse({
+                    status: 200,
+                    body: `<?xml version="1.0"?>
+                        <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+                            <url><loc>https://example.com/a</loc></url>
+                        </urlset>`,
+                });
+            }
+            return mockResponse({ status: 404 });
+        });
+        const urls = await fetchSitemapPageUrls('https://example.com/sitemap.xml', 'example.com', new Set());
+        assert.deepEqual(urls, ['https://example.com/a']);
     });
 
     it('startSpider completes small site scan', async () => {

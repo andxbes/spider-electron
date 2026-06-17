@@ -54,6 +54,7 @@ describe('settings-persistence', () => {
             useSitemap: true,
             maxPages: 10,
             concurrency: 2,
+            respectRobotsTxt: true,
             authType: 'basic',
             authUsername: 'admin',
             authPassword: 'secret',

@@ -1,6 +1,7 @@
 function getSettingsFormElements(form) {
     return {
         useSitemapInput: form.querySelector('#useSitemap'),
+        respectRobotsTxtInput: form.querySelector('#respectRobotsTxt'),
         maxPagesInput: form.querySelector('#maxPages'),
         concurrencyInput: form.querySelector('#concurrency'),
         authTypeInput: form.querySelector('#authType'),
@@ -30,6 +31,9 @@ async function populateSettingsForm(form) {
     const path = await getSettingsFilePath();
 
     elements.useSitemapInput.checked = loaded.useSitemap;
+    if (elements.respectRobotsTxtInput) {
+        elements.respectRobotsTxtInput.checked = loaded.respectRobotsTxt !== false;
+    }
     elements.maxPagesInput.value = loaded.maxPages || '';
     elements.concurrencyInput.value = loaded.concurrency || 3;
     if (elements.authTypeInput) {
@@ -62,6 +66,7 @@ function bindSettingsForm(form) {
         event.preventDefault();
         const { filePath } = await saveSettings({
             useSitemap: elements.useSitemapInput.checked,
+            respectRobotsTxt: elements.respectRobotsTxtInput?.checked !== false,
             maxPages: elements.maxPagesInput.value,
             concurrency: elements.concurrencyInput.value,
             authType: elements.authTypeInput?.value || 'none',

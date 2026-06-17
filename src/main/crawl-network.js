@@ -3,7 +3,7 @@ const { fetch: undiciFetch } = require('undici');
 const { normalizePageUrl, isSameHost } = require('../shared/url-utils');
 const { getAuthHeadersForUrl } = require('./http-auth');
 const { emitSpiderResult } = require('./crawl-hooks');
-const { robotsCache } = require('./crawl-state');
+const { robotsCache, getRespectRobotsTxt } = require('./crawl-state');
 const {
     ROBOTS_UA,
     buildSpiderResult,
@@ -98,7 +98,17 @@ async function getRobotsTxtFieldsForUrl(url) {
     }
 }
 
+function shouldBlockByRobotsTxt(parser, url) {
+    if (!getRespectRobotsTxt()) {
+        return false;
+    }
+    return !parser.isAllowed(url, ROBOTS_UA);
+}
+
 async function isInternalRobotsDisallowed(url, allowedHostname) {
+    if (!getRespectRobotsTxt()) {
+        return false;
+    }
     try {
         const absoluteUrl = normalizePageUrl(url);
         if (!isSameHost(absoluteUrl, allowedHostname)) {
@@ -141,5 +151,6 @@ module.exports = {
     getRobots,
     getRobotsTxtFieldsForUrl,
     isInternalRobotsDisallowed,
+    shouldBlockByRobotsTxt,
     sendRobotsBlockedResult,
 };

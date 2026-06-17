@@ -9,6 +9,15 @@ let probeQueue = [];
 let maxPagesToVisit = 0;
 const robotsCache = new Map();
 let scanSession = null;
+let respectRobotsTxt = true;
+
+function setRespectRobotsTxt(value) {
+    respectRobotsTxt = value !== false;
+}
+
+function getRespectRobotsTxt() {
+    return respectRobotsTxt;
+}
 
 function isPageLimitReached() {
     return maxPagesToVisit > 0 && visitedUrls.size >= maxPagesToVisit;
@@ -82,4 +91,6 @@ module.exports = {
     getScanSession,
     setScanSession,
     clearScanSession,
+    setRespectRobotsTxt,
+    getRespectRobotsTxt,
 };

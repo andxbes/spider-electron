@@ -1,5 +1,5 @@
 const cheerio = require('cheerio');
-const { normalizePageUrl, isSameHost } = require('../shared/url-utils');
+const { normalizePageUrl, isSameHost, isRedirectStatus, resolveRedirectTarget } = require('../shared/url-utils');
 const { fetchPage } = require('./crawl-network');
 const { enqueueUrl } = require('./crawl-queue');
 const { isInternalRobotsDisallowed } = require('./crawl-network');
@@ -17,6 +17,30 @@ function parseSitemapsFromRobotsTxt(text) {
     return sitemaps;
 }
 
+async function fetchSitemapResponse(sitemapUrl, allowedHostname, maxHops = 5) {
+    let currentUrl = sitemapUrl;
+    for (let hop = 0; hop <= maxHops; hop += 1) {
+        const response = await fetchPage(currentUrl);
+        if (!isRedirectStatus(response.status)) {
+            return { response, finalUrl: currentUrl };
+        }
+        const nextUrl = resolveRedirectTarget(currentUrl, response.headers.get('location'));
+        if (!nextUrl) {
+            return { response, finalUrl: currentUrl };
+        }
+        try {
+            if (!isSameHost(nextUrl, allowedHostname)) {
+                return { response, finalUrl: currentUrl };
+            }
+        } catch {
+            return { response, finalUrl: currentUrl };
+        }
+        currentUrl = nextUrl;
+    }
+    const response = await fetchPage(currentUrl);
+    return { response, finalUrl: currentUrl };
+}
+
 async function fetchSitemapPageUrls(sitemapUrl, allowedHostname, fetchedSitemaps) {
     if (fetchedSitemaps.has(sitemapUrl)) {
         return [];
@@ -24,9 +48,9 @@ async function fetchSitemapPageUrls(sitemapUrl, allowedHostname, fetchedSitemaps
     fetchedSitemaps.add(sitemapUrl);
 
     try {
-        const response = await fetchPage(sitemapUrl);
+        const { response, finalUrl } = await fetchSitemapResponse(sitemapUrl, allowedHostname);
         if (!response.ok) {
-            console.log(`Sitemap недоступний (${response.status}): ${sitemapUrl}`);
+            console.log(`Sitemap недоступний (${response.status}): ${finalUrl}`);
             return [];
         }
 

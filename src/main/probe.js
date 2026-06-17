@@ -15,6 +15,7 @@ const {
     visitedUrls,
     reportedStubUrls,
     probedDiscoveredUrls,
+    getRespectRobotsTxt,
 } = require('./crawl-state');
 const {
     buildSpiderResult,
@@ -37,6 +38,7 @@ const {
     getRobots,
     getRobotsTxtFieldsForUrl,
     sendRobotsBlockedResult,
+    shouldBlockByRobotsTxt,
 } = require('./crawl-network');
 
 function buildDiscoveredLinkResult(link) {
@@ -93,7 +95,7 @@ async function probeDiscoveredLink(url, referrer, link, browserWindow) {
     if (!link.external) {
         const urlObject = new URL(url);
         const { parser, text } = await getRobots(urlObject);
-        if (!parser.isAllowed(url, ROBOTS_UA)) {
+        if (shouldBlockByRobotsTxt(parser, url)) {
             sendRobotsBlockedResult(
                 browserWindow,
                 parser,
@@ -192,7 +194,9 @@ async function reportDiscoveredLinks(browserWindow, links, sourceUrl, allowedHos
         const robotsFields = link.external
             ? { robotsAllowed: null, robotsRule: '' }
             : await getRobotsTxtFieldsForUrl(link.url);
-        const internalRobotsBlocked = !link.external && robotsFields.robotsAllowed === false;
+        const internalRobotsBlocked = getRespectRobotsTxt()
+            && !link.external
+            && robotsFields.robotsAllowed === false;
 
         if (follow && !link.external && isCrawlableLink(link)) {
             if (internalRobotsBlocked) {

@@ -46,6 +46,7 @@ const {
     getMaxPagesToVisit,
     getHtmlQueue,
     getMediaQueue,
+    setRespectRobotsTxt,
 } = require('./crawl-state');
 const {
     buildSpiderResult,
@@ -78,6 +79,7 @@ const {
     getRobotsTxtFieldsForUrl,
     sendRobotsBlockedResult,
     isInternalRobotsDisallowed,
+    shouldBlockByRobotsTxt,
 } = require('./crawl-network');
 const { normalizeAuthSettings } = require('./http-auth');
 const {
@@ -141,7 +143,7 @@ async function crawl(url, referrer, browserWindow) {
     try {
         const referrers = getReferrersSnapshot(url, referrer);
 
-        if (!robots.isAllowed(url, ROBOTS_UA)) {
+        if (shouldBlockByRobotsTxt(robots, url)) {
             sendRobotsBlockedResult(browserWindow, robots, robotsText, url, referrers);
             return;
         }
@@ -248,7 +250,7 @@ async function crawl(url, referrer, browserWindow) {
 
             addReferrer(currentUrl, previousUrl);
 
-            if (!robots.isAllowed(currentUrl, ROBOTS_UA)) {
+            if (shouldBlockByRobotsTxt(robots, currentUrl)) {
                 sendRobotsBlockedResult(
                     browserWindow,
                     robots,
@@ -447,10 +449,6 @@ async function startSpider(startUrl, options, browserWindow) {
         Math.max(1, parseInt(options?.concurrency, 10) || 1)
     );
     const scanHostname = new URL(startUrl).hostname;
-    setScanAuthContext({
-        hostname: scanHostname,
-        ...normalizeAuthSettings(options),
-    });
 
     const session = {
         browserWindow,
@@ -605,6 +603,11 @@ async function startSpider(startUrl, options, browserWindow) {
 
     clearCrawlRuntime();
     clearReferrers();
+    setScanAuthContext({
+        hostname: scanHostname,
+        ...normalizeAuthSettings(options),
+    });
+    setRespectRobotsTxt(options?.respectRobotsTxt !== false);
 
     if (useSitemap) {
         const sitemapPageCount = await seedQueueFromSitemaps(startUrl, browserWindow, getRobots);
@@ -632,6 +635,7 @@ function resetSpiderStateForTests() {
     setMaxPagesToVisit(0);
     clearScanSession();
     clearScanAuthContext();
+    setRespectRobotsTxt(true);
 }
 
 module.exports = {

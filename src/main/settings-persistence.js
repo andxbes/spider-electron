@@ -10,6 +10,7 @@ const DEFAULT_SETTINGS = {
     useSitemap: false,
     maxPages: 0,
     concurrency: DEFAULT_CONCURRENCY,
+    respectRobotsTxt: true,
     authType: AUTH_TYPES.NONE,
     authUsername: '',
     authPassword: '',
@@ -29,6 +30,7 @@ function normalizeSettings(raw) {
             MAX_CONCURRENCY,
             Math.max(1, Number.isNaN(concurrency) ? DEFAULT_CONCURRENCY : concurrency)
         ),
+        respectRobotsTxt: raw?.respectRobotsTxt !== false,
         ...normalizeAuthSettings(raw),
     };
 }

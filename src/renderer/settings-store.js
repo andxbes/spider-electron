@@ -2,6 +2,7 @@ const DEFAULT_SETTINGS = {
     useSitemap: false,
     maxPages: 0,
     concurrency: 3,
+    respectRobotsTxt: true,
     authType: 'none',
     authUsername: '',
     authPassword: '',

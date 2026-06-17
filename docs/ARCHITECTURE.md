@@ -1,6 +1,6 @@
 # Spider-Electron — внутрішня документація
 
-> Останнє оновлення: 2026-06-17 (серверна автентифікація HTTP Basic / Bearer у налаштуваннях)  
+> Останнє оновлення: 2026-06-17 (опція respectRobotsTxt — обхід без дотримання Disallow, мета robots.txt лишається)  
 > Короткий довідник для розробки та правок. Детальніше про підтримку — [DOC_MAINTENANCE.md](./DOC_MAINTENANCE.md).
 
 ## Що це
@@ -198,7 +198,7 @@ Renderer
 **На кожній сторінці (`crawl`):**
 
 1. Skip, якщо URL вже в `visitedUrls` або ліміт досягнуто.
-2. Перевірка **robots.txt** (внутрішні URL) — якщо `Disallow`, HTTP-запит **не** виконується: ні `crawl`, ні `probe`; `status: 0`. Зовнішні URL перевіряються по HTTP навіть при забороні в robots.txt їхнього хоста.
+2. Перевірка **robots.txt** (внутрішні URL) — якщо `Disallow` і увімкнено `respectRobotsTxt` (за замовч.), HTTP-запит **не** виконується: ні `crawl`, ні `probe`; `status: 0`. Якщо `respectRobotsTxt: false` — сторінки скануються, але `robotsAllowed` / `robotsRule` у результаті лишаються. Зовнішні URL перевіряються по HTTP навіть при забороні в robots.txt їхнього хоста.
 3. `fetch` з timeout 5s, `redirect: 'manual'`, User-Agent `MyElectronSpider/1.0`; за наявності в налаштуваннях — `Authorization` (Basic або Bearer) **лише для URL з hostname скану** (`http-auth.js` + `setScanAuthContext` при `startSpider`).
 4. **3xx** — фіксація `redirectUrl`, ланцюг до **20** переходів (`redirect-chain.js`); метадані на стартовому URL; при циклі або перевищенні ліміту — `redirectInfinite`. Enqueue цілі (лише той самий `hostname`); ціль redirect теж перевіряється robots.txt перед fetch.
 5. **4xx/5xx** — `status` = код відповіді, `title` порожній.
@@ -224,7 +224,7 @@ Renderer
 
 | Напрямок | Канал | Payload |
 |----------|-------|---------|
-| R → M | `start-spider` | `{ startUrl, options: { useSitemap?, maxPages?, concurrency?, authType?, authUsername?, authPassword?, authToken? } }` |
+| R → M | `start-spider` | `{ startUrl, options: { useSitemap?, respectRobotsTxt?, maxPages?, concurrency?, authType?, authUsername?, authPassword?, authToken? } }` |
 | R → M | `spider-pause` / `spider-resume` / `spider-stop` | керування скануванням |
 | R → M | `shell:open-external` | відкрити URL у браузері |
 | R ↔ M | `settings:get` / `settings:save` | налаштування у `userData/settings.json` (див. нижче) |
@@ -245,6 +245,7 @@ Renderer
 | Поле | Тип | Опис |
 |------|-----|------|
 | `useSitemap` | boolean | Спочатку sitemap, потім обхід посилань |
+| `respectRobotsTxt` | boolean | `true` (за замовч.) — не сканувати URL з Disallow; `false` — сканувати, але показувати правило в UI |
 | `maxPages` | number | 0 = без ліміту |
 | `concurrency` | number | 1–50, паралельних `crawl()` |
 | `authType` | `'none'` \| `'basic'` \| `'bearer'` | Серверна автентифікація |
