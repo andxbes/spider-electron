@@ -55,6 +55,8 @@ function mockWindow() {
 }
 
 describe('spider-logic', () => {
+    const fastScan = { requestDelayMs: 0 };
+
     beforeEach(() => {
         resetSpiderStateForTests();
         resetFetchForTests();
@@ -477,6 +479,7 @@ describe('spider-logic', () => {
         });
 
         await startSpider('https://example.com/', {
+            ...fastScan,
             maxPages: 1,
             concurrency: 1,
             respectRobotsTxt: false,
@@ -517,6 +520,7 @@ describe('spider-logic', () => {
         });
 
         await startSpider('https://example.com/', {
+            ...fastScan,
             maxPages: 1,
             concurrency: 1,
             authType: 'basic',
@@ -572,6 +576,7 @@ describe('spider-logic', () => {
         });
 
         await startSpider('https://example.com/', {
+            ...fastScan,
             maxPages: 1,
             concurrency: 1,
             userAgentPreset: 'custom',
@@ -609,7 +614,7 @@ describe('spider-logic', () => {
             });
         });
 
-        await startSpider('https://example.com/', { maxPages: 2, concurrency: 1 }, win);
+        await startSpider('https://example.com/', { ...fastScan, maxPages: 2, concurrency: 1 }, win);
 
         const deadline = Date.now() + 3000;
         while (Date.now() < deadline) {

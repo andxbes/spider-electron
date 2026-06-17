@@ -74,6 +74,8 @@ const {
     clearScanAuthContext,
     setScanUserAgent,
     clearScanUserAgent,
+    setScanRequestDelayMs,
+    clearScanRequestDelayMs,
     fetchPage,
     timedFetch,
     getRobots,
@@ -429,6 +431,7 @@ function completeScan(session, endMessage) {
         clearScanSession();
         clearScanAuthContext();
         clearScanUserAgent();
+        clearScanRequestDelayMs();
     }
 
     console.log(endMessage);
@@ -612,6 +615,7 @@ async function startSpider(startUrl, options, browserWindow) {
     });
     setRespectRobotsTxt(options?.respectRobotsTxt !== false);
     setScanUserAgent(resolveUserAgent(options));
+    setScanRequestDelayMs(options?.requestDelayMs);
 
     if (useSitemap) {
         const sitemapPageCount = await seedQueueFromSitemaps(startUrl, browserWindow, getRobots);
@@ -640,6 +644,7 @@ function resetSpiderStateForTests() {
     clearScanSession();
     clearScanAuthContext();
     clearScanUserAgent();
+    clearScanRequestDelayMs();
     setRespectRobotsTxt(true);
 }
 

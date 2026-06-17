@@ -83,6 +83,22 @@
             Поточний:
             <code id="userAgentPreview" class="block mt-1 text-zinc-500 break-all"></code>
           </p>
+
+          <div class="mt-4">
+            <label for="requestDelayMs" class="block font-medium mb-1">Пауза між запитами (мс)</label>
+            <input
+              type="number"
+              id="requestDelayMs"
+              min="0"
+              max="60000"
+              placeholder="500"
+              class="w-32 p-2 border border-zinc-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none"
+            />
+            <p class="text-sm text-zinc-500 mt-1">
+              Затримка перед кожним HTTP-запитом на воркер. 0 — без паузи. Рекомендовано 500 мс
+              (з випадковим розкидом ±20%). При паралельних потоках навантаження множиться.
+            </p>
+          </div>
         </section>
 
         <section>

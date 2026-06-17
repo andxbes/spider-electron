@@ -6,6 +6,7 @@ const stopButton = document.getElementById('stopButton');
 const resumeButton = document.getElementById('resumeButton');
 const restartButton = document.getElementById('restartButton');
 const exportButton = document.getElementById('exportButton');
+const detailLinkExportBtn = document.getElementById('detailLinkExportBtn');
 const controlsIdle = document.getElementById('controlsIdle');
 const controlsRunning = document.getElementById('controlsRunning');
 const controlsPaused = document.getElementById('controlsPaused');
@@ -45,6 +46,7 @@ let linkTableSortState = { column: 'url', direction: 'asc' };
 /** @type {'idle' | 'running' | 'paused'} */
 let uiState = 'idle';
 let lastScanProgress = null;
+let scanStartedAt = null;
 let workspace;
 let scanHandlers;
 
@@ -266,7 +268,10 @@ detailPanel = createDetailPanel({
     getSelectedUrl: () => selectedUrl,
     getRowData,
     getActiveTab: () => activeTab,
-    setActiveTab: (tab) => { activeTab = tab; },
+    setActiveTab: (tab) => {
+        activeTab = tab;
+        updateDetailLinkExportButton();
+    },
     getReferrersForUrl,
     getOutgoingLinksFrom,
     getFilteredOutgoingLinks: (pageUrl) => tableFilters.getFilteredOutgoingLinks(pageUrl, getOutgoingLinksFrom),
@@ -276,6 +281,40 @@ detailPanel = createDetailPanel({
     getDetailHelpers: getPresentationHelpers,
     hasActiveLinkFilters: () => tableFilters.hasActiveLinkFilters(),
 });
+
+function updateDetailLinkExportButton() {
+    if (!detailLinkExportBtn) {
+        return;
+    }
+    const show = Boolean(selectedUrl)
+        && (activeTab === 'inlinks' || activeTab === 'outlinks');
+    detailLinkExportBtn.classList.toggle('hidden', !show);
+}
+
+function exportDetailLinksCsv() {
+    if (!selectedUrl) {
+        return;
+    }
+    const type = activeTab === 'inlinks' ? 'in' : activeTab === 'outlinks' ? 'out' : null;
+    if (!type) {
+        return;
+    }
+    const links = type === 'in'
+        ? getReferrersForUrl(selectedUrl)
+        : getOutgoingLinksFrom(selectedUrl);
+    const result = exportPageLinksToCsv({
+        pageUrl: selectedUrl,
+        type,
+        links,
+        sortState: linkTableSortState,
+        scanStartedAt,
+    });
+    if (!result.ok && result.reason === 'empty') {
+        alert(type === 'in'
+            ? 'Немає вхідних посилань для експорту.'
+            : 'Немає вихідних посилань для експорту.');
+    }
+}
 
 function syncSelectedRowUi() {
     if (!selectedUrl || !getRowData(selectedUrl)) {
@@ -290,6 +329,7 @@ function syncSelectedRowUi() {
         selectedUrlBar.appendChild(actions);
     }
     renderDetailPanel();
+    updateDetailLinkExportButton();
 }
 
 function selectRow(url) {
@@ -438,6 +478,7 @@ function clearScanData() {
         selectedUrlBar.querySelectorAll('.url-copy, .url-open').forEach((el) => el.remove());
     }
     detailContent.innerHTML = '<p class="p-4 text-zinc-400 italic">Оберіть URL у таблиці вище</p>';
+    updateDetailLinkExportButton();
 }
 
 async function beginScan(startUrl, { clearResults = true } = {}) {
@@ -446,6 +487,7 @@ async function beginScan(startUrl, { clearResults = true } = {}) {
     }
     setScanHostnameFromUrl(startUrl);
     lastScanProgress = null;
+    scanStartedAt = new Date();
     setUIState('running');
     updateUrlInputProgress({ scanned: 0, queue: 0 });
     statusText.textContent = `Починаю сканування з ${startUrl}...`;
@@ -456,6 +498,7 @@ async function beginScan(startUrl, { clearResults = true } = {}) {
         respectRobotsTxt: settings.respectRobotsTxt,
         userAgentPreset: settings.userAgentPreset,
         userAgentCustom: settings.userAgentCustom,
+        requestDelayMs: settings.requestDelayMs,
         maxPages: settings.maxPages,
         concurrency: settings.concurrency,
         authType: settings.authType,
@@ -472,6 +515,10 @@ exportButton.addEventListener('click', () => {
         return;
     }
     exportFilteredResultsToCsv(entries, { helpers: getPresentationHelpers(), startUrl: urlInput.value.trim() });
+});
+
+detailLinkExportBtn?.addEventListener('click', () => {
+    exportDetailLinksCsv();
 });
 
 document.addEventListener('click', (e) => {

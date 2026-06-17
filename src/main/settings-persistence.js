@@ -3,6 +3,7 @@ const path = require('node:path');
 const { app } = require('electron');
 const { AUTH_TYPES, normalizeAuthSettings } = require('./http-auth');
 const { normalizeUserAgentSettings } = require('../shared/user-agents');
+const { normalizeRequestDelayMs, DEFAULT_REQUEST_DELAY_MS } = require('./request-delay');
 
 const DEFAULT_CONCURRENCY = 3;
 const MAX_CONCURRENCY = 50;
@@ -12,6 +13,7 @@ const DEFAULT_SETTINGS = {
     maxPages: 0,
     concurrency: DEFAULT_CONCURRENCY,
     respectRobotsTxt: true,
+    requestDelayMs: DEFAULT_REQUEST_DELAY_MS,
     userAgentPreset: 'spider',
     userAgentCustom: '',
     authType: AUTH_TYPES.NONE,
@@ -34,6 +36,7 @@ function normalizeSettings(raw) {
             Math.max(1, Number.isNaN(concurrency) ? DEFAULT_CONCURRENCY : concurrency)
         ),
         respectRobotsTxt: raw?.respectRobotsTxt !== false,
+        requestDelayMs: normalizeRequestDelayMs(raw?.requestDelayMs),
         ...normalizeUserAgentSettings(raw),
         ...normalizeAuthSettings(raw),
     };

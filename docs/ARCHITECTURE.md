@@ -1,6 +1,6 @@
 # Spider-Electron — внутрішня документація
 
-> Останнє оновлення: 2026-06-17 (налаштування User-Agent: браузери, боти, власний рядок)  
+> Останнє оновлення: 2026-06-17 (CSV-експорт вхідних/вихідних посилань у панелі деталей)  
 > Короткий довідник для розробки та правок. Детальніше про підтримку — [DOC_MAINTENANCE.md](./DOC_MAINTENANCE.md).
 
 ## Що це
@@ -24,6 +24,7 @@ src/
 │   ├── spider-logic.js  # Оркестратор: crawl, startSpider (~620 рядків)
 │   ├── crawl-state.js   # Mutable state: visited, queues, session
 │   ├── crawl-network.js # Fetch, robots.txt, таймаути, auth-заголовки
+│   ├── request-delay.js   # Пауза між HTTP-запитами
 │   ├── http-auth.js       # HTTP Basic / Bearer для fetch
 │   ├── crawl-results.js # buildSpiderResult, meta robots parsing
 │   ├── crawl-referrers.js # referrersMap, add/merge referrers
@@ -200,7 +201,7 @@ Renderer
 
 1. Skip, якщо URL вже в `visitedUrls` або ліміт досягнуто.
 2. Перевірка **robots.txt** (внутрішні URL) — якщо `Disallow` і увімкнено `respectRobotsTxt` (за замовч.), HTTP-запит **не** виконується: ні `crawl`, ні `probe`; `status: 0`. Якщо `respectRobotsTxt: false` — сторінки скануються, але `robotsAllowed` / `robotsRule` у результаті лишаються. Зовнішні URL перевіряються по HTTP навіть при забороні в robots.txt їхнього хоста.
-3. `fetch` з timeout 5s, `redirect: 'manual'`, User-Agent з налаштувань (`user-agents.js`, пресет або власний); за наявності — `Authorization` (Basic/Bearer) **лише для URL з hostname скану**.
+3. `fetch` з timeout 5s, `redirect: 'manual'`, User-Agent з налаштувань; пауза `requestDelayMs` (за замовч. 500 мс, jitter ±20%) перед кожним запитом на воркер; за наявності — `Authorization` (Basic/Bearer) **лише для URL з hostname скану**.
 4. **3xx** — фіксація `redirectUrl`, ланцюг до **20** переходів (`redirect-chain.js`); метадані на стартовому URL; при циклі або перевищенні ліміту — `redirectInfinite`. Enqueue цілі (лише той самий `hostname`); ціль redirect теж перевіряється robots.txt перед fetch.
 5. **4xx/5xx** — `status` = код відповіді, `title` порожній.
 6. **200** — cheerio: title, meta description, canonical, headings, link count → `spider-result`.
@@ -215,7 +216,8 @@ Renderer
 |-----------|----------|-------|
 | `maxPages` (опція UI) | 0 = без ліміту | renderer → main |
 | `concurrency` (опція UI) | 1–50, за замовч. 3 | паралельних `crawl()` |
-| HTTP timeout | 5000 ms | ~98 |
+| HTTP timeout | 5000 ms | `crawl-network.js` |
+| Пауза між запитами | 500 ms (0–60000, jitter ±20%) | `request-delay.js`, налаштування |
 | User-Agent | з налаштувань (`userAgentPreset` / `userAgentCustom`) | `user-agents.js`, `setScanUserAgent` |
 | Область обходу | один `hostname` | ~146, ~210 |
 
@@ -225,7 +227,7 @@ Renderer
 
 | Напрямок | Канал | Payload |
 |----------|-------|---------|
-| R → M | `start-spider` | `{ startUrl, options: { useSitemap?, respectRobotsTxt?, userAgentPreset?, userAgentCustom?, maxPages?, concurrency?, authType?, authUsername?, authPassword?, authToken? } }` |
+| R → M | `start-spider` | `{ startUrl, options: { useSitemap?, respectRobotsTxt?, requestDelayMs?, userAgentPreset?, userAgentCustom?, maxPages?, concurrency?, authType?, authUsername?, authPassword?, authToken? } }` |
 | R → M | `spider-pause` / `spider-resume` / `spider-stop` | керування скануванням |
 | R → M | `shell:open-external` | відкрити URL у браузері |
 | R ↔ M | `settings:get` / `settings:save` | налаштування у `userData/settings.json` (див. нижче) |
@@ -249,6 +251,7 @@ Renderer
 | `respectRobotsTxt` | boolean | `true` (за замовч.) — не сканувати URL з Disallow; `false` — сканувати, але показувати правило в UI |
 | `userAgentPreset` | string | `spider`, `chrome-win`, `googlebot`, `custom`, … — див. `src/shared/user-agents.js` |
 | `userAgentCustom` | string | Власний User-Agent, якщо `userAgentPreset === 'custom'` |
+| `requestDelayMs` | number | 0–60000; пауза перед кожним HTTP-запитом на воркер (за замовч. **500**, jitter ±20%). **0** — без паузи |
 | `maxPages` | number | 0 = без ліміту |
 | `concurrency` | number | 1–50, паралельних `crawl()` |
 | `authType` | `'none'` \| `'basic'` \| `'bearer'` | Серверна автентифікація |
@@ -324,8 +327,10 @@ Renderer
 ## CSV export (renderer.js)
 
 - BOM `\uFEFF` для Excel/кирилиці.
-- Експорт відфільтрованих сторінок; колонки включають Internal Links, External Links.
-- Файл: `spider_<hostname>_YYYY-MM-DDTHH-MM-SS.csv` — hostname сканованого сайту + час запуску.
+- **Основна таблиця:** експорт відфільтрованих сторінок; колонки включають Internal/External Links (скорочений preview у комірках).
+- Файл основного експорту: `spider_<hostname>_YYYY-MM-DD-HH-MM-SS.csv`.
+- **Вкладки «Вхідні» / «Вихідні посилання»** (панель деталей): кнопка «Експорт CSV» — повний список посилань окремим файлом (без обмеження довжини комірки). Колонки: URL, Tag, rel, Follow, Anchor Text (+ External для вихідних). Сортування як у таблиці вкладки.
+- Ім'я файлу посилань: `<host>_<path>-in|out-YYYY-MM-DD-HH-MM-SS.csv` (час старту скану).
 - Дамп: `spider_<hostname>_YYYY-MM-DDTHH-MM-SS.spider.json` — аналогічно.
 
 ## Збір посилань (link-collector.js)
@@ -380,6 +385,7 @@ npm run make:mac       # macOS zip (з Linux); dmg — лише збірка н�
   - `main/crawl-hooks` — extract, emit, filter links;
   - `main/spider-logic` — парсинг HTML, robots/meta, черга, crawl/startSpider (mock fetch);
   - `main/settings-persistence` — normalize/save/load (mock `electron.app`);
+  - `main/request-delay` — normalize, jitter, пауза перед fetch;
   - `main/http-auth` — Basic/Bearer, обмеження за hostname;
   - `main/session-dump` — валідація дампу;
   - `renderer/ui-logic` — фільтри, класифікація, сортування, CSV preview;

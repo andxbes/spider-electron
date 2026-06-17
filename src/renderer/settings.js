@@ -8,6 +8,7 @@ function getSettingsFormElements(form) {
         userAgentCustomFields: form.querySelector('#userAgentCustomFields'),
         userAgentCustomInput: form.querySelector('#userAgentCustom'),
         userAgentPreview: form.querySelector('#userAgentPreview'),
+        requestDelayMsInput: form.querySelector('#requestDelayMs'),
         authTypeInput: form.querySelector('#authType'),
         authBasicFields: form.querySelector('#authBasicFields'),
         authBearerFields: form.querySelector('#authBearerFields'),
@@ -81,6 +82,9 @@ async function populateSettingsForm(form) {
     }
     elements.maxPagesInput.value = loaded.maxPages || '';
     elements.concurrencyInput.value = loaded.concurrency || 3;
+    if (elements.requestDelayMsInput) {
+        elements.requestDelayMsInput.value = loaded.requestDelayMs ?? 500;
+    }
     if (elements.authTypeInput) {
         elements.authTypeInput.value = loaded.authType || 'none';
     }
@@ -123,6 +127,7 @@ function bindSettingsForm(form) {
             respectRobotsTxt: elements.respectRobotsTxtInput?.checked !== false,
             maxPages: elements.maxPagesInput.value,
             concurrency: elements.concurrencyInput.value,
+            requestDelayMs: elements.requestDelayMsInput?.value ?? 500,
             ...userAgentSettings,
             authType: elements.authTypeInput?.value || 'none',
             authUsername: elements.authUsernameInput?.value || '',

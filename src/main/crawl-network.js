@@ -12,6 +12,11 @@ const {
     getRobotsTxtInfo,
 } = require('./crawl-results');
 const { DEFAULT_USER_AGENT } = require('../shared/user-agents');
+const {
+    setScanRequestDelayMs,
+    clearScanRequestDelayMs,
+    waitBeforeRequest,
+} = require('./request-delay');
 
 const FETCH_TIMEOUT_MS = 5000;
 const { MAX_REDIRECT_HOPS } = require('../shared/redirect-chain');
@@ -53,7 +58,8 @@ function resetFetchForTests() {
     fetchImpl = undiciFetch;
 }
 
-function fetchPage(url) {
+async function fetchPage(url) {
+    await waitBeforeRequest();
     const authHeaders = scanAuthContext
         ? getAuthHeadersForUrl(url, scanAuthContext.hostname, scanAuthContext)
         : {};
@@ -156,6 +162,8 @@ module.exports = {
     getScanUserAgent,
     setScanUserAgent,
     clearScanUserAgent,
+    setScanRequestDelayMs,
+    clearScanRequestDelayMs,
     FETCH_TIMEOUT_MS,
     MAX_REDIRECT_HOPS,
     setFetchForTests,
