@@ -9,12 +9,12 @@ if (typeof require !== 'undefined') {
         // redirect-chain.js підключається окремим <script> у renderer
     }
 }
-const RESOURCE_TYPE_FILTER_OPTIONS = [
+const CONTENT_TYPE_TABS = [
     { value: 'all', label: 'Усі' },
     { value: 'html', label: 'HTML' },
     { value: 'javascript', label: 'JavaScript' },
     { value: 'css', label: 'CSS' },
-    { value: 'media', label: 'Media (зображення, відео, аудіо)' },
+    { value: 'media', label: 'Media' },
 ];
 
 function createTableFilters(deps) {
@@ -31,15 +31,15 @@ function createTableFilters(deps) {
         compareRowsImpl,
         getRowMetrics,
         invalidateDuplicateCounts,
+        sanitizeSortState,
     } = deps;
 
     const {
-        contentTypeFilter,
+        contentTypeTabs,
         statusFilter,
         indexingFilter,
         h1Filter,
         duplicateFilter,
-        imgAltFilter,
         sourceFilter,
         tableSearch,
     } = elements;
@@ -49,19 +49,15 @@ function createTableFilters(deps) {
     let activeIndexingFilter = 'all';
     let activeH1Filter = 'all';
     let activeDuplicateFilter = 'all';
-    let activeImgAltFilter = 'all';
     let activeSourceFilter = 'all';
     let activeSearchQuery = '';
-    let knownPresentContentTypesKey = '';
     let knownStatusCodes = new Set();
     let searchRefreshTimer = null;
     const SEARCH_REFRESH_DELAY_MS = 200;
 
     function setActiveContentFilter(value) {
         activeContentFilter = normalizeContentTypeFilter(value);
-        if (contentTypeFilter) {
-            contentTypeFilter.value = activeContentFilter;
-        }
+        syncContentTypeTabsUi();
     }
 
     function setActiveSourceFilter(value) {
@@ -71,57 +67,24 @@ function createTableFilters(deps) {
         }
     }
 
-    function applyActiveFiltersToDom() {
-        if (contentTypeFilter && contentTypeFilter.value !== activeContentFilter) {
-            contentTypeFilter.value = activeContentFilter;
+    function syncContentTypeTabsUi() {
+        if (contentTypeTabs) {
+            contentTypeTabs.querySelectorAll('.content-type-tab').forEach((btn) => {
+                const isActive = btn.dataset.content === activeContentFilter;
+                btn.classList.toggle('border-blue-600', isActive);
+                btn.classList.toggle('text-blue-700', isActive);
+                btn.classList.toggle('bg-white', isActive);
+                btn.classList.toggle('border-transparent', !isActive);
+                btn.classList.toggle('text-zinc-600', !isActive);
+            });
         }
+    }
+
+    function applyActiveFiltersToDom() {
+        syncContentTypeTabsUi();
         if (sourceFilter && sourceFilter.value !== activeSourceFilter) {
             sourceFilter.value = activeSourceFilter;
         }
-    }
-
-    function collectPresentContentTypes() {
-        const present = new Set();
-        for (const entry of scanStore.scanResults.values()) {
-            present.add(getResourceKind(entry));
-        }
-        return present;
-    }
-
-    function appendContentTypeFilterOption(option) {
-        const el = document.createElement('option');
-        el.value = option.value;
-        el.textContent = option.label;
-        contentTypeFilter.appendChild(el);
-    }
-
-    function rebuildContentTypeFilterOptions({ preserveValue = true, force = false } = {}) {
-        if (!contentTypeFilter) {
-            return;
-        }
-        if (!force && contentTypeFilter.options.length === RESOURCE_TYPE_FILTER_OPTIONS.length) {
-            applyActiveFiltersToDom();
-            return;
-        }
-
-        const retainedSelection = preserveValue ? activeContentFilter : 'all';
-
-        contentTypeFilter.innerHTML = '';
-        for (const option of RESOURCE_TYPE_FILTER_OPTIONS) {
-            appendContentTypeFilterOption(option);
-        }
-
-        setActiveContentFilter(preserveValue ? retainedSelection : 'all');
-    }
-
-    function maybeUpdateContentTypeFilterOptions() {
-        const present = collectPresentContentTypes();
-        const presentKey = [...present].sort().join(',');
-        if (presentKey === knownPresentContentTypesKey && contentTypeFilter?.options.length > 0) {
-            return;
-        }
-        knownPresentContentTypesKey = presentKey;
-        rebuildContentTypeFilterOptions({ preserveValue: true });
     }
 
     function getScannableTablePool() {
@@ -149,7 +112,6 @@ function createTableFilters(deps) {
             activeIndexingFilter,
             activeH1Filter,
             activeDuplicateFilter,
-            activeImgAltFilter,
             activeContentFilter,
             scanHostname: getScanHostname(),
             getDuplicateCounts: () => scanStore.getDuplicateCounts(),
@@ -160,13 +122,25 @@ function createTableFilters(deps) {
     function getDisplayedResults() {
         const entries = getFilteredResults();
         const sortState = getSortState();
+        const sortHelpers = {
+            getRowMetrics,
+            getReferrersForUrl: (url) => scanStore.getReferrersForUrl(url),
+        };
         if (sortState.column) {
             entries.sort((a, b) => compareRowsImpl(
                 a,
                 b,
                 sortState,
                 scanStore.insertionOrder,
-                { getRowMetrics },
+                sortHelpers,
+            ));
+        } else if (activeContentFilter === 'media') {
+            entries.sort((a, b) => compareRowsImpl(
+                a,
+                b,
+                { column: 'alt', direction: 'asc' },
+                scanStore.insertionOrder,
+                sortHelpers,
             ));
         } else {
             entries.sort((a, b) => (
@@ -183,7 +157,6 @@ function createTableFilters(deps) {
             && activeIndexingFilter === 'all'
             && activeH1Filter === 'all'
             && activeDuplicateFilter === 'all'
-            && activeImgAltFilter === 'all'
             && !activeSearchQuery.trim()
             && !getSortState().column;
     }
@@ -275,9 +248,9 @@ function createTableFilters(deps) {
         activeIndexingFilter = 'all';
         activeH1Filter = 'all';
         activeDuplicateFilter = 'all';
-        activeImgAltFilter = 'all';
         activeSearchQuery = '';
         setActiveSourceFilter('all');
+        setActiveContentFilter('all');
         knownStatusCodes = new Set();
         invalidateDuplicateCounts();
         if (tableSearch) {
@@ -295,10 +268,6 @@ function createTableFilters(deps) {
         if (duplicateFilter) {
             duplicateFilter.value = 'all';
         }
-        if (imgAltFilter) {
-            imgAltFilter.value = 'all';
-        }
-        rebuildContentTypeFilterOptions({ preserveValue: false });
         updateStatusFilterOptions({ force: true });
     }
 
@@ -307,7 +276,6 @@ function createTableFilters(deps) {
         activeIndexingFilter = filters.indexing || 'all';
         activeH1Filter = filters.h1 || 'all';
         activeDuplicateFilter = filters.duplicate || 'all';
-        activeImgAltFilter = filters.imgAlt || 'all';
         setActiveSourceFilter(filters.source || filters.viewMode || filters.externalLinks || 'all');
         setActiveContentFilter(filters.content || filters.externalType || 'all');
         activeSearchQuery = filters.search || '';
@@ -326,10 +294,6 @@ function createTableFilters(deps) {
         if (duplicateFilter) {
             duplicateFilter.value = activeDuplicateFilter;
         }
-        if (imgAltFilter) {
-            imgAltFilter.value = activeImgAltFilter;
-        }
-        rebuildContentTypeFilterOptions({ preserveValue: true });
         updateStatusFilterOptions({ force: true });
     }
 
@@ -340,7 +304,6 @@ function createTableFilters(deps) {
             indexing: activeIndexingFilter,
             h1: activeH1Filter,
             duplicate: activeDuplicateFilter,
-            imgAlt: activeImgAltFilter,
             source: activeSourceFilter,
             search: activeSearchQuery,
         };
@@ -373,14 +336,28 @@ function createTableFilters(deps) {
         onFilterChange({ immediate: true });
     }
 
+    function onContentTypeTabChange(nextValue) {
+        if (activeContentFilter === nextValue) {
+            return;
+        }
+        setActiveContentFilter(nextValue);
+        if (typeof sanitizeSortState === 'function') {
+            sanitizeSortState();
+        }
+        onFilterChange({ immediate: true });
+        if (typeof onPersistWorkspace === 'function') {
+            onPersistWorkspace();
+        }
+    }
+
     function bindFilterControls() {
-        if (contentTypeFilter) {
-            contentTypeFilter.addEventListener('change', () => {
-                setActiveContentFilter(contentTypeFilter.value);
-                onFilterChange({ immediate: true });
-                if (typeof onPersistWorkspace === 'function') {
-                    onPersistWorkspace();
+        if (contentTypeTabs) {
+            contentTypeTabs.addEventListener('click', (event) => {
+                const btn = event.target.closest('.content-type-tab');
+                if (!btn?.dataset.content) {
+                    return;
                 }
+                onContentTypeTabChange(btn.dataset.content);
             });
         }
 
@@ -408,13 +385,6 @@ function createTableFilters(deps) {
         if (duplicateFilter) {
             duplicateFilter.addEventListener('change', () => {
                 activeDuplicateFilter = duplicateFilter.value;
-                onFilterChange({ immediate: true });
-            });
-        }
-
-        if (imgAltFilter) {
-            imgAltFilter.addEventListener('change', () => {
-                activeImgAltFilter = imgAltFilter.value;
                 onFilterChange({ immediate: true });
             });
         }
@@ -447,6 +417,8 @@ function createTableFilters(deps) {
         }
     }
 
+    syncContentTypeTabsUi();
+
     return {
         getScannableTablePool,
         getTableEntries,
@@ -455,9 +427,8 @@ function createTableFilters(deps) {
         areDefaultTableFiltersActive,
         hasActiveLinkFilters,
         getFilteredOutgoingLinks,
+        getActiveContentFilter: () => activeContentFilter,
         updateStatusFilterOptions,
-        rebuildContentTypeFilterOptions,
-        maybeUpdateContentTypeFilterOptions,
         resetTableFilters,
         applyFilterState,
         getFilterSnapshot,
@@ -468,7 +439,7 @@ function createTableFilters(deps) {
     };
 }
 
-const exported = { createTableFilters, RESOURCE_TYPE_FILTER_OPTIONS };
+const exported = { createTableFilters, CONTENT_TYPE_TABS };
 
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = exported;

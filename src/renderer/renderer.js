@@ -1,6 +1,7 @@
 const urlInput = document.getElementById('urlInput');
 const urlInputWrap = document.getElementById('urlInputWrap');
 const urlInputProgress = document.getElementById('urlInputProgress');
+const contentTypeTabs = document.getElementById('contentTypeTabs');
 const startButton = document.getElementById('startButton');
 const stopButton = document.getElementById('stopButton');
 const resumeButton = document.getElementById('resumeButton');
@@ -22,12 +23,10 @@ const statusScanned = document.getElementById('status-scanned');
 const statusQueue = document.getElementById('status-queue');
 const statusActive = document.getElementById('status-active');
 const statusRate = document.getElementById('status-rate');
-const contentTypeFilter = document.getElementById('contentTypeFilter');
 const statusFilter = document.getElementById('statusFilter');
 const indexingFilter = document.getElementById('indexingFilter');
 const h1Filter = document.getElementById('h1Filter');
 const duplicateFilter = document.getElementById('duplicateFilter');
-const imgAltFilter = document.getElementById('imgAltFilter');
 const sourceFilter = document.getElementById('sourceFilter');
 const tableSearch = document.getElementById('tableSearch');
 const filterCount = document.getElementById('filterCount');
@@ -216,6 +215,23 @@ function cancelPendingScanRefresh() {
     scanHandlers?.cancelPendingScanRefresh();
 }
 
+function sanitizeSortStateForContentFilter() {
+    const columns = resolveTableColumns({
+        helpers: getPresentationHelpers(),
+        sortState,
+        contentFilter: tableFilters.getActiveContentFilter(),
+    });
+    const sortKey = sortState.column;
+    if (!sortKey) {
+        return;
+    }
+    const hasColumn = columns.some((col) => col.sortKey === sortKey);
+    if (!hasColumn) {
+        sortState = { column: null, direction: 'asc' };
+        tableView?.renderTableHead();
+    }
+}
+
 const tableFilters = createTableFilters({
     scanStore,
     getUiState: () => uiState,
@@ -223,12 +239,11 @@ const tableFilters = createTableFilters({
     getSortState: () => sortState,
     setSortState: (next) => { sortState = next; },
     elements: {
-        contentTypeFilter,
+        contentTypeTabs,
         statusFilter,
         indexingFilter,
         h1Filter,
         duplicateFilter,
-        imgAltFilter,
         sourceFilter,
         tableSearch,
     },
@@ -238,7 +253,8 @@ const tableFilters = createTableFilters({
     compareRowsImpl,
     getRowMetrics,
     invalidateDuplicateCounts,
-    onTableHeadRefresh: () => tableView.renderTableHead(),
+    sanitizeSortState: sanitizeSortStateForContentFilter,
+    onTableHeadRefresh: () => tableView?.renderTableHead(),
 });
 
 tableView = createTableView({
@@ -261,6 +277,7 @@ tableView = createTableView({
     onCancelPendingScanRefresh: cancelPendingScanRefresh,
     getTableHelpers: getPresentationHelpers,
     getSortState: () => sortState,
+    getActiveContentFilter: () => tableFilters.getActiveContentFilter(),
     getScanResultsSize: () => scanStore.scanResults.size,
     onTableSortChange: (col) => tableFilters.onTableSortChange(col),
 });
@@ -737,7 +754,7 @@ function runStartup() {
         requestAnimationFrame(() => {
             const restored = workspace.restoreWorkspaceFromSession();
             if (!restored) {
-                tableFilters.rebuildContentTypeFilterOptions({ force: true });
+                tableFilters.applyFilterState({ content: 'all' });
             }
         });
     });

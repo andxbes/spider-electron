@@ -99,6 +99,10 @@ function createScanStore(options = {}) {
                     kind: data.kind || existing.kind,
                     tag: data.tag || existing.tag,
                     text: data.text || existing.text,
+                    imgAltMissing: data.imgAltMissing || existing.imgAltMissing,
+                    ...(data.imgAlt !== undefined
+                        ? { imgAlt: data.imgAlt }
+                        : (existing.imgAlt !== undefined ? { imgAlt: existing.imgAlt } : {})),
                 }));
                 return { isNew: false, changed: true };
             }
@@ -234,6 +238,7 @@ function createScanStore(options = {}) {
                 : (targetEntry.relIndexAllowed ?? null),
             relLabel: edgeHasRelMeta ? (ref.relLabel || '') : (targetEntry.relLabel || ''),
             imgAltMissing: ref.imgAltMissing === true,
+            ...(ref.imgAlt !== undefined ? { imgAlt: ref.imgAlt } : {}),
         });
     }
 

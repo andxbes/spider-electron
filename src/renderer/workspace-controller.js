@@ -134,7 +134,6 @@ function createWorkspaceController(deps) {
         }
         scanStore.rebuildLatestReferrersFromResults();
         reinferAllLinkKinds();
-        tableFilters.rebuildContentTypeFilterOptions({ preserveValue: true, force: true });
     }
 
     function restoreWorkspaceFromSession() {

@@ -14,6 +14,7 @@ const DEFAULT_MIN_WIDTHS = {
     responseTimeMs: 72,
     metaRobots: 100,
     xRobotsTag: 110,
+    alt: 120,
     robotsTxt: 110,
     h1: 120,
     title: 150,

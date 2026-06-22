@@ -429,6 +429,16 @@ function normalizeReferrerEntry(item) {
         relIndexAllowed: item?.relIndexAllowed ?? null,
         relLabel: item?.relLabel || '',
         imgAltMissing: item?.imgAltMissing === true,
+        ...(item?.imgAlt !== undefined ? { imgAlt: item.imgAlt } : {}),
+        ...(Array.isArray(item?.imgAltStates) && item.imgAltStates.length
+            ? {
+                imgAltStates: item.imgAltStates.map((state) => ({
+                    tag: state.tag || '',
+                    imgAltMissing: state.imgAltMissing === true,
+                    ...(state.imgAlt !== undefined ? { imgAlt: state.imgAlt } : {}),
+                })),
+            }
+            : {}),
     };
 }
 
@@ -929,31 +939,252 @@ function isImgOutlinkTag(tag) {
     return normalized === 'img[src]' || normalized === 'img[srcset]';
 }
 
-function isImageTableRow(data) {
-    if (isImgOutlinkTag(data.tag)) {
-        return true;
-    }
-    if (inferLinkKind(data) === 'images') {
-        return true;
-    }
-    const contentType = (data.contentType || '').toLowerCase();
-    return contentType.startsWith('image/');
-}
-
-function hasImgReferrerWithoutAlt(url, getReferrersForUrl = () => []) {
-    return getReferrersForUrl(url).some((ref) => (
-        isImgOutlinkTag(ref.tag) && ref.imgAltMissing === true
-    ));
-}
-
-function matchesImgAltFilterImpl(data, activeImgAltFilter = 'all', getReferrersForUrl = () => []) {
-    if (activeImgAltFilter !== 'missing') {
-        return true;
-    }
-    if (!isImageTableRow(data)) {
+function isImgAltEdge(entry) {
+    if (!entry) {
         return false;
     }
-    return hasImgReferrerWithoutAlt(data.url, getReferrersForUrl);
+    if (isImgOutlinkTag(entry.tag)) {
+        return true;
+    }
+    if (entry.imgAltMissing === true) {
+        return true;
+    }
+    return entry.imgAlt !== undefined;
+}
+
+function isLegacyMissingAltEdge(edge) {
+    return isImgOutlinkTag(edge?.tag)
+        && String(edge?.text || '').trim() === 'image'
+        && edge?.imgAlt === undefined
+        && edge?.imgAltMissing !== false;
+}
+
+function isLegacyMissingAltImageRow(data) {
+    return isImgOutlinkTag(data?.tag)
+        && String(data?.text || '').trim() === 'image'
+        && data?.imgAlt === undefined
+        && data?.imgAltMissing !== false;
+}
+
+function expandReferrerImgAltSources(ref) {
+    if (!ref) {
+        return [];
+    }
+    if (Array.isArray(ref.imgAltStates) && ref.imgAltStates.length) {
+        return ref.imgAltStates.map((state) => ({
+            tag: state.tag || ref.tag,
+            text: ref.text,
+            imgAltMissing: state.imgAltMissing === true,
+            ...(state.imgAlt !== undefined ? { imgAlt: state.imgAlt } : {}),
+        })).filter(isImgAltEdge);
+    }
+    return isImgAltEdge(ref) ? [ref] : [];
+}
+
+function getImageAltSources(data, getReferrersForUrl = () => []) {
+    const sources = [];
+    for (const ref of getReferrersForUrl(data.url)) {
+        sources.push(...expandReferrerImgAltSources(ref));
+    }
+
+    if (isImgAltEdge(data) || isLegacyMissingAltImageRow(data)) {
+        sources.push({
+            tag: data.tag,
+            text: data.text,
+            imgAlt: data.imgAlt,
+            imgAltMissing: data.imgAltMissing === true || isLegacyMissingAltImageRow(data),
+        });
+    }
+
+    return sources;
+}
+
+const TABLE_VIEW_PAGE_META_COLUMN_IDS = new Set([
+    'h1',
+    'title',
+    'metaDescription',
+    'metaRobots',
+    'ogTitle',
+    'ogImage',
+]);
+
+const TABLE_VIEW_IMAGE_HIDDEN_COLUMN_IDS = new Set([
+    'contentType',
+    ...TABLE_VIEW_PAGE_META_COLUMN_IDS,
+]);
+
+function getTableViewProfile(contentFilter = 'all') {
+    if (contentFilter === 'media') {
+        return 'images';
+    }
+    if (contentFilter === 'javascript' || contentFilter === 'css') {
+        return 'asset';
+    }
+    return 'full';
+}
+
+function insertTableColumnAfter(columns, afterId, column) {
+    const index = columns.findIndex((col) => col.id === afterId);
+    if (index === -1) {
+        return [...columns, column];
+    }
+    return [
+        ...columns.slice(0, index + 1),
+        column,
+        ...columns.slice(index + 1),
+    ];
+}
+
+function collectImageAltParts(data, getReferrersForUrl = () => []) {
+    const sources = getImageAltSources(data, getReferrersForUrl);
+    if (!sources.length) {
+        return { missing: false, values: [] };
+    }
+
+    const values = [];
+    const seen = new Set();
+    let missing = false;
+
+    for (const ref of sources) {
+        if (ref.imgAltMissing || isLegacyMissingAltEdge(ref)) {
+            missing = true;
+            continue;
+        }
+        const alt = ref.imgAlt !== undefined
+            ? ref.imgAlt
+            : (ref.text && ref.text !== 'image' ? ref.text : '');
+        const key = alt;
+        if (seen.has(key)) {
+            continue;
+        }
+        seen.add(key);
+        values.push(alt);
+    }
+
+    return { missing, values };
+}
+
+const ALT_SORT_TIER = {
+    MISSING_ONLY: 0,
+    MISSING_MIX: 1,
+    EMPTY_ONLY: 2,
+    EMPTY_MIX: 3,
+    TEXT_ONLY: 4,
+    NONE: 5,
+};
+
+function classifyImageAltSortTier(missing, values) {
+    const hasEmpty = values.some((value) => value === '');
+    const hasText = values.some((value) => value !== '');
+
+    if (missing && values.length === 0) {
+        return ALT_SORT_TIER.MISSING_ONLY;
+    }
+    if (missing) {
+        return ALT_SORT_TIER.MISSING_MIX;
+    }
+    if (values.length === 0) {
+        return ALT_SORT_TIER.MISSING_ONLY;
+    }
+    if (hasEmpty && !hasText) {
+        return ALT_SORT_TIER.EMPTY_ONLY;
+    }
+    if (hasEmpty) {
+        return ALT_SORT_TIER.EMPTY_MIX;
+    }
+    return ALT_SORT_TIER.TEXT_ONLY;
+}
+
+function getImageAltSortParts(data, getReferrersForUrl = () => []) {
+    const sources = getImageAltSources(data, getReferrersForUrl);
+    if (!sources.length) {
+        return { tier: ALT_SORT_TIER.MISSING_ONLY, text: '' };
+    }
+
+    const { missing, values } = collectImageAltParts(data, getReferrersForUrl);
+    const tier = classifyImageAltSortTier(missing, values);
+    if (tier !== ALT_SORT_TIER.TEXT_ONLY) {
+        return { tier, text: '' };
+    }
+    const primary = [...values].sort((a, b) => a.localeCompare(b, 'uk'))[0];
+    return {
+        tier,
+        text: primary.toLocaleLowerCase('uk'),
+    };
+}
+
+function compareImageAltSortImpl(a, b, getReferrersForUrl = () => [], direction = 'asc') {
+    const mul = direction === 'asc' ? 1 : -1;
+    const pa = getImageAltSortParts(a, getReferrersForUrl);
+    const pb = getImageAltSortParts(b, getReferrersForUrl);
+    if (pa.tier !== pb.tier) {
+        return (pa.tier - pb.tier) * mul;
+    }
+    if (pa.tier === ALT_SORT_TIER.TEXT_ONLY && pa.text !== pb.text) {
+        return pa.text.localeCompare(pb.text, 'uk') * mul;
+    }
+    return a.url.localeCompare(b.url, 'uk') * mul;
+}
+
+function imageAltCellHtml(data, getReferrersForUrl = () => []) {
+    const { missing, values } = collectImageAltParts(data, getReferrersForUrl);
+    if (!missing && values.length === 0) {
+        return '<span class="text-zinc-400 italic">—</span>';
+    }
+
+    const parts = [];
+    if (missing) {
+        parts.push('<span class="text-amber-700 font-medium" title="Немає атрибута alt">немає</span>');
+    }
+    for (const value of values) {
+        if (value === '') {
+            parts.push('<span class="text-zinc-500 italic" title="alt=&quot;&quot;">(порожній)</span>');
+        } else {
+            parts.push(`<span class="text-zinc-800">${escapeHtml(value)}</span>`);
+        }
+    }
+    return parts.join('<br>');
+}
+
+function imageAltSortValue(data, getReferrersForUrl = () => []) {
+    const { tier, text } = getImageAltSortParts(data, getReferrersForUrl);
+    if (tier === ALT_SORT_TIER.TEXT_ONLY) {
+        return `4:${text}`;
+    }
+    return String(tier);
+}
+
+function buildAltTableColumn(getReferrersForUrl) {
+    return {
+        id: 'alt',
+        sortKey: 'alt',
+        minWidth: 120,
+        thClass: 'sortable-th p-2 font-semibold cursor-pointer select-none hover:bg-zinc-200',
+        thLabel: 'alt',
+        renderCell: (data) => `<td class="p-2">${imageAltCellHtml(data, getReferrersForUrl)}</td>`,
+    };
+}
+
+function applyTableViewProfile(columns, profile, helpers = {}) {
+    if (profile === 'full') {
+        return columns;
+    }
+
+    const getReferrersForUrl = helpers.getReferrersForUrl || (() => []);
+
+    if (profile === 'images') {
+        const filtered = columns.filter((col) => !TABLE_VIEW_IMAGE_HIDDEN_COLUMN_IDS.has(col.id));
+        if (filtered.some((col) => col.id === 'alt')) {
+            return filtered;
+        }
+        return insertTableColumnAfter(filtered, 'status', buildAltTableColumn(getReferrersForUrl));
+    }
+
+    if (profile === 'asset') {
+        return columns.filter((col) => !TABLE_VIEW_PAGE_META_COLUMN_IDS.has(col.id));
+    }
+
+    return columns;
 }
 
 function passesTableFiltersImpl(data, ctx) {
@@ -964,7 +1195,6 @@ function passesTableFiltersImpl(data, ctx) {
         activeIndexingFilter = 'all',
         activeH1Filter = 'all',
         activeDuplicateFilter = 'all',
-        activeImgAltFilter = 'all',
         activeContentFilter = 'all',
         scanHostname = '',
         getDuplicateCounts = () => ({ h1: new Map(), title: new Map(), description: new Map() }),
@@ -999,9 +1229,6 @@ function passesTableFiltersImpl(data, ctx) {
         if (activeDuplicateFilter === 'description' && !hasDuplicateField(data.metaDescription, counts.description)) {
             return false;
         }
-    }
-    if (!matchesImgAltFilterImpl(data, activeImgAltFilter, getReferrersForUrl)) {
-        return false;
     }
     return true;
 }
@@ -1111,6 +1338,16 @@ function getRowMetricsImpl(data, helpers = {}) {
 function compareRowsImpl(a, b, sortState = { column: null, direction: 'asc' }, insertionOrder = [], helpers = {}) {
     const { column, direction } = sortState;
     const mul = direction === 'asc' ? 1 : -1;
+
+    if (column === 'alt') {
+        return compareImageAltSortImpl(
+            a,
+            b,
+            helpers.getReferrersForUrl || (() => []),
+            direction,
+        );
+    }
+
     const getMetrics = helpers.getRowMetrics
         ? helpers.getRowMetrics
         : (data) => getRowMetricsImpl(data, helpers);
@@ -1315,9 +1552,11 @@ const exported = {
     isMetaRobotsBlocked,
     isXRobotsTagBlocked,
     isImgOutlinkTag,
-    isImageTableRow,
-    hasImgReferrerWithoutAlt,
-    matchesImgAltFilterImpl,
+    getTableViewProfile,
+    applyTableViewProfile,
+    imageAltCellHtml,
+    imageAltSortValue,
+    compareImageAltSortImpl,
     isRobotsTxtBlocked,
     isIndexingBlocked,
     isIndexingAllowed,

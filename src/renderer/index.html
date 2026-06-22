@@ -83,17 +83,15 @@
 
     <main class="flex-grow flex flex-col min-h-0 min-w-0 w-full p-2 gap-0">
       <div id="resultsPanel" class="flex-grow min-h-[120px] w-full min-w-0 border border-zinc-300 rounded-md bg-white overflow-hidden flex flex-col mb-2">
+        <div id="contentTypeTabs" class="flex flex-wrap gap-1 px-2 pt-2 border-b border-zinc-200 bg-zinc-50 shrink-0">
+          <button type="button" data-content="all" class="content-type-tab px-3 py-1.5 text-xs font-medium border-b-2 border-blue-600 text-blue-700 bg-white rounded-t">Усі</button>
+          <button type="button" data-content="html" class="content-type-tab px-3 py-1.5 text-xs font-medium border-b-2 border-transparent text-zinc-600 hover:text-zinc-800 rounded-t">HTML</button>
+          <button type="button" data-content="javascript" class="content-type-tab px-3 py-1.5 text-xs font-medium border-b-2 border-transparent text-zinc-600 hover:text-zinc-800 rounded-t">JavaScript</button>
+          <button type="button" data-content="css" class="content-type-tab px-3 py-1.5 text-xs font-medium border-b-2 border-transparent text-zinc-600 hover:text-zinc-800 rounded-t">CSS</button>
+          <button type="button" data-content="media" class="content-type-tab px-3 py-1.5 text-xs font-medium border-b-2 border-transparent text-zinc-600 hover:text-zinc-800 rounded-t">Media</button>
+        </div>
         <div class="flex flex-wrap items-center gap-x-3 gap-y-1 px-2 py-1.5 border-b border-zinc-200 bg-zinc-50 text-xs shrink-0">
           <div class="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0">
-          <label class="flex items-center gap-1.5">
-            <span class="text-zinc-500 whitespace-nowrap">Тип:</span>
-            <select
-              id="contentTypeFilter"
-              class="px-2 py-1 border border-zinc-300 rounded bg-white text-zinc-800 min-w-[7rem]"
-            >
-              <option value="all">Усі</option>
-            </select>
-          </label>
           <label class="flex items-center gap-1.5">
             <span class="text-zinc-500 whitespace-nowrap">Статус:</span>
             <select
@@ -139,16 +137,6 @@
               <option value="h1">H1</option>
               <option value="title">Title</option>
               <option value="description">Meta description</option>
-            </select>
-          </label>
-          <label class="flex items-center gap-1.5">
-            <span class="text-zinc-500 whitespace-nowrap">IMG alt:</span>
-            <select
-              id="imgAltFilter"
-              class="px-2 py-1 border border-zinc-300 rounded bg-white text-zinc-800 min-w-[9rem]"
-            >
-              <option value="all">Усі</option>
-              <option value="missing">Немає атрибута</option>
             </select>
           </label>
           <label class="flex items-center gap-1.5">

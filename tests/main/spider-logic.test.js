@@ -130,8 +130,11 @@ describe('spider-logic', () => {
         const emptyAlt = links.find((l) => l.url.endsWith('/empty-alt.png'));
         const withAlt = links.find((l) => l.url.endsWith('/with-alt.png'));
         assert.equal(noAlt?.imgAltMissing, true);
+        assert.equal(noAlt?.imgAlt, undefined);
         assert.equal(emptyAlt?.imgAltMissing, undefined);
+        assert.equal(emptyAlt?.imgAlt, '');
         assert.equal(withAlt?.imgAltMissing, undefined);
+        assert.equal(withAlt?.imgAlt, 'Logo');
     });
 
     it('collectPageLinks adds every img srcset candidate', () => {
@@ -162,8 +165,14 @@ describe('spider-logic', () => {
         mergeReferrerMeta(map, 'https://example.com/page', {
             tag: 'img[src]',
             text: 'Logo',
+            imgAlt: 'Logo',
         });
-        assert.equal(map.get('https://example.com/page').imgAltMissing, true);
+        const merged = map.get('https://example.com/page');
+        assert.equal(merged.imgAltMissing, true);
+        assert.equal(merged.imgAlt, 'Logo');
+        assert.equal(merged.imgAltStates.length, 2);
+        assert.equal(merged.imgAltStates.some((state) => state.imgAltMissing), true);
+        assert.equal(merged.imgAltStates.some((state) => state.imgAlt === 'Logo'), true);
     });
 
     it('extractPageTitle prefers head title and og fallback', () => {

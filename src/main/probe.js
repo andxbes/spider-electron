@@ -54,6 +54,8 @@ function buildDiscoveredLinkResult(link) {
         relIndexAllowed: link.relIndexAllowed,
         relLabel: link.relLabel || '',
         referrers: getReferrersListForUrl(link.url),
+        ...(link.imgAltMissing === true ? { imgAltMissing: true } : {}),
+        ...(link.imgAlt !== undefined ? { imgAlt: link.imgAlt } : {}),
     });
 }
 
@@ -80,6 +82,8 @@ function buildProbeLinkFields(url, link, fields) {
         relIndexAllowed: link.relIndexAllowed,
         relLabel: link.relLabel || '',
         referrers: getReferrersListForUrl(url),
+        ...(link.imgAltMissing === true ? { imgAltMissing: true } : {}),
+        ...(link.imgAlt !== undefined ? { imgAlt: link.imgAlt } : {}),
         ...fields,
     };
 }

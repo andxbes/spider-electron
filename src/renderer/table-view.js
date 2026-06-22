@@ -60,6 +60,7 @@ function createTableView(deps) {
         return {
             helpers: deps.getTableHelpers(),
             sortState: deps.getSortState(),
+            contentFilter: deps.getActiveContentFilter?.() || 'all',
         };
     }
 

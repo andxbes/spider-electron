@@ -2,6 +2,68 @@ const { normalizePageUrl } = require('../shared/url-utils');
 
 const referrersMap = new Map();
 
+function isImgReferrerTag(tag) {
+    const normalized = String(tag || '');
+    return normalized === 'img[src]' || normalized === 'img[srcset]';
+}
+
+function normalizeImgAltState(meta = {}) {
+    const tag = meta.tag || '';
+    const hasImgAlt = meta.imgAlt !== undefined;
+    const imgAltMissing = meta.imgAltMissing === true;
+    if (!isImgReferrerTag(tag) && !imgAltMissing && !hasImgAlt) {
+        return null;
+    }
+    return {
+        tag,
+        imgAltMissing,
+        ...(hasImgAlt ? { imgAlt: meta.imgAlt } : {}),
+    };
+}
+
+function getImgAltStatesFromMeta(meta = {}) {
+    if (Array.isArray(meta.imgAltStates) && meta.imgAltStates.length) {
+        return meta.imgAltStates
+            .map((state) => normalizeImgAltState(state))
+            .filter(Boolean);
+    }
+    const single = normalizeImgAltState(meta);
+    return single ? [single] : [];
+}
+
+function imgAltStateKey(state) {
+    return `${state.tag}|${state.imgAltMissing ? 'missing' : 'alt'}|${state.imgAlt ?? ''}`;
+}
+
+function mergeImgAltStateLists(left = [], right = []) {
+    const seen = new Set();
+    const merged = [];
+    for (const state of [...left, ...right]) {
+        const key = imgAltStateKey(state);
+        if (seen.has(key)) {
+            continue;
+        }
+        seen.add(key);
+        merged.push(state);
+    }
+    return merged;
+}
+
+function summarizeImgAltFields(states) {
+    if (!states.length) {
+        return {};
+    }
+    const summary = {
+        imgAltStates: states,
+        imgAltMissing: states.some((state) => state.imgAltMissing),
+    };
+    const withAlt = states.find((state) => !state.imgAltMissing && state.imgAlt !== undefined);
+    if (withAlt) {
+        summary.imgAlt = withAlt.imgAlt;
+    }
+    return summary;
+}
+
 function normalizeReferrerMeta(linkMeta = {}) {
     const meta = typeof linkMeta === 'string' ? { text: linkMeta } : (linkMeta || {});
     return {
@@ -12,7 +74,7 @@ function normalizeReferrerMeta(linkMeta = {}) {
         relFollowAllowed: meta.relFollowAllowed ?? null,
         relIndexAllowed: meta.relIndexAllowed ?? null,
         relLabel: meta.relLabel || '',
-        imgAltMissing: meta.imgAltMissing === true,
+        ...summarizeImgAltFields(getImgAltStatesFromMeta(meta)),
     };
 }
 
@@ -40,6 +102,10 @@ function mergeReferrerMeta(targetMap, referrerUrl, linkMeta = {}) {
         }
         return null;
     };
+    const imgAltStates = mergeImgAltStateLists(
+        getImgAltStatesFromMeta(existing),
+        getImgAltStatesFromMeta(incoming),
+    );
     targetMap.set(referrerUrl, {
         text,
         rel: existing.rel || incoming.rel,
@@ -48,7 +114,7 @@ function mergeReferrerMeta(targetMap, referrerUrl, linkMeta = {}) {
         relFollowAllowed: mergeRelFlag(existing.relFollowAllowed, incoming.relFollowAllowed),
         relIndexAllowed: mergeRelFlag(existing.relIndexAllowed, incoming.relIndexAllowed),
         relLabel: existing.relLabel || incoming.relLabel,
-        imgAltMissing: existing.imgAltMissing || incoming.imgAltMissing,
+        ...summarizeImgAltFields(imgAltStates),
     });
 }
 
@@ -74,7 +140,7 @@ function referrerEntry(href, linkMeta = {}) {
         relFollowAllowed: meta.relFollowAllowed,
         relIndexAllowed: meta.relIndexAllowed,
         relLabel: meta.relLabel,
-        imgAltMissing: meta.imgAltMissing === true,
+        ...summarizeImgAltFields(getImgAltStatesFromMeta(meta)),
     };
 }
 
@@ -114,6 +180,7 @@ function buildReferrerLinkMeta(link) {
         relIndexAllowed: link.relIndexAllowed,
         relLabel: link.relLabel || '',
         imgAltMissing: link.imgAltMissing === true,
+        ...(link.imgAlt !== undefined ? { imgAlt: link.imgAlt } : {}),
     };
 }
 

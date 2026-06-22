@@ -34,6 +34,8 @@ function cloneResultEntry(data) {
         kind: data.kind ?? '',
         tag: data.tag ?? '',
         text: data.text ?? data.linkText ?? data.title ?? '',
+        imgAltMissing: data.imgAltMissing === true,
+        ...(data.imgAlt !== undefined ? { imgAlt: data.imgAlt } : {}),
         referrers: Array.isArray(data.referrers)
             ? data.referrers.map((ref) => (
                 typeof ref === 'string'
@@ -48,6 +50,16 @@ function cloneResultEntry(data) {
                         relIndexAllowed: ref.relIndexAllowed ?? null,
                         relLabel: ref.relLabel ?? '',
                         imgAltMissing: ref.imgAltMissing === true,
+                        ...(ref.imgAlt !== undefined ? { imgAlt: ref.imgAlt } : {}),
+                        ...(Array.isArray(ref.imgAltStates) && ref.imgAltStates.length
+                            ? {
+                                imgAltStates: ref.imgAltStates.map((state) => ({
+                                    tag: state.tag ?? '',
+                                    imgAltMissing: state.imgAltMissing === true,
+                                    ...(state.imgAlt !== undefined ? { imgAlt: state.imgAlt } : {}),
+                                })),
+                            }
+                            : {}),
                     }
             ))
             : [],

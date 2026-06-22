@@ -251,6 +251,7 @@ function collectPageLinks($, currentUrl, allowedHostname) {
                 relIndexAllowed: relInfo.relIndexAllowed,
                 relLabel: relInfo.relLabel,
                 ...(context.imgAltMissing === true ? { imgAltMissing: true } : {}),
+                ...(context.imgAlt !== undefined ? { imgAlt: context.imgAlt } : {}),
             });
         } catch {
             // невалідний URL
@@ -322,11 +323,16 @@ function collectPageLinks($, currentUrl, allowedHostname) {
     $('img[src]').each((_, img) => {
         const el = $(img);
         const attribs = el.get(0)?.attribs || {};
-        const altMissing = !Object.prototype.hasOwnProperty.call(attribs, 'alt');
+        const hasAltAttr = Object.prototype.hasOwnProperty.call(attribs, 'alt');
         const linkText = el.attr('alt') ?? el.attr('title') ?? 'image';
-        addLink(el.attr('src'), linkText, { element: 'image', imgAltMissing: altMissing });
+        const imgContext = {
+            element: 'image',
+            imgAltMissing: !hasAltAttr,
+            ...(hasAltAttr ? { imgAlt: el.attr('alt') ?? '' } : {}),
+        };
+        addLink(el.attr('src'), linkText, imgContext);
         for (const srcsetUrl of parseSrcsetUrls(el.attr('srcset'))) {
-            addLink(srcsetUrl, linkText, { tag: 'img[srcset]', element: 'image', imgAltMissing: altMissing });
+            addLink(srcsetUrl, linkText, { tag: 'img[srcset]', ...imgContext });
         }
     });
 

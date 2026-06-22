@@ -28,7 +28,9 @@ function transformStoredResult(ctx, result) {
 }
 
 function resolveTableColumns(ctx) {
-    return uiHookRegistry.runWaterfallSync(UI_HOOKS.TABLE_COLUMNS, ctx, null) || [];
+    const columns = uiHookRegistry.runWaterfallSync(UI_HOOKS.TABLE_COLUMNS, ctx, null) || [];
+    const profile = getTableViewProfile(ctx.contentFilter || 'all');
+    return applyTableViewProfile(columns, profile, ctx.helpers || {});
 }
 
 function resolveDetailRows(ctx, data) {

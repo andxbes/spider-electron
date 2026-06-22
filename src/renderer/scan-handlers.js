@@ -98,7 +98,6 @@ function createScanHandlers(deps) {
 
         invalidateOutgoingLinksCache();
         invalidateDuplicateCounts();
-        tableFilters.maybeUpdateContentTypeFilterOptions();
         requestRefreshTable();
 
         if (isNew && !getSelectedUrl()) {
@@ -132,7 +131,6 @@ function createScanHandlers(deps) {
             return;
         }
 
-        tableFilters.maybeUpdateContentTypeFilterOptions();
         requestRefreshTable();
     }
 
@@ -172,7 +170,6 @@ function createScanHandlers(deps) {
             reinferAllLinkKinds();
             invalidateOutgoingLinksCache();
             invalidateDuplicateCounts();
-            tableFilters.maybeUpdateContentTypeFilterOptions();
             refreshTable();
             persistWorkspaceNow();
         });

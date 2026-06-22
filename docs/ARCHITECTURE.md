@@ -1,6 +1,6 @@
 # Spider-Electron — внутрішня документація
 
-> Останнє оновлення: 2026-06-22 (усі URL з srcset; фільтр IMG без alt)  
+> Останнє оновлення: 2026-06-22 (сортування alt, прибрано фільтр IMG alt)  
 > Короткий довідник для розробки та правок. Детальніше про підтримку — [DOC_MAINTENANCE.md](./DOC_MAINTENANCE.md).
 
 ## Що це
@@ -313,6 +313,11 @@ Renderer
 
 ## Таблиця сторінок (renderer.js)
 
+- **Вкладки типу** (`#contentTypeTabs`) над фільтрами: Усі / HTML / JavaScript / CSS / Media — фільтрують рядки і **профіль колонок** таблиці (`applyTableViewProfile` у `ui-logic.js`):
+  - **Усі, HTML** — повна таблиця (усі колонки, включно з OG через плагін);
+  - **Media** — … колонка **alt**; сортування alt (asc): `—` і лише `немає` (tier 0) → мікс `немає`+текст → лише `(порожній)` → мікс `(порожній)`+текст → алфавіт;
+  - **JavaScript, CSS** — без колонок мета-сторінки та H1 (Content-Type лишається).
+- При зміні вкладки скидається сортування, якщо колонка більше не видима.
 - Спочатку рендериться **100** рядків (`TABLE_VISIBLE_INITIAL`); решта — по **50** при прокрутці вниз (`TABLE_LAZY_LOAD_SIZE`).
 - Контейнер `#pagesTableScroll` — **горизонтальний і вертикальний** скрол (`results-table-wrap`). Таблиця `#resultsDataTable` має `width: max-content; min-width: 100%` — колонки не стискаються нижче заданої ширини.
 - Заголовки з хуків `ui:tableColumns`; ширини — `colgroup` + `table-column-layout.js`. **Resize:** перетягніть правий край заголовка; подвійний клік на роздільнику — скинути ширину. Збереження в `localStorage` (`spider.resultsTableColumnWidths`).
@@ -321,13 +326,13 @@ Renderer
 
 ## Фільтри таблиці (renderer.js)
 
-- **Тип** — класифікація **самого URL** в `scanResults`:
+- **Тип** — вкладки `#contentTypeTabs` (див. вище); класифікація URL у `scanResults`:
   - `HTML` — завантажені URL з `Content-Type: text/html` / `application/xhtml`;
   - `JavaScript` / `CSS` / `Media` — за `kind`, тегом (`script[src]`, `link[rel=stylesheet]`) і розширенням URL;
   - `Усі` — усі записи в `scanResults`.
 - **Джерело** — `external: true/false` (або `hostname` URL).
 - Стан фільтрів — `activeContentFilter`, `activeSourceFilter` у пам’яті; не скидається під час сканування.
-- Інші фільтри: статус HTTP, індексація, H1, дублікати, **IMG alt** (`missing` — зображення з `<img>` без атрибута `alt`; порожній `alt=""` не враховується).
+- Інші фільтри: статус HTTP, індексація, H1, дублікати.
 
 Колонки **Внутр.** / **Зовн.** — кількість посилань **з** обраної сторінки (через `referrersMap`: хто посилається **на** URL з цієї сторінки як джерела).
 
