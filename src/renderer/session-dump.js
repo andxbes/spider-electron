@@ -47,6 +47,7 @@ function cloneResultEntry(data) {
                         relFollowAllowed: ref.relFollowAllowed ?? null,
                         relIndexAllowed: ref.relIndexAllowed ?? null,
                         relLabel: ref.relLabel ?? '',
+                        imgAltMissing: ref.imgAltMissing === true,
                     }
             ))
             : [],

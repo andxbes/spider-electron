@@ -428,6 +428,7 @@ function normalizeReferrerEntry(item) {
         relFollowAllowed: item?.relFollowAllowed ?? null,
         relIndexAllowed: item?.relIndexAllowed ?? null,
         relLabel: item?.relLabel || '',
+        imgAltMissing: item?.imgAltMissing === true,
     };
 }
 
@@ -923,6 +924,38 @@ function matchesSearchFilterImpl(data, searchQuery = '', getReferrersForUrl = ()
     return getRowSearchTextImpl(data, getReferrersForUrl).includes(query);
 }
 
+function isImgOutlinkTag(tag) {
+    const normalized = String(tag || '');
+    return normalized === 'img[src]' || normalized === 'img[srcset]';
+}
+
+function isImageTableRow(data) {
+    if (isImgOutlinkTag(data.tag)) {
+        return true;
+    }
+    if (inferLinkKind(data) === 'images') {
+        return true;
+    }
+    const contentType = (data.contentType || '').toLowerCase();
+    return contentType.startsWith('image/');
+}
+
+function hasImgReferrerWithoutAlt(url, getReferrersForUrl = () => []) {
+    return getReferrersForUrl(url).some((ref) => (
+        isImgOutlinkTag(ref.tag) && ref.imgAltMissing === true
+    ));
+}
+
+function matchesImgAltFilterImpl(data, activeImgAltFilter = 'all', getReferrersForUrl = () => []) {
+    if (activeImgAltFilter !== 'missing') {
+        return true;
+    }
+    if (!isImageTableRow(data)) {
+        return false;
+    }
+    return hasImgReferrerWithoutAlt(data.url, getReferrersForUrl);
+}
+
 function passesTableFiltersImpl(data, ctx) {
     const {
         activeSearchQuery = '',
@@ -931,6 +964,7 @@ function passesTableFiltersImpl(data, ctx) {
         activeIndexingFilter = 'all',
         activeH1Filter = 'all',
         activeDuplicateFilter = 'all',
+        activeImgAltFilter = 'all',
         activeContentFilter = 'all',
         scanHostname = '',
         getDuplicateCounts = () => ({ h1: new Map(), title: new Map(), description: new Map() }),
@@ -965,6 +999,9 @@ function passesTableFiltersImpl(data, ctx) {
         if (activeDuplicateFilter === 'description' && !hasDuplicateField(data.metaDescription, counts.description)) {
             return false;
         }
+    }
+    if (!matchesImgAltFilterImpl(data, activeImgAltFilter, getReferrersForUrl)) {
+        return false;
     }
     return true;
 }
@@ -1277,6 +1314,10 @@ const exported = {
     matchesStatusFilter,
     isMetaRobotsBlocked,
     isXRobotsTagBlocked,
+    isImgOutlinkTag,
+    isImageTableRow,
+    hasImgReferrerWithoutAlt,
+    matchesImgAltFilterImpl,
     isRobotsTxtBlocked,
     isIndexingBlocked,
     isIndexingAllowed,

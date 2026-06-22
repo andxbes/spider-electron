@@ -7,6 +7,7 @@ const {
     isSameHost,
     isSkippableHref,
     firstSrcsetUrl,
+    parseSrcsetUrls,
     looksLikeJavascriptUrl,
     isRedirectStatus,
     resolveRedirectTarget,
@@ -35,6 +36,15 @@ describe('url-utils', () => {
 
     it('firstSrcsetUrl picks first candidate', () => {
         assert.equal(firstSrcsetUrl('a.webp 1x, b.webp 2x'), 'a.webp');
+    });
+
+    it('parseSrcsetUrls returns all candidates', () => {
+        assert.deepEqual(
+            parseSrcsetUrls('a.webp 1x, b.webp 2x, /c.webp 480w'),
+            ['a.webp', 'b.webp', '/c.webp']
+        );
+        assert.deepEqual(parseSrcsetUrls(''), []);
+        assert.deepEqual(parseSrcsetUrls('only.jpg 2x'), ['only.jpg']);
     });
 
     it('looksLikeJavascriptUrl detects js paths', () => {

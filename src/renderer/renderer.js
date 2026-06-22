@@ -27,6 +27,7 @@ const statusFilter = document.getElementById('statusFilter');
 const indexingFilter = document.getElementById('indexingFilter');
 const h1Filter = document.getElementById('h1Filter');
 const duplicateFilter = document.getElementById('duplicateFilter');
+const imgAltFilter = document.getElementById('imgAltFilter');
 const sourceFilter = document.getElementById('sourceFilter');
 const tableSearch = document.getElementById('tableSearch');
 const filterCount = document.getElementById('filterCount');
@@ -227,6 +228,7 @@ const tableFilters = createTableFilters({
         indexingFilter,
         h1Filter,
         duplicateFilter,
+        imgAltFilter,
         sourceFilter,
         tableSearch,
     },
@@ -607,7 +609,7 @@ async function handleMenuLoadedDump(payload) {
 window.api.onSessionDumpRequestSave(() => saveSessionDumpToFile());
 window.api.onSessionDumpLoaded((payload) => handleMenuLoadedDump(payload));
 
-startButton.addEventListener('click', async () => {
+async function tryStartScanFromInput() {
     const startUrl = urlInput.value.trim();
     try {
         new URL(startUrl);
@@ -615,6 +617,18 @@ startButton.addEventListener('click', async () => {
     } catch {
         alert('Будь ласка, введіть коректний URL (наприклад, https://example.com).');
     }
+}
+
+startButton.addEventListener('click', () => {
+    tryStartScanFromInput();
+});
+
+urlInput.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' || uiState === 'running') {
+        return;
+    }
+    event.preventDefault();
+    tryStartScanFromInput();
 });
 
 stopButton.addEventListener('click', async () => {
@@ -637,14 +651,8 @@ resumeButton.addEventListener('click', async () => {
     setUIState('running');
 });
 
-restartButton.addEventListener('click', async () => {
-    const startUrl = urlInput.value.trim();
-    try {
-        new URL(startUrl);
-        await beginScan(startUrl);
-    } catch {
-        alert('Будь ласка, введіть коректний URL (наприклад, https://example.com).');
-    }
+restartButton.addEventListener('click', () => {
+    tryStartScanFromInput();
 });
 
 const DETAIL_PANEL_HEIGHT_KEY = 'detailPanelHeight';

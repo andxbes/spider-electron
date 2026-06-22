@@ -117,6 +117,55 @@ describe('spider-logic', () => {
         assert.ok(links.find((l) => l.tag === 'script[src]'));
     });
 
+    it('collectPageLinks marks img without alt attribute', () => {
+        const html = `
+            <html><body>
+                <img src="/no-alt.png">
+                <img src="/empty-alt.png" alt="">
+                <img src="/with-alt.png" alt="Logo">
+            </body></html>`;
+        const $ = cheerio.load(html);
+        const links = collectPageLinks($, 'https://example.com/', 'example.com');
+        const noAlt = links.find((l) => l.url.endsWith('/no-alt.png'));
+        const emptyAlt = links.find((l) => l.url.endsWith('/empty-alt.png'));
+        const withAlt = links.find((l) => l.url.endsWith('/with-alt.png'));
+        assert.equal(noAlt?.imgAltMissing, true);
+        assert.equal(emptyAlt?.imgAltMissing, undefined);
+        assert.equal(withAlt?.imgAltMissing, undefined);
+    });
+
+    it('collectPageLinks adds every img srcset candidate', () => {
+        const html = `
+            <html><body>
+                <img src="/fallback.jpg" srcset="/small.webp 480w, /large.webp 960w">
+            </body></html>`;
+        const $ = cheerio.load(html);
+        const links = collectPageLinks($, 'https://example.com/', 'example.com');
+        const srcsetLinks = links.filter((l) => l.tag === 'img[srcset]');
+        assert.deepEqual(
+            srcsetLinks.map((l) => l.url).sort(),
+            [
+                'https://example.com/large.webp',
+                'https://example.com/small.webp',
+            ]
+        );
+    });
+
+    it('mergeReferrerMeta preserves imgAltMissing from any img edge', () => {
+        const { mergeReferrerMeta } = require('../../src/main/crawl-referrers');
+        const map = new Map();
+        mergeReferrerMeta(map, 'https://example.com/page', {
+            tag: 'img[src]',
+            text: 'image',
+            imgAltMissing: true,
+        });
+        mergeReferrerMeta(map, 'https://example.com/page', {
+            tag: 'img[src]',
+            text: 'Logo',
+        });
+        assert.equal(map.get('https://example.com/page').imgAltMissing, true);
+    });
+
     it('extractPageTitle prefers head title and og fallback', () => {
         const $ = cheerio.load('<html><head><title>Head</title></head></html>');
         assert.equal(extractPageTitle($), 'Head');

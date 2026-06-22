@@ -16,6 +16,7 @@ const {
     duplicateCountBadge,
     buildH1DuplicateCounts,
     linkTableSortIndicator,
+    matchesImgAltFilterImpl,
 } = require('../../src/renderer/ui-logic');
 
 describe('ui-logic', () => {
@@ -71,6 +72,7 @@ describe('ui-logic', () => {
             activeIndexingFilter: 'all',
             activeH1Filter: 'all',
             activeDuplicateFilter: 'all',
+            activeImgAltFilter: 'all',
             activeContentFilter: 'all',
             scanHostname: 'example.com',
             getDuplicateCounts: () => ({ h1: new Map(), title: new Map(), description: new Map() }),
@@ -78,6 +80,35 @@ describe('ui-logic', () => {
         };
         assert.equal(passesTableFiltersImpl(row, ctx), true);
         assert.equal(passesTableFiltersImpl(row, { ...ctx, activeSearchQuery: 'missing' }), false);
+    });
+
+    it('matchesImgAltFilterImpl shows images linked from img without alt attribute', () => {
+        const imageRow = {
+            url: 'https://example.com/logo.png',
+            contentType: 'image/png',
+            tag: 'img[src]',
+        };
+        const htmlRow = {
+            url: 'https://example.com/',
+            contentType: 'text/html',
+        };
+        const getReferrers = (url) => (
+            url === imageRow.url
+                ? [{ href: 'https://example.com/', tag: 'img[src]', imgAltMissing: true }]
+                : []
+        );
+        assert.equal(
+            matchesImgAltFilterImpl(imageRow, 'missing', getReferrers),
+            true
+        );
+        assert.equal(
+            matchesImgAltFilterImpl(htmlRow, 'missing', getReferrers),
+            false
+        );
+        assert.equal(
+            matchesImgAltFilterImpl(imageRow, 'all', getReferrers),
+            true
+        );
     });
 
     it('normalizeContentTypeFilter maps legacy values', () => {

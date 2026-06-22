@@ -233,6 +233,7 @@ function createScanStore(options = {}) {
                 ? (ref.relIndexAllowed ?? null)
                 : (targetEntry.relIndexAllowed ?? null),
             relLabel: edgeHasRelMeta ? (ref.relLabel || '') : (targetEntry.relLabel || ''),
+            imgAltMissing: ref.imgAltMissing === true,
         });
     }
 

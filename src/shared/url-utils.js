@@ -46,9 +46,26 @@ function isSkippableHref(href) {
         || value === '#';
 }
 
+function parseSrcsetUrls(srcset) {
+    const raw = String(srcset || '').trim();
+    if (!raw) {
+        return [];
+    }
+    const urls = [];
+    const seen = new Set();
+    for (const part of raw.split(',')) {
+        const url = part.trim().split(/\s+/)[0];
+        if (!url || seen.has(url)) {
+            continue;
+        }
+        seen.add(url);
+        urls.push(url);
+    }
+    return urls;
+}
+
 function firstSrcsetUrl(srcset) {
-    const first = String(srcset || '').split(',')[0]?.trim().split(/\s+/)[0];
-    return first || '';
+    return parseSrcsetUrls(srcset)[0] || '';
 }
 
 function looksLikeJavascriptUrl(href, ext, pathLower) {
@@ -93,6 +110,7 @@ module.exports = {
     isSameHost,
     isSkippableHref,
     firstSrcsetUrl,
+    parseSrcsetUrls,
     looksLikeJavascriptUrl,
     isRedirectStatus,
     resolveRedirectTarget,

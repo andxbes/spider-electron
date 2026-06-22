@@ -12,6 +12,7 @@ function normalizeReferrerMeta(linkMeta = {}) {
         relFollowAllowed: meta.relFollowAllowed ?? null,
         relIndexAllowed: meta.relIndexAllowed ?? null,
         relLabel: meta.relLabel || '',
+        imgAltMissing: meta.imgAltMissing === true,
     };
 }
 
@@ -47,6 +48,7 @@ function mergeReferrerMeta(targetMap, referrerUrl, linkMeta = {}) {
         relFollowAllowed: mergeRelFlag(existing.relFollowAllowed, incoming.relFollowAllowed),
         relIndexAllowed: mergeRelFlag(existing.relIndexAllowed, incoming.relIndexAllowed),
         relLabel: existing.relLabel || incoming.relLabel,
+        imgAltMissing: existing.imgAltMissing || incoming.imgAltMissing,
     });
 }
 
@@ -72,6 +74,7 @@ function referrerEntry(href, linkMeta = {}) {
         relFollowAllowed: meta.relFollowAllowed,
         relIndexAllowed: meta.relIndexAllowed,
         relLabel: meta.relLabel,
+        imgAltMissing: meta.imgAltMissing === true,
     };
 }
 
@@ -110,6 +113,7 @@ function buildReferrerLinkMeta(link) {
         relFollowAllowed: link.relFollowAllowed,
         relIndexAllowed: link.relIndexAllowed,
         relLabel: link.relLabel || '',
+        imgAltMissing: link.imgAltMissing === true,
     };
 }
 

@@ -5,7 +5,7 @@ const {
     getUrlPathnameLower,
     isSameHost,
     isSkippableHref,
-    firstSrcsetUrl,
+    parseSrcsetUrls,
     looksLikeJavascriptUrl,
 } = require('../shared/url-utils');
 
@@ -250,6 +250,7 @@ function collectPageLinks($, currentUrl, allowedHostname) {
                 relFollowAllowed: relInfo.relFollowAllowed,
                 relIndexAllowed: relInfo.relIndexAllowed,
                 relLabel: relInfo.relLabel,
+                ...(context.imgAltMissing === true ? { imgAltMissing: true } : {}),
             });
         } catch {
             // невалідний URL
@@ -320,21 +321,22 @@ function collectPageLinks($, currentUrl, allowedHostname) {
 
     $('img[src]').each((_, img) => {
         const el = $(img);
-        addLink(el.attr('src'), el.attr('alt') || el.attr('title') || 'image', { element: 'image' });
-        const srcset = firstSrcsetUrl(el.attr('srcset'));
-        if (srcset) {
-            addLink(srcset, el.attr('alt') || el.attr('title') || 'image', { tag: 'img[srcset]' });
+        const attribs = el.get(0)?.attribs || {};
+        const altMissing = !Object.prototype.hasOwnProperty.call(attribs, 'alt');
+        const linkText = el.attr('alt') ?? el.attr('title') ?? 'image';
+        addLink(el.attr('src'), linkText, { element: 'image', imgAltMissing: altMissing });
+        for (const srcsetUrl of parseSrcsetUrls(el.attr('srcset'))) {
+            addLink(srcsetUrl, linkText, { tag: 'img[srcset]', element: 'image', imgAltMissing: altMissing });
         }
     });
 
     $('picture source[srcset], source[src]').each((_, source) => {
         const el = $(source);
-        const srcset = firstSrcsetUrl(el.attr('srcset'));
         if (el.attr('src')) {
             addLink(el.attr('src'), 'media', { tag: 'source[src]' });
         }
-        if (srcset) {
-            addLink(srcset, 'media', { tag: 'source[srcset]' });
+        for (const srcsetUrl of parseSrcsetUrls(el.attr('srcset'))) {
+            addLink(srcsetUrl, 'media', { tag: 'source[srcset]' });
         }
     });
 

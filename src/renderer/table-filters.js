@@ -39,6 +39,7 @@ function createTableFilters(deps) {
         indexingFilter,
         h1Filter,
         duplicateFilter,
+        imgAltFilter,
         sourceFilter,
         tableSearch,
     } = elements;
@@ -48,6 +49,7 @@ function createTableFilters(deps) {
     let activeIndexingFilter = 'all';
     let activeH1Filter = 'all';
     let activeDuplicateFilter = 'all';
+    let activeImgAltFilter = 'all';
     let activeSourceFilter = 'all';
     let activeSearchQuery = '';
     let knownPresentContentTypesKey = '';
@@ -147,6 +149,7 @@ function createTableFilters(deps) {
             activeIndexingFilter,
             activeH1Filter,
             activeDuplicateFilter,
+            activeImgAltFilter,
             activeContentFilter,
             scanHostname: getScanHostname(),
             getDuplicateCounts: () => scanStore.getDuplicateCounts(),
@@ -180,6 +183,7 @@ function createTableFilters(deps) {
             && activeIndexingFilter === 'all'
             && activeH1Filter === 'all'
             && activeDuplicateFilter === 'all'
+            && activeImgAltFilter === 'all'
             && !activeSearchQuery.trim()
             && !getSortState().column;
     }
@@ -271,6 +275,7 @@ function createTableFilters(deps) {
         activeIndexingFilter = 'all';
         activeH1Filter = 'all';
         activeDuplicateFilter = 'all';
+        activeImgAltFilter = 'all';
         activeSearchQuery = '';
         setActiveSourceFilter('all');
         knownStatusCodes = new Set();
@@ -290,6 +295,9 @@ function createTableFilters(deps) {
         if (duplicateFilter) {
             duplicateFilter.value = 'all';
         }
+        if (imgAltFilter) {
+            imgAltFilter.value = 'all';
+        }
         rebuildContentTypeFilterOptions({ preserveValue: false });
         updateStatusFilterOptions({ force: true });
     }
@@ -299,6 +307,7 @@ function createTableFilters(deps) {
         activeIndexingFilter = filters.indexing || 'all';
         activeH1Filter = filters.h1 || 'all';
         activeDuplicateFilter = filters.duplicate || 'all';
+        activeImgAltFilter = filters.imgAlt || 'all';
         setActiveSourceFilter(filters.source || filters.viewMode || filters.externalLinks || 'all');
         setActiveContentFilter(filters.content || filters.externalType || 'all');
         activeSearchQuery = filters.search || '';
@@ -317,6 +326,9 @@ function createTableFilters(deps) {
         if (duplicateFilter) {
             duplicateFilter.value = activeDuplicateFilter;
         }
+        if (imgAltFilter) {
+            imgAltFilter.value = activeImgAltFilter;
+        }
         rebuildContentTypeFilterOptions({ preserveValue: true });
         updateStatusFilterOptions({ force: true });
     }
@@ -328,6 +340,7 @@ function createTableFilters(deps) {
             indexing: activeIndexingFilter,
             h1: activeH1Filter,
             duplicate: activeDuplicateFilter,
+            imgAlt: activeImgAltFilter,
             source: activeSourceFilter,
             search: activeSearchQuery,
         };
@@ -395,6 +408,13 @@ function createTableFilters(deps) {
         if (duplicateFilter) {
             duplicateFilter.addEventListener('change', () => {
                 activeDuplicateFilter = duplicateFilter.value;
+                onFilterChange({ immediate: true });
+            });
+        }
+
+        if (imgAltFilter) {
+            imgAltFilter.addEventListener('change', () => {
+                activeImgAltFilter = imgAltFilter.value;
                 onFilterChange({ immediate: true });
             });
         }
