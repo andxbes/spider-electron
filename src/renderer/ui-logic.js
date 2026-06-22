@@ -84,6 +84,19 @@ function metaRobotsCellHtml(data) {
     return `<span class="${cls} font-medium" title="${escapeHtml(title)}: ${escapeHtml(label)}">${escapeHtml(label)}</span>`;
 }
 
+function xRobotsTagCellHtml(data) {
+    const status = data.xRobotsTagStatus || 'none';
+    if (status === 'none') {
+        return '<span class="text-zinc-400 italic">—</span>';
+    }
+    const label = data.xRobotsTagLabel || data.xRobotsTag || '';
+    const cls = indexingStateClass('meta', status);
+    const title = status === 'allowed'
+        ? 'Дозволено для індексації та обходу (X-Robots-Tag)'
+        : 'Закрито (X-Robots-Tag: noindex / nofollow)';
+    return `<span class="${cls} font-medium" title="${escapeHtml(title)}: ${escapeHtml(label)}">${escapeHtml(label)}</span>`;
+}
+
 function formatResponseTimeMs(ms) {
     if (ms === null || ms === undefined || Number.isNaN(ms)) {
         return '<span class="text-zinc-400 italic">—</span>';
@@ -118,6 +131,13 @@ function statusSortValue(status) {
 
 function metaRobotsSortValue(data) {
     const status = data.metaRobotsStatus || 'none';
+    if (status === 'none') return 0;
+    if (status === 'allowed') return 1;
+    return 2;
+}
+
+function xRobotsTagSortValue(data) {
+    const status = data.xRobotsTagStatus || 'none';
     if (status === 'none') return 0;
     if (status === 'allowed') return 1;
     return 2;
@@ -354,12 +374,17 @@ function isMetaRobotsBlocked(data) {
     return ['noindex', 'nofollow', 'closed'].includes(status);
 }
 
+function isXRobotsTagBlocked(data) {
+    const status = data.xRobotsTagStatus || 'none';
+    return ['noindex', 'nofollow', 'closed'].includes(status);
+}
+
 function isRobotsTxtBlocked(data) {
     return data.robotsAllowed === false;
 }
 
 function isIndexingBlocked(data) {
-    return isMetaRobotsBlocked(data) || isRobotsTxtBlocked(data);
+    return isMetaRobotsBlocked(data) || isXRobotsTagBlocked(data) || isRobotsTxtBlocked(data);
 }
 
 function isIndexingAllowed(data) {
@@ -370,6 +395,10 @@ function isIndexingAllowed(data) {
         return false;
     }
     const metaStatus = data.metaRobotsStatus || 'none';
+    const xStatus = data.xRobotsTagStatus || 'none';
+    if (xStatus !== 'none' && xStatus !== 'allowed') {
+        return false;
+    }
     return metaStatus === 'allowed';
 }
 
@@ -874,7 +903,12 @@ function getRowSearchTextImpl(data, getReferrersForUrl = () => []) {
         data.relLabel,
         data.metaRobots,
         data.metaRobotsLabel,
+        data.xRobotsTag,
+        data.xRobotsTagLabel,
         data.robotsRule,
+        ...(Array.isArray(data.responseHeaders)
+            ? data.responseHeaders.flatMap((header) => [header.name, header.value])
+            : []),
         headingText,
         referrerText,
         formatLinkKindLabel(getResourceKind(data)),
@@ -991,6 +1025,29 @@ function formatMetaRobotsDetail(data) {
     return `<span class="${cls} font-medium">${formatMultiValueDetail(label)}</span>`;
 }
 
+function formatXRobotsTagDetail(data) {
+    const status = data.xRobotsTagStatus || 'none';
+    if (status === 'none' && !data.xRobotsTag && !data.xRobotsTagLabel) {
+        return '<span class="text-zinc-400 italic">—</span>';
+    }
+    const label = data.xRobotsTagLabel || data.xRobotsTag || '';
+    const cls = indexingStateClass('meta', status);
+    return `<span class="${cls} font-medium">${formatMultiValueDetail(label)}</span>`;
+}
+
+function formatResponseHeadersDetail(data) {
+    const headers = data.responseHeaders;
+    if (!Array.isArray(headers) || headers.length === 0) {
+        return '<span class="text-zinc-400 italic">—</span>';
+    }
+    const lines = headers.map(({ name, value }) => (
+        `<div class="font-mono text-[11px] leading-relaxed">`
+        + `<span class="text-zinc-500">${escapeHtml(name)}:</span> ${escapeHtml(value)}`
+        + '</div>'
+    ));
+    return `<div class="space-y-0.5">${lines.join('')}</div>`;
+}
+
 function decodeUrlAttr(encoded) {
     try {
         return decodeURIComponent(encoded);
@@ -1050,6 +1107,10 @@ function compareRowsImpl(a, b, sortState = { column: null, direction: 'asc' }, i
         case 'metaRobots':
             va = metaRobotsSortValue(a);
             vb = metaRobotsSortValue(b);
+            break;
+        case 'xRobotsTag':
+            va = xRobotsTagSortValue(a);
+            vb = xRobotsTagSortValue(b);
             break;
         case 'robotsTxt':
             va = robotsTxtSortValue(a);
@@ -1159,6 +1220,7 @@ const exported = {
     statusRowClass,
     indexingStateClass,
     metaRobotsCellHtml,
+    xRobotsTagCellHtml,
     formatResponseTimeMs,
     robotsTxtCellHtml,
     statusSortValue,
@@ -1209,9 +1271,12 @@ const exported = {
     formatCsvUrlListPreview,
     formatRobotsTxtDetail,
     formatMetaRobotsDetail,
+    formatXRobotsTagDetail,
+    formatResponseHeadersDetail,
     decodeUrlAttr,
     matchesStatusFilter,
     isMetaRobotsBlocked,
+    isXRobotsTagBlocked,
     isRobotsTxtBlocked,
     isIndexingBlocked,
     isIndexingAllowed,

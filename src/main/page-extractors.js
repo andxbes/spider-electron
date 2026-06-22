@@ -67,17 +67,27 @@ function extractHeadings($) {
 }
 
 function getXRobotsTag(response) {
+    if (!response?.headers) {
+        return '';
+    }
     return response.headers.get('x-robots-tag') || '';
 }
 
-function extractMetaRobotsRaw($, response) {
+function collectResponseHeaders(response) {
+    if (!response?.headers) {
+        return [];
+    }
+    const headers = [];
+    for (const [name, value] of response.headers.entries()) {
+        headers.push({ name, value });
+    }
+    return headers.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function extractMetaRobotsRaw($) {
     let values = collectMetaAttributeValues($, 'head meta[name="robots"], head meta[name="googlebot"]');
     if (!values.length) {
         values = collectMetaAttributeValues($, 'meta[name="robots"], meta[name="googlebot"]');
-    }
-    const xRobots = getXRobotsTag(response).trim();
-    if (xRobots && !values.some((value) => value.toLowerCase() === xRobots.toLowerCase())) {
-        values.push(xRobots);
     }
     return values.join('; ');
 }
@@ -91,5 +101,6 @@ module.exports = {
     extractMetaDescription,
     extractHeadings,
     getXRobotsTag,
+    collectResponseHeaders,
     extractMetaRobotsRaw,
 };

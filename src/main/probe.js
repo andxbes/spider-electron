@@ -1,4 +1,3 @@
-const { getXRobotsTag } = require('./page-extractors');
 const {
     isRedirectStatus,
     resolveRedirectTarget,
@@ -162,7 +161,8 @@ async function probeDiscoveredLink(url, referrer, link, browserWindow) {
                 redirectUrl: currentUrl !== url ? currentUrl : undefined,
                 ...redirectTracker.toFields(),
             }),
-            getXRobotsTag(response) || null
+            null,
+            response
         ));
     } catch (error) {
         console.error(`Помилка перевірки ${label} ${url}: ${error.message}`);

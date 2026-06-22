@@ -1,3 +1,5 @@
+const { getXRobotsTag, collectResponseHeaders } = require('./page-extractors');
+
 const DEFAULT_ROBOTS_UA = 'MyElectronSpider/1.0';
 let activeRobotsUa = DEFAULT_ROBOTS_UA;
 
@@ -17,6 +19,10 @@ function buildSpiderResult(overrides) {
         metaRobots: '',
         metaRobotsStatus: 'none',
         metaRobotsLabel: '',
+        xRobotsTag: '',
+        xRobotsTagStatus: 'none',
+        xRobotsTagLabel: '',
+        responseHeaders: [],
         robotsAllowed: null,
         robotsRule: '',
         responseTimeMs: null,
@@ -105,19 +111,42 @@ function getRobotsTxtInfo(robots, robotsText, url) {
     };
 }
 
-function buildResultWithIndexing(robots, robotsText, url, fields, metaRobotsRaw = null) {
-    const metaFields = metaRobotsRaw === null
+function getResponseHeaderFields(response) {
+    if (!response?.headers) {
+        return {
+            responseHeaders: [],
+            xRobotsTag: '',
+            xRobotsTagStatus: 'none',
+            xRobotsTagLabel: '',
+        };
+    }
+
+    const raw = getXRobotsTag(response).trim();
+    const parsed = raw ? parseMetaRobotsDirective(raw) : null;
+
+    return {
+        responseHeaders: collectResponseHeaders(response),
+        xRobotsTag: parsed?.metaRobots || '',
+        xRobotsTagStatus: parsed ? parsed.metaRobotsStatus : 'none',
+        xRobotsTagLabel: parsed ? parsed.metaRobotsLabel : '',
+    };
+}
+
+function buildResultWithIndexing(robots, robotsText, url, fields, metaRobotsRaw = null, response = null) {
+    const metaParsed = metaRobotsRaw === null
         ? {
             metaRobots: '',
             metaRobotsStatus: 'none',
             metaRobotsLabel: '',
-            blocksFollow: false,
         }
         : parseMetaRobotsDirective(metaRobotsRaw);
+
+    const { blocksFollow: _blocksFollow, ...metaFields } = metaParsed;
 
     return buildSpiderResult({
         ...getRobotsTxtInfo(robots, robotsText, url),
         ...metaFields,
+        ...getResponseHeaderFields(response),
         ...fields,
     });
 }
@@ -130,4 +159,5 @@ module.exports = {
     parseMetaRobotsDirective,
     getRobotsTxtInfo,
     buildResultWithIndexing,
+    getResponseHeaderFields,
 };

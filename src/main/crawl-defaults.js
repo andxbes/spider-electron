@@ -16,7 +16,7 @@ function registerDefaultCrawlHooks() {
         metaDescription: extractMetaDescription(ctx.$),
         metaCanonical: ctx.$('link[rel="canonical"]').attr('href') || '',
         headings: extractHeadings(ctx.$),
-        metaRobotsRaw: extractMetaRobotsRaw(ctx.$, ctx.response),
+        metaRobotsRaw: extractMetaRobotsRaw(ctx.$),
     }), { priority: 0, id: 'default-extract-page' });
 
     crawlHookRegistry.register(CRAWL_HOOKS.BUILD_RESULT, (_ctx, result) => result, {

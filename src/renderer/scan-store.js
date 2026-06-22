@@ -15,10 +15,14 @@ const PAGE_EXTRACT_FIELDS = [
     'metaRobots',
     'metaRobotsStatus',
     'metaRobotsLabel',
+    'xRobotsTag',
+    'xRobotsTagStatus',
+    'xRobotsTagLabel',
+    'responseHeaders',
 ];
 
 function isEmptyExtractField(field, value) {
-    if (field === 'headings') {
+    if (field === 'headings' || field === 'responseHeaders') {
         return !Array.isArray(value) || value.length === 0;
     }
     return value === '' || value === undefined || value === null;

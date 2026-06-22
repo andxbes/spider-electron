@@ -13,6 +13,12 @@ function cloneResultEntry(data) {
         metaRobots: data.metaRobots ?? '',
         metaRobotsStatus: data.metaRobotsStatus ?? 'none',
         metaRobotsLabel: data.metaRobotsLabel ?? '',
+        xRobotsTag: data.xRobotsTag ?? '',
+        xRobotsTagStatus: data.xRobotsTagStatus ?? 'none',
+        xRobotsTagLabel: data.xRobotsTagLabel ?? '',
+        responseHeaders: Array.isArray(data.responseHeaders)
+            ? data.responseHeaders.map((header) => ({ ...header }))
+            : [],
         robotsAllowed: data.robotsAllowed ?? null,
         robotsRule: data.robotsRule ?? '',
         responseTimeMs: data.responseTimeMs ?? null,

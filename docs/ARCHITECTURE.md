@@ -1,6 +1,6 @@
 # Spider-Electron — внутрішня документація
 
-> Останнє оновлення: 2026-06-17 (CSV-експорт вхідних/вихідних посилань у панелі деталей)  
+> Останнє оновлення: 2026-06-22 (колонка X-Robots-Tag, заголовки відповіді в деталях)  
 > Короткий довідник для розробки та правок. Детальніше про підтримку — [DOC_MAINTENANCE.md](./DOC_MAINTENANCE.md).
 
 ## Що це
@@ -206,7 +206,7 @@ Renderer
 5. **4xx/5xx** — `status` = код відповіді, `title` порожній.
 6. **200** — cheerio: title, meta description, canonical, headings, link count → `spider-result`.
 7. Якщо `<meta name="robots" content="nofollow">` — не додає нові посилання.
-8. Збір URL з HTML: `<a>`, `<link>`, `<script>`, `<img>`, … — HTML-сторінки через `crawl`; **медіа, CSS, JS і зовнішні** — stub у batch, потім **probe** (status + `content-type` + robots.txt + `X-Robots-Tag`, без HTML) — навіть при `rel=nofollow`. BFS лише для внутрішніх навігаційних: `a[href]`, `area[href]`, `form[action]`, `iframe[src]` (HTML). Stub для не-навігаційних ресурсів — **завжди**; для навігаційних — лише якщо URL не в черзі обходу.
+8. Збір URL з HTML: `<a>`, `<link>`, `<script>`, `<img>`, … — HTML-сторінки через `crawl`; **медіа, CSS, JS і зовнішні** — stub у batch, потім **probe** (status + `content-type` + robots.txt + `X-Robots-Tag`, без HTML) — навіть при `rel=nofollow`. BFS лише для внутрішніх навігаційних: `a[href]`, `area[href]`, `form[action]`, `iframe[src]` (HTML). Stub для не-навігаційних ресурсів — **завжди**; для навігаційних — лише якщо URL не в черзі обходу. У `spider-result`: **Meta robots** — лише `<meta name="robots">` / `googlebot`; **X-Robots-Tag** — окремо з HTTP-заголовка; **responseHeaders** — усі заголовки відповіді (для UI / дампу).
 
 **Завершення:** порожня черга або досягнуто `maxPages` (якщо > 0) → `spider-referrers-update` → `spider-end`. На renderer після referrers — `materializeDiscoveredFromReferrers()`: URL з referrers, яких немає в `scanResults`, додаються як знайдені (`fetched: false`).
 
@@ -286,6 +286,15 @@ Renderer
   contentType?: string,
   metaDescription?: string,
   metaCanonical?: string,
+  metaRobots?: string,
+  metaRobotsStatus?: 'none' | 'allowed' | 'noindex' | 'nofollow' | 'closed',
+  metaRobotsLabel?: string,
+  xRobotsTag?: string,
+  xRobotsTagStatus?: 'none' | 'allowed' | 'noindex' | 'nofollow' | 'closed',
+  xRobotsTagLabel?: string,
+  responseHeaders?: [{ name: string, value: string }],
+  robotsAllowed?: boolean | null,
+  robotsRule?: string,
   headings?: [{ level: number, text: string }],
   redirectUrl?: string,
   redirectHopCount?: number,

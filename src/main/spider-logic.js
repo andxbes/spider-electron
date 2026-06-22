@@ -170,7 +170,7 @@ async function crawl(url, referrer, browserWindow) {
                 referrers,
                 responseTimeMs: redirectTracker.firstHopResponseTimeMs ?? responseTimeMs,
                 ...redirectTracker.toFields(),
-            }));
+            }, null, response));
         }
 
         while (isRedirectStatus(response.status) && redirectTracker.canFollow()) {
@@ -184,7 +184,7 @@ async function crawl(url, referrer, browserWindow) {
                 redirectUrl: redirectUrl,
                 responseTimeMs,
                 ...redirectHopOnlyFields(url, currentUrl),
-            }));
+            }, null, response));
 
             if (!redirectUrl) {
                 emitRedirectChainSummary();
@@ -281,7 +281,7 @@ async function crawl(url, referrer, browserWindow) {
                 redirectUrl: resolveRedirectTarget(currentUrl, response.headers.get('location')),
                 responseTimeMs,
                 ...redirectHopOnlyFields(url, currentUrl),
-            }));
+            }, null, response));
             emitRedirectChainSummary();
             return;
         }
@@ -310,7 +310,8 @@ async function crawl(url, referrer, browserWindow) {
                     contentType,
                     responseTimeMs,
                 },
-                getXRobotsTag(response) || null
+                null,
+                response
             ));
             return;
         }
@@ -328,7 +329,8 @@ async function crawl(url, referrer, browserWindow) {
                     contentType,
                     responseTimeMs,
                 },
-                getXRobotsTag(response) || null
+                null,
+                response
             ));
             return;
         }
@@ -354,6 +356,8 @@ async function crawl(url, referrer, browserWindow) {
             ...pluginPageFields
         } = pageFields;
         const metaRobotsParsed = parseMetaRobotsDirective(metaRobotsRaw);
+        const xRobotsParsed = parseMetaRobotsDirective(getXRobotsTag(response) || '');
+        const blocksFollow = metaRobotsParsed.blocksFollow || xRobotsParsed.blocksFollow;
 
         emitSpiderResult(browserWindow, buildResultWithIndexing(
             robots,
@@ -373,7 +377,8 @@ async function crawl(url, referrer, browserWindow) {
                 responseTimeMs,
                 ...pluginPageFields,
             },
-            metaRobotsRaw
+            metaRobotsRaw,
+            response
         ));
 
         if (!isSessionPaused(session) && !session?.stopped) {
@@ -383,9 +388,9 @@ async function crawl(url, referrer, browserWindow) {
                 pageLinks,
                 currentUrl,
                 urlObject.hostname,
-                { follow: !metaRobotsParsed.blocksFollow }
+                { follow: !blocksFollow }
             );
-            if (metaRobotsParsed.blocksFollow) {
+            if (blocksFollow) {
                 console.log(`Знайдено nofollow на сторінці: ${currentUrl}`);
             }
         }

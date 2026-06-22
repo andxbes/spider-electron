@@ -37,6 +37,11 @@ function mockResponse({ status = 200, headers = {}, body = '' } = {}) {
         ok: status >= 200 && status < 300,
         headers: {
             get: (name) => map.get(String(name).toLowerCase()) || '',
+            entries: function* entries() {
+                for (const [k, v] of map) {
+                    yield [k, v];
+                }
+            },
         },
         text: async () => body,
     };

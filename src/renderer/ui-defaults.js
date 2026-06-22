@@ -64,6 +64,13 @@ function buildDefaultTableColumns(ctx) {
             renderCell: (data) => `<td class="p-2">${metaRobotsCellHtml(data)}</td>`,
         },
         {
+            id: 'xRobotsTag',
+            sortKey: 'xRobotsTag',
+            thClass: 'sortable-th p-2 font-semibold cursor-pointer select-none hover:bg-zinc-200',
+            thLabel: 'X-Robots-Tag',
+            renderCell: (data) => `<td class="p-2">${xRobotsTagCellHtml(data)}</td>`,
+        },
+        {
             id: 'robotsTxt',
             sortKey: 'robotsTxt',
             thClass: 'sortable-th p-2 font-semibold cursor-pointer select-none hover:bg-zinc-200',
@@ -197,7 +204,9 @@ function buildDefaultDetailRows(data, ctx) {
         ['Meta Description Length', data.metaDescription ? String(data.metaDescription.length) : '0'],
         ['Canonical', data.metaCanonical ? urlCellHtml(data.metaCanonical) : '<span class="text-zinc-400 italic">—</span>'],
         ['Meta robots', formatMetaRobotsDetail(data)],
+        ['X-Robots-Tag', formatXRobotsTagDetail(data)],
         ['Robots.txt', formatRobotsTxtDetail(data)],
+        ['Заголовки відповіді', formatResponseHeadersDetail(data)],
         ['H1 Count', String(getH1Count(data))],
         [
             'H1',
@@ -259,6 +268,7 @@ function buildDefaultExportColumns(ctx) {
         { id: 'url', header: 'URL', value: (data) => `"${(data.url || '').replace(/"/g, '""')}"` },
         { id: 'status', header: 'Status', value: (data) => `"${(data.status || '')}"` },
         { id: 'metaRobots', header: 'Meta Robots', value: (data) => `"${(data.metaRobotsLabel || data.metaRobots || '').replace(/"/g, '""')}"` },
+        { id: 'xRobotsTag', header: 'X-Robots-Tag', value: (data) => `"${(data.xRobotsTagLabel || data.xRobotsTag || '').replace(/"/g, '""')}"` },
         { id: 'robotsRule', header: 'Robots.txt Rule', value: (data) => `"${(data.robotsRule || '').replace(/"/g, '""')}"` },
         { id: 'robotsAllowed', header: 'Robots.txt Allowed', value: (data) => `"${data.robotsAllowed === false ? 'Заборонено' : (data.robotsAllowed ? 'Дозволено' : '')}"` },
         { id: 'h1Count', header: 'H1 Count', value: (data) => `"${getH1Count(data)}"` },
