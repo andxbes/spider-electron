@@ -132,6 +132,26 @@ function isSessionPaused(session) {
     return isSessionActive(session) && session.paused;
 }
 
+function shouldAbortCrawl(session) {
+    if (!session) {
+        return false;
+    }
+    return !isSessionActive(session);
+}
+
+function stopSpiderSession() {
+    const session = getScanSession();
+    if (!session || session.finished) {
+        return false;
+    }
+    session.stopped = true;
+    session.paused = false;
+    void terminateHtmlParsePool();
+    session.sendProgress('Зупинка...');
+    session.tryFinishOrPump();
+    return true;
+}
+
 async function crawl(url, referrer, browserWindow) {
     if (!tryClaimUrl(url)) {
         return;
@@ -142,23 +162,34 @@ async function crawl(url, referrer, browserWindow) {
 
     const urlObject = new URL(url);
     const { parser: robots, text: robotsText } = await getRobots(urlObject);
+    if (shouldAbortCrawl(session)) {
+        return;
+    }
 
     try {
         const referrers = getReferrersSnapshot(url, referrer);
 
         if (shouldBlockByRobotsTxt(robots, url)) {
-            sendRobotsBlockedResult(browserWindow, robots, robotsText, url, referrers);
+            if (!shouldAbortCrawl(session)) {
+                sendRobotsBlockedResult(browserWindow, robots, robotsText, url, referrers);
+            }
             return;
         }
 
         let currentUrl = url;
         let timed = await timedFetch(currentUrl);
+        if (shouldAbortCrawl(session)) {
+            return;
+        }
         let response = timed.response;
         let responseTimeMs = timed.getElapsedMs();
         let previousUrl = null;
         const redirectTracker = createRedirectChainTracker(url, MAX_REDIRECT_HOPS);
 
         function emitRedirectChainSummary() {
+            if (shouldAbortCrawl(session)) {
+                return;
+            }
             if (redirectTracker.hopCount === 0 && !redirectTracker.infinite) {
                 return;
             }
@@ -173,8 +204,12 @@ async function crawl(url, referrer, browserWindow) {
         }
 
         while (isRedirectStatus(response.status) && redirectTracker.canFollow()) {
+            if (shouldAbortCrawl(session)) {
+                return;
+            }
             const redirectUrl = resolveRedirectTarget(currentUrl, response.headers.get('location'));
 
+            if (!shouldAbortCrawl(session)) {
             emitSpiderResult(browserWindow, buildResultWithIndexing(robots, robotsText, currentUrl, {
                 status: response.status,
                 url: currentUrl,
@@ -184,6 +219,7 @@ async function crawl(url, referrer, browserWindow) {
                 responseTimeMs,
                 ...redirectHopOnlyFields(url, currentUrl),
             }, null, response));
+            }
 
             if (!redirectUrl) {
                 emitRedirectChainSummary();
@@ -208,14 +244,7 @@ async function crawl(url, referrer, browserWindow) {
                 return;
             }
 
-            if (isSessionPaused(session)) {
-                redirectTracker.recordHop({
-                    from: currentUrl,
-                    to: redirectUrl,
-                    status: response.status,
-                    responseTimeMs,
-                });
-                emitRedirectChainSummary();
+            if (shouldAbortCrawl(session)) {
                 return;
             }
 
@@ -254,20 +283,29 @@ async function crawl(url, referrer, browserWindow) {
             addReferrer(currentUrl, previousUrl);
 
             if (shouldBlockByRobotsTxt(robots, currentUrl)) {
-                sendRobotsBlockedResult(
-                    browserWindow,
-                    robots,
-                    robotsText,
-                    currentUrl,
-                    [referrerEntry(previousUrl)]
-                );
-                emitRedirectChainSummary();
+                if (!shouldAbortCrawl(session)) {
+                    sendRobotsBlockedResult(
+                        browserWindow,
+                        robots,
+                        robotsText,
+                        currentUrl,
+                        [referrerEntry(previousUrl)]
+                    );
+                    emitRedirectChainSummary();
+                }
                 return;
             }
 
             timed = await timedFetch(currentUrl);
             response = timed.response;
             responseTimeMs = timed.getElapsedMs();
+            if (shouldAbortCrawl(session)) {
+                return;
+            }
+        }
+
+        if (shouldAbortCrawl(session)) {
+            return;
         }
 
         if (isRedirectStatus(response.status)) {
@@ -336,7 +374,13 @@ async function crawl(url, referrer, browserWindow) {
 
         const html = await response.text();
         responseTimeMs = timed.getElapsedMs();
+        if (shouldAbortCrawl(session)) {
+            return;
+        }
         const parsed = await parseHtmlDocumentAsync(html, currentUrl, urlObject.hostname);
+        if (shouldAbortCrawl(session)) {
+            return;
+        }
         const pageFields = extractPageViaHooks({
             response,
             url: currentUrl,
@@ -355,6 +399,10 @@ async function crawl(url, referrer, browserWindow) {
         const metaRobotsParsed = parseMetaRobotsDirective(metaRobotsRaw);
         const xRobotsParsed = parseMetaRobotsDirective(getXRobotsTag(response) || '');
         const blocksFollow = metaRobotsParsed.blocksFollow || xRobotsParsed.blocksFollow;
+
+        if (shouldAbortCrawl(session)) {
+            return;
+        }
 
         emitSpiderResult(browserWindow, buildResultWithIndexing(
             robots,
@@ -378,7 +426,7 @@ async function crawl(url, referrer, browserWindow) {
             response
         ));
 
-        if (!isSessionPaused(session) && !session?.stopped) {
+        if (!session?.stopped) {
             await reportDiscoveredLinks(
                 browserWindow,
                 parsed.pageLinks,
@@ -391,6 +439,9 @@ async function crawl(url, referrer, browserWindow) {
             }
         }
     } catch (error) {
+        if (shouldAbortCrawl(session)) {
+            return;
+        }
         console.error(`Помилка під час сканування ${url}: ${error.message}`);
         const errorReferrers = getReferrersSnapshot(url, referrer);
         emitSpiderResult(browserWindow, buildResultWithIndexing(
@@ -600,7 +651,11 @@ async function startSpider(startUrl, options, browserWindow) {
                         this.activeWorkers--;
                         this.pagesCompleted++;
                         this.tryFinishOrPump();
-                        this.sendProgress();
+                        if (!this.stopped) {
+                            this.sendProgress();
+                        } else if (this.activeWorkers > 0) {
+                            this.sendProgress('Зупинка...');
+                        }
                     });
             }
 
@@ -702,6 +757,7 @@ module.exports = {
     getRobots,
     crawl,
     startSpider,
+    stopSpiderSession,
     getScanSession,
     clearScanSession,
     isLikelyMediaUrl,

@@ -15,6 +15,7 @@ const {
     reportedStubUrls,
     probedDiscoveredUrls,
     getRespectRobotsTxt,
+    getScanSession,
 } = require('./crawl-state');
 const {
     buildSpiderResult,
@@ -120,6 +121,9 @@ async function probeDiscoveredLink(url, referrer, link, browserWindow) {
         const redirectTracker = createRedirectChainTracker(url, MAX_REDIRECT_HOPS);
 
         while (isRedirectStatus(response.status) && redirectTracker.canFollow()) {
+            if (shouldAbortProbe()) {
+                return;
+            }
             const redirectUrl = resolveRedirectTarget(currentUrl, response.headers.get('location'));
             if (!redirectUrl || redirectUrl === currentUrl) {
                 if (redirectUrl === currentUrl) {
@@ -147,10 +151,17 @@ async function probeDiscoveredLink(url, referrer, link, browserWindow) {
             timed = await timedFetch(currentUrl);
             response = timed.response;
             responseTimeMs = timed.getElapsedMs();
+            if (shouldAbortProbe()) {
+                return;
+            }
         }
 
         if (isRedirectStatus(response.status) && !redirectTracker.infinite) {
             redirectTracker.markInfinite();
+        }
+
+        if (shouldAbortProbe()) {
+            return;
         }
 
         const { parser, text } = await getRobots(new URL(currentUrl));
@@ -169,6 +180,9 @@ async function probeDiscoveredLink(url, referrer, link, browserWindow) {
             response
         ));
     } catch (error) {
+        if (shouldAbortProbe()) {
+            return;
+        }
         console.error(`Помилка перевірки ${label} ${url}: ${error.message}`);
         const { parser, text } = await getRobots(new URL(url)).catch(() => ({ parser: null, text: '' }));
         const fields = buildProbeLinkFields(url, link, { status: 'ERROR' });
@@ -185,7 +199,18 @@ async function probeDiscoveredLink(url, referrer, link, browserWindow) {
 
 const probeExternalLink = probeDiscoveredLink;
 
+function shouldAbortProbe() {
+    const session = getScanSession();
+    if (!session) {
+        return false;
+    }
+    return session.finished || session.stopped;
+}
+
 async function reportDiscoveredLinks(browserWindow, links, sourceUrl, allowedHostname, { follow = true } = {}) {
+    if (shouldAbortProbe()) {
+        return;
+    }
     const stubs = [];
     const filteredLinks = filterDiscoveredLinksViaHooks(
         { sourceUrl, allowedHostname, follow, browserWindow },

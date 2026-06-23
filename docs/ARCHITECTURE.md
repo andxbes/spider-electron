@@ -1,6 +1,6 @@
 # Spider-Electron — внутрішня документація
 
-> Останнє оновлення: 2026-06-23 (HTML-парсинг у worker threads)  
+> Останнє оновлення: 2026-06-23 (пауза не губить посилання з активних воркерів)  
 > Короткий довідник для розробки та правок. Детальніше про підтримку — [DOC_MAINTENANCE.md](./DOC_MAINTENANCE.md).
 
 ## Що це
@@ -216,6 +216,10 @@ Renderer
 8. Збір URL з HTML: `<a>`, `<link>`, `<script>`, `<img>`, … — HTML-сторінки через `crawl`; **медіа, CSS, JS і зовнішні** — stub у batch, потім **probe** (status + `content-type` + robots.txt + `X-Robots-Tag`, без HTML) — навіть при `rel=nofollow`. BFS лише для внутрішніх навігаційних: `a[href]`, `area[href]`, `form[action]`, `iframe[src]` (HTML). Stub для не-навігаційних ресурсів — **завжди**; для навігаційних — лише якщо URL не в черзі обходу. У `spider-result`: **Meta robots** — лише `<meta name="robots">` / `googlebot`; **X-Robots-Tag** — окремо з HTTP-заголовка; **responseHeaders** — усі заголовки відповіді (для UI / дампу).
 
 **Завершення:** порожня черга або досягнуто `maxPages` (якщо > 0) → `spider-referrers-update` → `spider-end`. На renderer після referrers — `materializeDiscoveredFromReferrers()`: URL з referrers, яких немає в `scanResults`, додаються як знайдені (`fetched: false`).
+
+**Зупинка (`spider-stop`):** `stopSpiderSession()` — прапорець `stopped`, негайно `terminateHtmlParsePool()` (скасовує чергу парсингу), нові воркери не стартують. Активні `crawl`/`probe` дочекаються поточного `fetch`, але після стопу **не** парсять HTML, не шлють `spider-result` і не додають посилання в чергу. Коли `activeWorkers === 0` → `spider-end`.
+
+**Пауза (`spider-pause` / кнопка «Зупинити» в UI):** нові воркери не стартують, черга **зберігається**. Воркери, що вже в роботі, **дозавершують** поточну сторінку (редиректи, парсинг, `reportDiscoveredLinks`) — посилання з них лишаються в черзі. `Продовжити` (`spider-resume`) — обхід з тієї ж черги.
 
 ## Константи (hardcoded у `main.js`)
 

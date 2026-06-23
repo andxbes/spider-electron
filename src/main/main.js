@@ -71,6 +71,7 @@ app.on('window-all-closed', () => {
 
 const {
     startSpider,
+    stopSpiderSession,
     getScanSession,
     clearScanSession,
 } = require('./spider-logic');
@@ -124,13 +125,7 @@ ipcMain.handle('spider-resume', () => {
 });
 
 ipcMain.on('spider-stop', () => {
-    const session = getScanSession();
-    if (session && !session.finished) {
-        session.stopped = true;
-        session.paused = false;
-        session.sendProgress('Зупинка...');
-        session.tryFinishOrPump();
-    }
+    stopSpiderSession();
 });
 
 ipcMain.handle('shell:open-external', async (_event, url) => {

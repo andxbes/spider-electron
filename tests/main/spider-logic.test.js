@@ -22,12 +22,14 @@ const {
     mergeReferrerMeta,
     crawl,
     startSpider,
+    stopSpiderSession,
     getScanSession,
     reportDiscoveredLinks,
     dequeueNextUrl,
     probeDiscoveredLink,
     probeExternalLink,
 } = require('../../src/main/spider-logic');
+const { setScanSession } = require('../../src/main/crawl-state');
 const robotsParser = require('robots-parser');
 
 function mockResponse({ status = 200, headers = {}, body = '' } = {}) {
@@ -692,5 +694,63 @@ describe('spider-logic', () => {
         assert.ok(end);
         const results = win._events.filter((e) => e.channel === 'spider-result');
         assert.ok(results.length >= 2);
+    });
+
+    it('crawl still enqueues outlinks when scan session is paused', async () => {
+        const win = mockWindow();
+        setFetchForTests(async (url) => {
+            if (url.includes('robots.txt')) {
+                return mockResponse({ status: 404 });
+            }
+            return mockResponse({
+                status: 200,
+                headers: { 'content-type': 'text/html' },
+                body: '<html><head><title>Root</title></head><body><a href="/child">c</a><a href="/other">o</a></body></html>',
+            });
+        });
+
+        setScanSession({
+            paused: true,
+            stopped: false,
+            finished: false,
+        });
+
+        await crawl('https://example.com/', 'N/A', win);
+
+        assert.equal(getQueueLength(), 2);
+    });
+
+    it('stopSpiderSession marks running scan as stopped', async () => {
+        assert.equal(stopSpiderSession(), false);
+
+        const win = mockWindow();
+        let releaseFetch;
+        const fetchGate = new Promise((resolve) => {
+            releaseFetch = () => resolve();
+        });
+        setFetchForTests(async (url) => {
+            if (url.includes('robots.txt')) {
+                return mockResponse({ status: 404 });
+            }
+            await fetchGate;
+            return mockResponse({
+                status: 200,
+                headers: { 'content-type': 'text/html' },
+                body: '<html><head><title>Late</title></head></html>',
+            });
+        });
+
+        void startSpider('https://example.com/', { ...fastScan, concurrency: 1 }, win);
+        await new Promise((resolve) => setTimeout(resolve, 50));
+
+        assert.ok(stopSpiderSession());
+        assert.equal(getScanSession()?.stopped, true);
+
+        const resultsBeforeRelease = win._events.filter((e) => e.channel === 'spider-result').length;
+        releaseFetch();
+        await new Promise((resolve) => setTimeout(resolve, 150));
+
+        const resultsAfterRelease = win._events.filter((e) => e.channel === 'spider-result').length;
+        assert.equal(resultsAfterRelease, resultsBeforeRelease);
     });
 });
