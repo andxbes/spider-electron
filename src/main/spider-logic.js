@@ -1,5 +1,5 @@
-const cheerio = require('cheerio');
 const { MAX_CONCURRENCY } = require('./settings-persistence');
+const { parseHtmlDocumentAsync, terminateHtmlParsePool } = require('./html-parse-pool');
 const {
     extractPageTitle,
     extractMetaDescription,
@@ -31,7 +31,6 @@ const {
     parseAnchorRel,
     formatOutlinkTag,
     isCrawlableLink,
-    collectPageLinks,
 } = require('./link-collector');
 const {
     visitedUrls,
@@ -337,16 +336,14 @@ async function crawl(url, referrer, browserWindow) {
 
         const html = await response.text();
         responseTimeMs = timed.getElapsedMs();
-        const $ = cheerio.load(html);
-
+        const parsed = await parseHtmlDocumentAsync(html, currentUrl, urlObject.hostname);
         const pageFields = extractPageViaHooks({
-            $,
             response,
             url: currentUrl,
             hostname: urlObject.hostname,
             robots,
             robotsText,
-        });
+        }, parsed.pageFields);
         const {
             metaRobotsRaw = '',
             title = '',
@@ -382,10 +379,9 @@ async function crawl(url, referrer, browserWindow) {
         ));
 
         if (!isSessionPaused(session) && !session?.stopped) {
-            const pageLinks = collectPageLinks($, currentUrl, urlObject.hostname);
             await reportDiscoveredLinks(
                 browserWindow,
-                pageLinks,
+                parsed.pageLinks,
                 currentUrl,
                 urlObject.hostname,
                 { follow: !blocksFollow }
@@ -426,10 +422,11 @@ function sendFinalProgress(session, endMessage) {
     });
 }
 
-function completeScan(session, endMessage) {
+async function completeScan(session, endMessage) {
     if (session.finished) {
         return;
     }
+    await terminateHtmlParsePool();
     sendFinalProgress(session, endMessage);
     session.finished = true;
     if (getScanSession() === session) {
@@ -452,6 +449,7 @@ async function startSpider(startUrl, options, browserWindow) {
     if (existingSession && !existingSession.finished) {
         existingSession.stopped = true;
     }
+    await terminateHtmlParsePool();
 
     const useSitemap = options?.useSitemap ?? false;
     setMaxPagesToVisit(Math.max(0, parseInt(options?.maxPages, 10) || 0));
@@ -651,6 +649,7 @@ function resetSpiderStateForTests() {
     clearScanUserAgent();
     clearScanRequestDelayMs();
     setRespectRobotsTxt(true);
+    void terminateHtmlParsePool();
 }
 
 module.exports = {
@@ -667,7 +666,7 @@ module.exports = {
     extractPageTitle,
     extractMetaDescription,
     extractElementText: require('./page-extractors').extractElementText,
-    collectPageLinks,
+    collectPageLinks: require('./link-collector').collectPageLinks,
     parseMetaRobotsDirective,
     parseAnchorRel,
     classifyOutlinkKind,

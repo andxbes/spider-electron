@@ -30,7 +30,9 @@ if (process.platform === 'darwin') {
 
 module.exports = {
   packagerConfig: {
-    asar: true,
+    asar: {
+      unpack: '**/html-parse-worker.js',
+    },
     npmRebuild: false,
     icon: path.join(__dirname, 'assets', 'icon'),
     extraResource: [

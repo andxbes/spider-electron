@@ -18,10 +18,15 @@ function extractOgFields($) {
 }
 
 function registerOgMetaPlugin() {
-    crawlHookRegistry.register(CRAWL_HOOKS.EXTRACT_PAGE, (ctx, fields) => ({
-        ...fields,
-        ...extractOgFields(ctx.$),
-    }), { priority: 20, id: `${PLUGIN_ID}-extract-page` });
+    crawlHookRegistry.register(CRAWL_HOOKS.EXTRACT_PAGE, (ctx, fields) => {
+        if (!ctx.$) {
+            return fields;
+        }
+        return {
+            ...fields,
+            ...extractOgFields(ctx.$),
+        };
+    }, { priority: 20, id: `${PLUGIN_ID}-extract-page` });
 }
 
 registerOgMetaPlugin();
