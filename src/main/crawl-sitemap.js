@@ -1,7 +1,7 @@
 const cheerio = require('cheerio');
 const { normalizePageUrl, isSameHost, isRedirectStatus, resolveRedirectTarget } = require('../shared/url-utils');
 const { fetchPage } = require('./crawl-network');
-const { enqueueUrl } = require('./crawl-queue');
+const { enqueueUrl, getQueueLength } = require('./crawl-queue');
 const { isInternalRobotsDisallowed } = require('./crawl-network');
 
 const FALLBACK_SITEMAP_PATHS = ['/sitemap_index.xml', '/sitemap.xml', '/index.xml'];
@@ -20,7 +20,7 @@ function parseSitemapsFromRobotsTxt(text) {
 async function fetchSitemapResponse(sitemapUrl, allowedHostname, maxHops = 5) {
     let currentUrl = sitemapUrl;
     for (let hop = 0; hop <= maxHops; hop += 1) {
-        const response = await fetchPage(currentUrl);
+        const response = await fetchPage(currentUrl, { skipDelay: true });
         if (!isRedirectStatus(response.status)) {
             return { response, finalUrl: currentUrl };
         }
@@ -37,11 +37,16 @@ async function fetchSitemapResponse(sitemapUrl, allowedHostname, maxHops = 5) {
         }
         currentUrl = nextUrl;
     }
-    const response = await fetchPage(currentUrl);
+    const response = await fetchPage(currentUrl, { skipDelay: true });
     return { response, finalUrl: currentUrl };
 }
 
-async function fetchSitemapPageUrls(sitemapUrl, allowedHostname, fetchedSitemaps) {
+async function fetchSitemapPageUrls(sitemapUrl, allowedHostname, fetchedSitemaps, hooks = {}) {
+    const { onLeafUrls, shouldAbort } = hooks;
+
+    if (shouldAbort?.()) {
+        return [];
+    }
     if (fetchedSitemaps.has(sitemapUrl)) {
         return [];
     }
@@ -49,6 +54,9 @@ async function fetchSitemapPageUrls(sitemapUrl, allowedHostname, fetchedSitemaps
 
     try {
         const { response, finalUrl } = await fetchSitemapResponse(sitemapUrl, allowedHostname);
+        if (shouldAbort?.()) {
+            return [];
+        }
         if (!response.ok) {
             console.log(`Sitemap недоступний (${response.status}): ${finalUrl}`);
             return [];
@@ -69,8 +77,20 @@ async function fetchSitemapPageUrls(sitemapUrl, allowedHostname, fetchedSitemaps
             });
 
             for (const nestedUrl of nestedSitemaps) {
-                const nestedPages = await fetchSitemapPageUrls(nestedUrl, allowedHostname, fetchedSitemaps);
-                pageUrls.push(...nestedPages);
+                if (shouldAbort?.()) {
+                    return [];
+                }
+                if (onLeafUrls) {
+                    await fetchSitemapPageUrls(nestedUrl, allowedHostname, fetchedSitemaps, hooks);
+                } else {
+                    const nestedPages = await fetchSitemapPageUrls(
+                        nestedUrl,
+                        allowedHostname,
+                        fetchedSitemaps,
+                        hooks
+                    );
+                    pageUrls.push(...nestedPages);
+                }
             }
             return pageUrls;
         }
@@ -95,6 +115,10 @@ async function fetchSitemapPageUrls(sitemapUrl, allowedHostname, fetchedSitemaps
             $('loc').each((_, el) => collectPageUrl($(el).text().trim()));
         }
 
+        if (onLeafUrls) {
+            await onLeafUrls(pageUrls, sitemapUrl);
+            return [];
+        }
         return pageUrls;
     } catch (error) {
         console.error(`Помилка читання sitemap ${sitemapUrl}: ${error.message}`);
@@ -117,27 +141,52 @@ async function discoverSitemapUrls(startUrl, getRobots) {
     return [...new Set(sitemapUrls)];
 }
 
-async function seedQueueFromSitemaps(startUrl, browserWindow, getRobots) {
+async function seedQueueFromSitemaps(startUrl, browserWindow, getRobots, session = null) {
     const start = new URL(startUrl);
     const sitemapUrls = await discoverSitemapUrls(startUrl, getRobots);
+    if (session?.stopped) {
+        return 0;
+    }
+
     const fetchedSitemaps = new Set();
     const pageUrls = new Set();
+    let leafFilesDone = 0;
 
-    browserWindow.webContents.send('spider-progress', {
-        scanned: 0,
-        queue: 0,
-        status: `Пошук sitemap (${sitemapUrls.length})...`,
-    });
+    const sendSitemapProgress = (status) => {
+        browserWindow.webContents.send('spider-progress', {
+            scanned: 0,
+            queue: getQueueLength(),
+            status,
+        });
+    };
 
-    for (const sitemapUrl of sitemapUrls) {
-        const urls = await fetchSitemapPageUrls(sitemapUrl, start.hostname, fetchedSitemaps);
+    sendSitemapProgress(`Пошук sitemap (${sitemapUrls.length})...`);
+
+    const onLeafUrls = async (urls, sitemapUrl) => {
+        leafFilesDone += 1;
         for (const pageUrl of urls) {
+            if (session?.stopped) {
+                return;
+            }
             pageUrls.add(pageUrl);
             if (await isInternalRobotsDisallowed(pageUrl, start.hostname)) {
                 continue;
             }
             enqueueUrl(pageUrl, sitemapUrl, start.hostname, 'sitemap');
         }
+        sendSitemapProgress(
+            `Sitemap ${leafFilesDone}: у черзі ${getQueueLength()}`
+        );
+    };
+
+    for (const sitemapUrl of sitemapUrls) {
+        if (session?.stopped) {
+            break;
+        }
+        await fetchSitemapPageUrls(sitemapUrl, start.hostname, fetchedSitemaps, {
+            onLeafUrls,
+            shouldAbort: () => Boolean(session?.stopped),
+        });
     }
 
     console.log(`У sitemap знайдено сторінок: ${pageUrls.size}`);

@@ -1,6 +1,6 @@
 # Spider-Electron — внутрішня документація
 
-> Останнє оновлення: 2026-06-23 (пауза не губить посилання з активних воркерів)  
+> Останнє оновлення: 2026-07-01 (єдина FIFO-черга crawl замість html→media)  
 > Короткий довідник для розробки та правок. Детальніше про підтримку — [DOC_MAINTENANCE.md](./DOC_MAINTENANCE.md).
 
 ## Що це
@@ -90,7 +90,7 @@ tests/
 | `http-auth.js` | `getAuthHeadersForUrl` — Basic/Bearer лише для hostname скану |
 | `crawl-results.js` | `buildSpiderResult`, `parseMetaRobotsDirective`, indexing |
 | `crawl-referrers.js` | `referrersMap`, `addReferrer`, `getReferrersSnapshot` |
-| `crawl-queue.js` | `enqueueUrl`, `dequeueNextUrl`, `hasPendingWork`, media queue |
+| `crawl-queue.js` | `enqueueUrl`, `dequeueNextUrl`, `hasPendingWork`, FIFO crawl queue |
 | `crawl-sitemap.js` | `discoverSitemapUrls`, `seedQueueFromSitemaps` |
 | `probe.js` | HTTP-probe зовнішніх/медіа посилань, stub batch |
 | `link-collector.js` | `collectPageLinks`, класифікація outlinks, `isCrawlableLink` |
@@ -198,17 +198,17 @@ Renderer
 
 ## Алгоритм краулера
 
-**Тип:** BFS (черга `queue`, FIFO через `shift()`).
+**Тип:** BFS — одна FIFO-черга `crawlQueue` (HTML і медіа в порядку знаходження); окремо `probeQueue` для зовнішніх / не-crawlable посилань.
 
 **Запуск:** `ipcMain.on('start-spider')` → `startSpider()` → `processQueue()` (рекурсія через `setTimeout(..., 0)`).
 
-**Опція sitemap (`useSitemap`):** перед обходом читається `robots.txt`, з нього витягуються рядки `Sitemap:`. Якщо їх немає — пробуються `/sitemap_index.xml`, `/sitemap.xml`, `/index.xml`. XML парситься (індекс + вкладені sitemap + `urlset`), URL сторінок додаються в чергу **першими**. Referrer для таких URL — адреса sitemap-файлу.
+**Опція sitemap (`useSitemap`):** перед обходом читається `robots.txt`, з нього витягуються рядки `Sitemap:`. Якщо їх немає — пробуються `/sitemap_index.xml`, `/sitemap.xml`, `/index.xml`. XML парситься (індекс + вкладені sitemap + `urlset`), URL сторінок додаються в чергу **першими** (по мірі читання вкладених файлів, з оновленням `spider-progress`). Запити sitemap **не** чекають `requestDelayMs`. Referrer для таких URL — адреса sitemap-файлу. Зупинка (`spider-stop`) перериває фазу sitemap.
 
 **На кожній сторінці (`crawl`):**
 
 1. Skip, якщо URL вже в `visitedUrls` або ліміт досягнуто.
 2. Перевірка **robots.txt** (внутрішні URL) — якщо `Disallow` і увімкнено `respectRobotsTxt` (за замовч.), HTTP-запит **не** виконується: ні `crawl`, ні `probe`; `status: 0`. Якщо `respectRobotsTxt: false` — сторінки скануються, але `robotsAllowed` / `robotsRule` у результаті лишаються. Зовнішні URL перевіряються по HTTP навіть при забороні в robots.txt їхнього хоста.
-3. `fetch` з timeout 5s, `redirect: 'manual'`, User-Agent з налаштувань; пауза `requestDelayMs` (за замовч. 500 мс, jitter ±20%) перед кожним запитом на воркер; за наявності — `Authorization` (Basic/Bearer) **лише для URL з hostname скану**.
+3. `fetch` з timeout 5s, `redirect: 'manual'`, User-Agent з налаштувань; пауза `requestDelayMs` (за замовч. 500 мс, jitter ±20%) перед кожним запитом **воркера** (не sitemap discovery); за наявності — `Authorization` (Basic/Bearer) **лише для URL з hostname скану**.
 4. **3xx** — фіксація `redirectUrl`, ланцюг до **20** переходів (`redirect-chain.js`); метадані на стартовому URL; при циклі або перевищенні ліміту — `redirectInfinite`. Enqueue цілі (лише той самий `hostname`); ціль redirect теж перевіряється robots.txt перед fetch.
 5. **4xx/5xx** — `status` = код відповіді, `title` порожній.
 6. **200 HTML** — тіло відповіді парситься в **worker thread** (`html-parse-pool.js`): cheerio → title, meta, headings, OG, `collectPageLinks`. На main лишаються fetch, robots, черга, IPC. Хуки `crawl:extractPage` без `ctx.$` отримують уже зібрані поля (для додаткових полів без DOM).

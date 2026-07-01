@@ -198,10 +198,19 @@ describe('spider-logic', () => {
         assert.deepEqual(parseSitemapsFromRobotsTxt(text), ['https://example.com/sitemap.xml']);
     });
 
-    it('enqueueUrl keeps internal URLs in html or media queue', () => {
+    it('enqueueUrl keeps internal URLs in crawl queue', () => {
         enqueueUrl('https://example.com/', 'N/A', 'example.com');
         enqueueUrl('https://example.com/app.js', 'https://example.com/', 'example.com');
         assert.equal(getQueueLength(), 2);
+    });
+
+    it('dequeueNextUrl processes crawl queue in FIFO order', () => {
+        enqueueUrl('https://example.com/app.js', 'https://example.com/', 'example.com');
+        enqueueUrl('https://example.com/about', 'https://example.com/', 'example.com');
+        const first = dequeueNextUrl();
+        const second = dequeueNextUrl();
+        assert.equal(first.url, 'https://example.com/app.js');
+        assert.equal(second.url, 'https://example.com/about');
     });
 
     it('tryClaimUrl rejects already visited URL', () => {

@@ -4,8 +4,7 @@ const { addReferrer } = require('./crawl-referrers');
 const {
     visitedUrls,
     probedDiscoveredUrls,
-    getHtmlQueue,
-    getMediaQueue,
+    getCrawlQueue,
     getProbeQueue,
     isPageLimitReached,
 } = require('./crawl-state');
@@ -24,8 +23,21 @@ function isLikelyMediaUrl(url) {
     return MEDIA_URL_EXTENSIONS.has(getUrlExtension(url));
 }
 
+function countCrawlQueueByKind() {
+    let html = 0;
+    let media = 0;
+    for (const item of getCrawlQueue()) {
+        if (isLikelyMediaUrl(item.url)) {
+            media += 1;
+        } else {
+            html += 1;
+        }
+    }
+    return { html, media };
+}
+
 function getQueueLength() {
-    return getHtmlQueue().length + getMediaQueue().length + getProbeQueue().length;
+    return getCrawlQueue().length + getProbeQueue().length;
 }
 
 function isProbeUrlQueued(url) {
@@ -33,8 +45,7 @@ function isProbeUrlQueued(url) {
 }
 
 function isUrlQueued(url) {
-    return getHtmlQueue().some((item) => item.url === url)
-        || getMediaQueue().some((item) => item.url === url)
+    return getCrawlQueue().some((item) => item.url === url)
         || isProbeUrlQueued(url);
 }
 
@@ -45,7 +56,7 @@ function hasPendingWork() {
     if (isPageLimitReached()) {
         return false;
     }
-    return getHtmlQueue().length > 0 || getMediaQueue().length > 0;
+    return getCrawlQueue().length > 0;
 }
 
 function needsLinkProbe(link) {
@@ -57,14 +68,9 @@ function needsLinkProbe(link) {
 
 function dequeueNextUrl() {
     if (!isPageLimitReached()) {
-        const htmlQueue = getHtmlQueue();
-        if (htmlQueue.length > 0) {
-            const item = htmlQueue.shift();
-            return { type: 'crawl', url: item.url, referrer: item.referrer };
-        }
-        const mediaQueue = getMediaQueue();
-        if (mediaQueue.length > 0) {
-            const item = mediaQueue.shift();
+        const crawlQueue = getCrawlQueue();
+        if (crawlQueue.length > 0) {
+            const item = crawlQueue.shift();
             return { type: 'crawl', url: item.url, referrer: item.referrer };
         }
     }
@@ -93,8 +99,7 @@ function enqueueUrl(url, referrer, allowedHostname, linkMeta = {}) {
         }
 
         if (!visitedUrls.has(absoluteUrl) && !isUrlQueued(absoluteUrl)) {
-            const targetQueue = isLikelyMediaUrl(absoluteUrl) ? getMediaQueue() : getHtmlQueue();
-            targetQueue.push({ url: absoluteUrl, referrer });
+            getCrawlQueue().push({ url: absoluteUrl, referrer });
         }
     } catch {
         // невалідний URL
@@ -118,6 +123,7 @@ function enqueueProbeUrl(url, sourceUrl, link) {
 
 module.exports = {
     isLikelyMediaUrl,
+    countCrawlQueueByKind,
     getQueueLength,
     isProbeUrlQueued,
     isUrlQueued,

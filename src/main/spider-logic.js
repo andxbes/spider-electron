@@ -43,8 +43,6 @@ const {
     clearScanSession,
     setMaxPagesToVisit,
     getMaxPagesToVisit,
-    getHtmlQueue,
-    getMediaQueue,
     setRespectRobotsTxt,
 } = require('./crawl-state');
 const {
@@ -101,6 +99,7 @@ const {
     isUrlQueued,
     needsLinkProbe,
     isLikelyMediaUrl,
+    countCrawlQueueByKind,
 } = require('./crawl-queue');
 const {
     probeDiscoveredLink,
@@ -571,8 +570,8 @@ async function startSpider(startUrl, options, browserWindow) {
             this.browserWindow.webContents.send('spider-progress', {
                 scanned: visitedUrls.size,
                 queue: getQueueLength(),
-                queueHtml: getHtmlQueue().length,
-                queueMedia: getMediaQueue().length,
+                queueHtml: countCrawlQueueByKind().html,
+                queueMedia: countCrawlQueueByKind().media,
                 active: this.activeWorkers,
                 concurrency: this.concurrency,
                 paused: this.paused,
@@ -676,8 +675,12 @@ async function startSpider(startUrl, options, browserWindow) {
     setScanRequestDelayMs(options?.requestDelayMs);
 
     if (useSitemap) {
-        const sitemapPageCount = await seedQueueFromSitemaps(startUrl, browserWindow, getRobots);
+        const sitemapPageCount = await seedQueueFromSitemaps(startUrl, browserWindow, getRobots, session);
         if (getScanSession() !== session) {
+            return;
+        }
+        if (session.stopped) {
+            session.tryFinishOrPump();
             return;
         }
         session.sendProgress(

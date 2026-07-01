@@ -3,8 +3,7 @@ const { normalizePageUrl } = require('../shared/url-utils');
 const visitedUrls = new Set();
 const reportedStubUrls = new Set();
 const probedDiscoveredUrls = new Set();
-let htmlQueue = [];
-let mediaQueue = [];
+let crawlQueue = [];
 let probeQueue = [];
 let maxPagesToVisit = 0;
 const robotsCache = new Map();
@@ -49,8 +48,7 @@ function getMaxPagesToVisit() {
 }
 
 function clearQueues() {
-    htmlQueue = [];
-    mediaQueue = [];
+    crawlQueue = [];
     probeQueue = [];
 }
 
@@ -78,8 +76,7 @@ module.exports = {
     visitedUrls,
     reportedStubUrls,
     probedDiscoveredUrls,
-    getHtmlQueue: () => htmlQueue,
-    getMediaQueue: () => mediaQueue,
+    getCrawlQueue: () => crawlQueue,
     getProbeQueue: () => probeQueue,
     robotsCache,
     isPageLimitReached,

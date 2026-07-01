@@ -58,8 +58,10 @@ function resetFetchForTests() {
     fetchImpl = undiciFetch;
 }
 
-async function fetchPage(url) {
-    await waitBeforeRequest();
+async function fetchPage(url, { skipDelay = false } = {}) {
+    if (!skipDelay) {
+        await waitBeforeRequest();
+    }
     const authHeaders = scanAuthContext
         ? getAuthHeadersForUrl(url, scanAuthContext.hostname, scanAuthContext)
         : {};
