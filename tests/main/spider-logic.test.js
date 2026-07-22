@@ -488,6 +488,45 @@ describe('spider-logic', () => {
         assert.equal(result.payload.fetched, true);
     });
 
+    it('probeDiscoveredLink keeps first-hop redirect status on start URL', async () => {
+        const win = mockWindow();
+        setFetchForTests(async (url) => {
+            if (url.includes('robots.txt')) {
+                return mockResponse({ status: 404 });
+            }
+            if (url.endsWith('/old-asset.png')) {
+                return mockResponse({ status: 301, headers: { location: '/new-asset.png' } });
+            }
+            if (url.endsWith('/new-asset.png')) {
+                return mockResponse({
+                    status: 200,
+                    headers: { 'content-type': 'image/png' },
+                });
+            }
+            return mockResponse({ status: 404 });
+        });
+
+        await probeDiscoveredLink(
+            'https://example.com/old-asset.png',
+            'https://example.com/',
+            {
+                url: 'https://example.com/old-asset.png',
+                external: false,
+                tag: 'img[src]',
+                kind: 'media',
+                text: '',
+            },
+            win
+        );
+
+        const result = win._events.find((e) => e.channel === 'spider-result');
+        assert.ok(result);
+        assert.equal(result.payload.status, 301);
+        assert.equal(result.payload.redirectHopCount, 1);
+        assert.equal(result.payload.redirectFinalUrl, 'https://example.com/new-asset.png');
+        assert.equal(result.payload.contentType, 'image/png');
+    });
+
     it('probeExternalLink fetches status and content-type even for rel=nofollow', async () => {
         const win = mockWindow();
         let fetchCalls = [];

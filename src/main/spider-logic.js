@@ -193,11 +193,15 @@ async function crawl(url, referrer, browserWindow) {
                 return;
             }
             emitSpiderResult(browserWindow, buildResultWithIndexing(robots, robotsText, url, {
-                status: redirectTracker.firstHopStatus ?? response.status,
+                status: redirectTracker.firstHopStatus != null
+                    ? redirectTracker.firstHopStatus
+                    : response.status,
                 url,
                 title: '',
                 referrers,
-                responseTimeMs: redirectTracker.firstHopResponseTimeMs ?? responseTimeMs,
+                responseTimeMs: redirectTracker.firstHopResponseTimeMs != null
+                    ? redirectTracker.firstHopResponseTimeMs
+                    : responseTimeMs,
                 ...redirectTracker.toFields(),
             }, null, response));
         }

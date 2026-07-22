@@ -1,6 +1,6 @@
 # Spider-Electron — внутрішня документація
 
-> Останнє оновлення: 2026-07-22 (оптимізація фільтрів/таблиці для великих сканів)  
+> Останнє оновлення: 2026-07-22 (probe: статус першого редиректу, не фінальний 200)  
 > Короткий довідник для розробки та правок. Детальніше про підтримку — [DOC_MAINTENANCE.md](./DOC_MAINTENANCE.md).
 
 ## Що це
@@ -209,7 +209,7 @@ Renderer
 1. Skip, якщо URL вже в `visitedUrls` або ліміт досягнуто.
 2. Перевірка **robots.txt** (внутрішні URL) — якщо `Disallow` і увімкнено `respectRobotsTxt` (за замовч.), HTTP-запит **не** виконується: ні `crawl`, ні `probe`; `status: 0`. Якщо `respectRobotsTxt: false` — сторінки скануються, але `robotsAllowed` / `robotsRule` у результаті лишаються. Зовнішні URL перевіряються по HTTP навіть при забороні в robots.txt їхнього хоста.
 3. `fetch` з timeout 5s, `redirect: 'manual'`, User-Agent з налаштувань; пауза `requestDelayMs` (за замовч. 500 мс, jitter ±20%) перед кожним HTTP-запитом (сторінки, probe і sitemap); за наявності — `Authorization` (Basic/Bearer) **лише для URL з hostname скану**.
-4. **3xx** — фіксація `redirectUrl`, ланцюг до **20** переходів (`redirect-chain.js`); метадані на стартовому URL; при циклі або перевищенні ліміту — `redirectInfinite`. Enqueue цілі (лише той самий `hostname`); ціль redirect теж перевіряється robots.txt перед fetch.
+4. **3xx** — фіксація `redirectUrl`, ланцюг до **20** переходів (`redirect-chain.js`); метадані на стартовому URL; **status** на стартовому URL — код **першого** редиректу (301/302…), не фінальний 200. Те саме для `probe`. При циклі або перевищенні ліміту — `redirectInfinite`. Enqueue цілі (лише той самий `hostname`); ціль redirect теж перевіряється robots.txt перед fetch. Probe **не** перезаписує URL, уже пройдені через `crawl` (`visitedUrls`).
 5. **4xx/5xx** — `status` = код відповіді, `title` порожній.
 6. **200 HTML** — тіло відповіді парситься в **worker thread** (`html-parse-pool.js`): cheerio → title, meta, headings, OG, `collectPageLinks`. На main лишаються fetch, robots, черга, IPC. Хуки `crawl:extractPage` без `ctx.$` отримують уже зібрані поля (для додаткових полів без DOM).
 7. Якщо `<meta name="robots" content="nofollow">` — не додає нові посилання.

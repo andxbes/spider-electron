@@ -2,6 +2,7 @@ const {
     isRedirectStatus,
     resolveRedirectTarget,
     getContentType,
+    normalizePageUrl,
 } = require('../shared/url-utils');
 const { createRedirectChainTracker } = require('../shared/redirect-chain');
 const { isCrawlableLink } = require('./link-collector');
@@ -90,10 +91,21 @@ function buildProbeLinkFields(url, link, fields) {
 }
 
 async function probeDiscoveredLink(url, referrer, link, browserWindow) {
-    if (probedDiscoveredUrls.has(url)) {
+    let normalizedUrl = url;
+    try {
+        normalizedUrl = normalizePageUrl(url);
+    } catch {
         return;
     }
-    probedDiscoveredUrls.add(url);
+    if (probedDiscoveredUrls.has(normalizedUrl)) {
+        return;
+    }
+    // Already fully crawled — do not overwrite crawl result (e.g. 3xx + chain) with probe.
+    if (!link.external && visitedUrls.has(normalizedUrl)) {
+        probedDiscoveredUrls.add(normalizedUrl);
+        return;
+    }
+    probedDiscoveredUrls.add(normalizedUrl);
 
     if (!link.external) {
         const urlObject = new URL(url);
@@ -165,16 +177,23 @@ async function probeDiscoveredLink(url, referrer, link, browserWindow) {
         }
 
         const { parser, text } = await getRobots(new URL(currentUrl));
+        const redirectFields = redirectTracker.toFields();
+        const status = redirectTracker.hopCount > 0
+            ? (redirectTracker.firstHopStatus ?? response.status)
+            : response.status;
+        const probeResponseTimeMs = redirectTracker.hopCount > 0
+            ? (redirectTracker.firstHopResponseTimeMs ?? responseTimeMs)
+            : responseTimeMs;
         emitSpiderResult(browserWindow, buildResultWithIndexing(
             parser,
             text,
             url,
             buildProbeLinkFields(url, link, {
-                status: response.status,
+                status,
                 contentType: getContentType(response),
-                responseTimeMs,
-                redirectUrl: currentUrl !== url ? currentUrl : undefined,
-                ...redirectTracker.toFields(),
+                responseTimeMs: probeResponseTimeMs,
+                redirectUrl: redirectFields.redirectUrl || (currentUrl !== url ? currentUrl : undefined),
+                ...redirectFields,
             }),
             null,
             response
@@ -241,7 +260,15 @@ async function reportDiscoveredLinks(browserWindow, links, sourceUrl, allowedHos
 
         addReferrer(link.url, sourceUrl, referrerMeta);
 
-        if (!internalRobotsBlocked) {
+        let normalizedLinkUrl = link.url;
+        try {
+            normalizedLinkUrl = normalizePageUrl(link.url);
+        } catch {
+            continue;
+        }
+        const alreadyVisited = !link.external && visitedUrls.has(normalizedLinkUrl);
+
+        if (!internalRobotsBlocked && !alreadyVisited) {
             enqueueProbeUrl(link.url, sourceUrl, link);
         }
 
@@ -250,7 +277,7 @@ async function reportDiscoveredLinks(browserWindow, links, sourceUrl, allowedHos
         }
 
         const crawlableInternal = follow && !link.external && isCrawlableLink(link);
-        if (crawlableInternal && (visitedUrls.has(link.url) || isUrlQueued(link.url))) {
+        if (crawlableInternal && (alreadyVisited || isUrlQueued(link.url))) {
             continue;
         }
 

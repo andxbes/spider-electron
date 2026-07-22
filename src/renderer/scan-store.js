@@ -28,6 +28,10 @@ function isEmptyExtractField(field, value) {
     return value === '' || value === undefined || value === null;
 }
 
+function isHttpRedirectStatus(status) {
+    return typeof status === 'number' && status >= 300 && status < 400;
+}
+
 function mergeFetchedPageFields(existing, incoming) {
     if (!existing || existing.fetched === false || incoming.fetched === false) {
         return incoming;
@@ -43,6 +47,35 @@ function mergeFetchedPageFields(existing, incoming) {
         && existing.responseTimeMs !== undefined) {
         merged.responseTimeMs = existing.responseTimeMs;
     }
+
+    // Keep crawl redirect summary if a later update (e.g. probe) would wipe it with final 2xx.
+    const existingHops = Number(existing.redirectHopCount || 0);
+    const incomingHops = Number(incoming.redirectHopCount || 0);
+    if (existingHops > 0 && incomingHops === 0) {
+        merged.redirectHopCount = existing.redirectHopCount;
+        merged.redirectFinalUrl = existing.redirectFinalUrl || '';
+        merged.redirectInfinite = Boolean(existing.redirectInfinite);
+        merged.redirectChain = Array.isArray(existing.redirectChain) ? existing.redirectChain : [];
+        merged.redirectLoopStartUrl = existing.redirectLoopStartUrl || '';
+        merged.redirectUrl = existing.redirectUrl || merged.redirectUrl || '';
+        if (isHttpRedirectStatus(existing.status) && !isHttpRedirectStatus(incoming.status)) {
+            merged.status = existing.status;
+            if (existing.responseTimeMs !== null && existing.responseTimeMs !== undefined) {
+                merged.responseTimeMs = existing.responseTimeMs;
+            }
+        }
+    } else if (
+        existingHops > 0
+        && incomingHops > 0
+        && isHttpRedirectStatus(existing.status)
+        && !isHttpRedirectStatus(incoming.status)
+    ) {
+        merged.status = existing.status;
+        if (existing.responseTimeMs !== null && existing.responseTimeMs !== undefined) {
+            merged.responseTimeMs = existing.responseTimeMs;
+        }
+    }
+
     return merged;
 }
 
