@@ -185,7 +185,8 @@
         id="detailPanel"
         class="shrink-0 min-h-[120px] w-full min-w-0 border border-zinc-300 rounded-md bg-white flex flex-col overflow-hidden mt-1"
       >
-        <div class="flex border-b border-zinc-300 bg-zinc-50 shrink-0">
+        <div class="flex border-b border-zinc-300 bg-zinc-50 shrink-0 min-w-0 overflow-hidden">
+          <div class="flex shrink-0 min-w-0">
           <button
             type="button"
             data-tab="details"
@@ -207,7 +208,8 @@
           >
             Вихідні посилання
           </button>
-          <div class="flex-grow"></div>
+          </div>
+          <div class="flex-grow min-w-0 basis-0"></div>
           <button
             type="button"
             id="detailLinkExportBtn"
@@ -216,16 +218,16 @@
           >
             Експорт CSV
           </button>
-          <div id="selectedUrlBar" class="flex items-center gap-1 px-2 py-1 max-w-lg min-w-0">
+          <div id="selectedUrlBar" class="flex items-center gap-1 px-2 py-1 min-w-0 max-w-md shrink-0 border-l border-zinc-200">
             <span
               id="selectedUrlHint"
-              class="text-xs text-zinc-500 truncate italic min-w-0"
+              class="text-xs text-zinc-500 truncate italic min-w-0 flex-1"
             >
               Оберіть рядок у таблиці
             </span>
           </div>
         </div>
-        <div id="detailContent" class="overflow-auto flex-grow p-0 text-xs">
+        <div id="detailContent" class="overflow-auto flex-grow min-w-0 p-0 text-xs">
           <p class="p-4 text-zinc-400 italic">Оберіть URL у таблиці вище</p>
         </div>
       </div>

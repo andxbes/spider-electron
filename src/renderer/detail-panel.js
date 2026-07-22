@@ -62,11 +62,11 @@ function createDetailPanel(deps) {
                         : '<span class="text-zinc-400 italic">—</span>';
                     return `
         <tr class="border-b border-zinc-100 hover:bg-zinc-50${external ? ' bg-amber-50/40' : ''}">
-            <td class="p-2">${urlCellHtml(link.url || link.href || link)}${typeBadge}</td>
-            <td class="p-2 font-mono text-zinc-600 text-[11px] whitespace-nowrap">${escapeHtml(tag)}</td>
-            <td class="p-2 text-zinc-600">${relCell}</td>
-            <td class="p-2 whitespace-nowrap">${formatRelAllowedStatus(relInfo.relFollowAllowed)}</td>
-            <td class="p-2 text-zinc-600">${link.text ? escapeHtml(link.text) : '<span class="text-zinc-400 italic">—</span>'}</td>
+            <td class="p-2 detail-link-col-url">${urlCellHtml(link.url || link.href || link)}${typeBadge}</td>
+            <td class="p-2 font-mono text-zinc-600 text-[11px] detail-link-col-tag whitespace-nowrap">${escapeHtml(tag)}</td>
+            <td class="p-2 text-zinc-600 detail-link-col-rel">${relCell}</td>
+            <td class="p-2 whitespace-nowrap detail-link-col-follow">${formatRelAllowedStatus(relInfo.relFollowAllowed)}</td>
+            <td class="p-2 text-zinc-600 detail-link-col-text">${link.text ? escapeHtml(link.text) : '<span class="text-zinc-400 italic">—</span>'}</td>
         </tr>`;
                 }
             )
@@ -75,14 +75,14 @@ function createDetailPanel(deps) {
         const activeSortClass = (column) => (
             linkTableSortState.column === column ? ' bg-zinc-200 text-zinc-800' : ''
         );
-        return `${captionHtml}<table class="w-full border-collapse">
+        return `${captionHtml}<table class="detail-links-table w-full border-collapse">
         <thead class="bg-zinc-50 sticky top-0">
             <tr class="text-left text-zinc-500">
-                <th class="${sortThClass}${activeSortClass('url')}" data-sort="url" title="URL">${linkTableSortIndicator('url', 'URL', linkTableSortState)}</th>
-                <th class="${sortThClass} min-w-[110px]${activeSortClass('tag')}" data-sort="tag" title="Тег">${linkTableSortIndicator('tag', 'Тег', linkTableSortState)}</th>
-                <th class="${sortThClass} min-w-[90px]${activeSortClass('rel')}" data-sort="rel" title="rel">${linkTableSortIndicator('rel', 'rel', linkTableSortState)}</th>
-                <th class="${sortThClass} w-24${activeSortClass('follow')}" data-sort="follow" title="Перехід">${linkTableSortIndicator('follow', 'Перехід', linkTableSortState)}</th>
-                <th class="${sortThClass} w-1/3${activeSortClass('text')}" data-sort="text" title="Текст посилання">${linkTableSortIndicator('text', 'Текст посилання', linkTableSortState)}</th>
+                <th class="${sortThClass} detail-link-col-url${activeSortClass('url')}" data-sort="url" title="URL">${linkTableSortIndicator('url', 'URL', linkTableSortState)}</th>
+                <th class="${sortThClass} detail-link-col-tag${activeSortClass('tag')}" data-sort="tag" title="Тег">${linkTableSortIndicator('tag', 'Тег', linkTableSortState)}</th>
+                <th class="${sortThClass} detail-link-col-rel${activeSortClass('rel')}" data-sort="rel" title="rel">${linkTableSortIndicator('rel', 'rel', linkTableSortState)}</th>
+                <th class="${sortThClass} detail-link-col-follow${activeSortClass('follow')}" data-sort="follow" title="Перехід">${linkTableSortIndicator('follow', 'Перехід', linkTableSortState)}</th>
+                <th class="${sortThClass} detail-link-col-text${activeSortClass('text')}" data-sort="text" title="Текст посилання">${linkTableSortIndicator('text', 'Текст посилання', linkTableSortState)}</th>
             </tr>
         </thead>
         <tbody>${rows}</tbody>

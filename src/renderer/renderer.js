@@ -157,11 +157,14 @@ function urlActionButtons(url) {
     </span>`;
 }
 
-function urlCellHtml(url) {
+function urlCellHtml(url, { compact = false } = {}) {
     if (!url) {
         return '<span class="text-zinc-400 italic">—</span>';
     }
-    return `<span class="flex flex-wrap items-start gap-x-1 gap-y-0.5 min-w-0 w-full">
+    const wrapperClass = compact
+        ? 'inline-flex items-start gap-x-1 gap-y-0.5 min-w-0 max-w-full'
+        : 'flex flex-wrap items-start gap-x-1 gap-y-0.5 min-w-0 w-full';
+    return `<span class="${wrapperClass}">
         <span class="text-blue-700 break-all min-w-0">${escapeHtml(url)}</span>
         ${urlActionButtons(url)}
     </span>`;
@@ -294,7 +297,7 @@ detailPanel = createDetailPanel({
     getReferrersForUrl,
     getOutgoingLinksFrom,
     getFilteredOutgoingLinks: (pageUrl) => tableFilters.getFilteredOutgoingLinks(pageUrl, getOutgoingLinksFrom),
-    urlCellHtml,
+    urlCellHtml: (url) => urlCellHtml(url, { compact: true }),
     getLinkTableSortState: () => linkTableSortState,
     setLinkTableSortState: (next) => { linkTableSortState = next; },
     getDetailHelpers: getPresentationHelpers,
@@ -341,11 +344,14 @@ function syncSelectedRowUi() {
     }
     selectedUrlHint.textContent = truncate(selectedUrl, 80);
     selectedUrlHint.title = selectedUrl;
-    if (selectedUrlBar) {
-        selectedUrlBar.querySelectorAll('.url-copy, .url-open').forEach((el) => el.remove());
-        const actions = document.createElement('span');
+    if (selectedUrlBar?.querySelector) {
+        let actions = selectedUrlBar.querySelector('[data-url-actions]');
+        if (!actions) {
+            actions = document.createElement('span');
+            actions.dataset.urlActions = '1';
+            selectedUrlBar.appendChild(actions);
+        }
         actions.innerHTML = urlActionButtons(selectedUrl);
-        selectedUrlBar.appendChild(actions);
     }
     renderDetailPanel();
     updateDetailLinkExportButton();
@@ -493,8 +499,8 @@ function clearScanData() {
     tableView.renderTableHead();
     resultsTable.innerHTML = '';
     selectedUrlHint.textContent = 'Оберіть рядок у таблиці';
-    if (selectedUrlBar) {
-        selectedUrlBar.querySelectorAll('.url-copy, .url-open').forEach((el) => el.remove());
+    if (selectedUrlBar?.querySelector) {
+        selectedUrlBar.querySelector('[data-url-actions]')?.remove();
     }
     detailContent.innerHTML = '<p class="p-4 text-zinc-400 italic">Оберіть URL у таблиці вище</p>';
     updateDetailLinkExportButton();

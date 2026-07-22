@@ -127,4 +127,52 @@
   body.table-col-resizing * {
     cursor: col-resize !important;
   }
+
+  .detail-links-table {
+    width: 100%;
+    table-layout: fixed;
+    border-collapse: collapse;
+  }
+
+  .detail-links-table th,
+  .detail-links-table td {
+    overflow: hidden;
+    vertical-align: top;
+  }
+
+  .detail-links-table .detail-link-col-url {
+    width: 38%;
+  }
+
+  .detail-links-table .detail-link-col-tag {
+    width: 18%;
+  }
+
+  .detail-links-table .detail-link-col-rel {
+    width: 12%;
+  }
+
+  .detail-links-table .detail-link-col-follow {
+    width: 10%;
+  }
+
+  .detail-links-table .detail-link-col-text {
+    width: 22%;
+  }
+
+  .detail-links-table td:first-child {
+    overflow-wrap: anywhere;
+    word-break: break-all;
+  }
+
+  .detail-links-table td {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .detail-links-table td.detail-link-col-tag,
+  .detail-links-table td.detail-link-col-follow {
+    white-space: nowrap;
+  }
 }
