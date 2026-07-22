@@ -90,6 +90,22 @@ describe('redirect-chain', () => {
         assert.equal(hasRedirectChainData({ redirectInfinite: true }), true);
     });
 
+    it('buildRedirectIntermediateUrlSet marks only middle hops', () => {
+        const entries = [
+            {
+                url: 'https://example.com/a',
+                redirectChain: ['https://example.com/a', 'https://example.com/b', 'https://example.com/c'],
+            },
+            { url: 'https://example.com/b', status: 301 },
+            { url: 'https://example.com/c', status: 200, fetched: true },
+        ];
+        const { buildRedirectIntermediateUrlSet } = require('../../src/shared/redirect-chain');
+        const intermediates = buildRedirectIntermediateUrlSet(entries);
+        assert.equal(intermediates.has('https://example.com/b'), true);
+        assert.equal(intermediates.has('https://example.com/a'), false);
+        assert.equal(intermediates.has('https://example.com/c'), false);
+    });
+
     it('shouldShowInResultsTable hides redirect intermediates but keeps start and final', () => {
         const entries = [
             {

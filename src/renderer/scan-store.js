@@ -49,6 +49,8 @@ function mergeFetchedPageFields(existing, incoming) {
 function createScanStore(options = {}) {
     const scanResults = new Map();
     const insertionOrder = [];
+    const insertionOrderIndex = new Map();
+    let dataRevision = 0;
     let latestReferrersByUrl = new Map();
     let latestRobotsByUrl = new Map();
     let duplicateCountsCache = null;
@@ -57,6 +59,23 @@ function createScanStore(options = {}) {
     let scanHostname = '';
 
     const getScanHostname = options.getScanHostname || (() => scanHostname);
+
+    function bumpDataRevision() {
+        dataRevision += 1;
+    }
+
+    function rebuildInsertionOrderIndex() {
+        insertionOrderIndex.clear();
+        for (let index = 0; index < insertionOrder.length; index += 1) {
+            insertionOrderIndex.set(insertionOrder[index], index);
+        }
+    }
+
+    function getInsertionIndex(url) {
+        return insertionOrderIndex.has(url)
+            ? insertionOrderIndex.get(url)
+            : Number.MAX_SAFE_INTEGER;
+    }
 
     function invalidateOutgoingLinksCache() {
         outgoingLinksByPageCache = null;
@@ -104,6 +123,7 @@ function createScanStore(options = {}) {
                         ? { imgAlt: data.imgAlt }
                         : (existing.imgAlt !== undefined ? { imgAlt: existing.imgAlt } : {})),
                 }));
+                bumpDataRevision();
                 return { isNew: false, changed: true };
             }
             return { isNew: false, changed: false };
@@ -111,8 +131,12 @@ function createScanStore(options = {}) {
         const isNew = !existing;
         if (isNew) {
             insertionOrder.push(data.url);
+            insertionOrderIndex.set(data.url, insertionOrder.length - 1);
         }
         scanResults.set(data.url, data);
+        if (isNew || existing) {
+            bumpDataRevision();
+        }
         return { isNew, changed: true, deferUi };
     }
 
@@ -122,6 +146,8 @@ function createScanStore(options = {}) {
         latestRobotsByUrl = new Map();
         scanResults.clear();
         insertionOrder.length = 0;
+        insertionOrderIndex.clear();
+        dataRevision = 0;
         outgoingLinksByPageCache = null;
     }
 
@@ -189,6 +215,7 @@ function createScanStore(options = {}) {
         if (changed) {
             reinferAllLinkKinds();
             invalidateOutgoingLinksCache();
+            bumpDataRevision();
         }
         return changed;
     }
@@ -216,6 +243,7 @@ function createScanStore(options = {}) {
         }
         materializeDiscoveredFromReferrers();
         invalidateOutgoingLinksCache();
+        bumpDataRevision();
     }
 
     function buildOutgoingLink(ref, targetEntry) {
@@ -288,6 +316,10 @@ function createScanStore(options = {}) {
     return {
         scanResults,
         insertionOrder,
+        insertionOrderIndex,
+        getDataRevision: () => dataRevision,
+        getInsertionIndex,
+        rebuildInsertionOrderIndex,
         getScanHostname,
         setScanHostname,
         upsertRaw,

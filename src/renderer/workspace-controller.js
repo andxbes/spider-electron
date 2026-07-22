@@ -101,6 +101,13 @@ function createWorkspaceController(deps) {
         }
     }
 
+    function scheduleWorkspacePersistSelectedUrl() {
+        if (getUiState() === 'running') {
+            return;
+        }
+        saveSelectedUrlToSession(getSelectedUrl());
+    }
+
     function populateScanResults(normalized) {
         clearScanData();
         urlInput.value = normalized.startUrl;
@@ -133,6 +140,7 @@ function createWorkspaceController(deps) {
             }
         }
         scanStore.rebuildLatestReferrersFromResults();
+        scanStore.rebuildInsertionOrderIndex();
         reinferAllLinkKinds();
     }
 
@@ -212,6 +220,7 @@ function createWorkspaceController(deps) {
     return {
         persistWorkspaceNow,
         scheduleWorkspacePersist,
+        scheduleWorkspacePersistSelectedUrl,
         cancelWorkspacePersistTimer,
         populateScanResults,
         restoreWorkspaceFromSession,

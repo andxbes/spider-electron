@@ -55,6 +55,7 @@ function createTableView(deps) {
     let tableScrollRaf = null;
     let renderedTableUrlSet = new Set();
     let refreshTableTimer = null;
+    let lastPoolSize = 0;
 
     function getTableContext() {
         return {
@@ -117,7 +118,10 @@ function createTableView(deps) {
         }
 
         const selectedUrl = getSelectedUrl();
-        if (selectedUrl && !entries.some((row) => row.url === selectedUrl)) {
+        const urlHidden = deps.isUrlInDisplayedResults
+            ? !deps.isUrlInDisplayedResults(selectedUrl)
+            : !entries.some((row) => row.url === selectedUrl);
+        if (selectedUrl && urlHidden) {
             document.querySelectorAll('#resultsTable tr').forEach((tr) => {
                 tr.classList.remove('bg-blue-50');
             });
@@ -151,7 +155,7 @@ function createTableView(deps) {
         tableRenderedCount = end;
         updateFilterCount(
             tableDisplayEntries.length,
-            getTableEntries().length,
+            lastPoolSize,
             tableRenderedCount
         );
     }
@@ -219,8 +223,13 @@ function createTableView(deps) {
             updateStatusFilterOptions();
         }
 
-        const entries = getDisplayedResults();
-        const poolSize = getTableEntries().length;
+        const entries = deps.getDisplayedResultsSnapshot
+            ? deps.getDisplayedResultsSnapshot().entries
+            : getDisplayedResults();
+        const poolSize = deps.getCachedPoolSize
+            ? deps.getCachedPoolSize()
+            : getTableEntries().length;
+        lastPoolSize = poolSize;
 
         if (incremental) {
             refreshTableIncremental(entries, poolSize);

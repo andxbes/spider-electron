@@ -55,6 +55,7 @@ function createScanHandlers(deps) {
             scanRefreshTimer = null;
             invalidateOutgoingLinksCache();
             invalidateDuplicateCounts();
+            deps.invalidateDisplayedResultsCache?.();
             requestRefreshTable();
         }, SCAN_REFRESH_DELAY_MS);
     }
@@ -80,6 +81,7 @@ function createScanHandlers(deps) {
         if (!changed) {
             return false;
         }
+        deps.invalidateDisplayedResultsCache?.();
         const data = scanStore.scanResults.get(
             (typeof incoming === 'object' && incoming.url) ? incoming.url : incoming
         ) || normalizeLinkEntry(incoming);
@@ -170,8 +172,16 @@ function createScanHandlers(deps) {
             reinferAllLinkKinds();
             invalidateOutgoingLinksCache();
             invalidateDuplicateCounts();
+            deps.invalidateDisplayedResultsCache?.();
             refreshTable();
-            persistWorkspaceNow();
+            const persist = () => {
+                persistWorkspaceNow();
+            };
+            if (typeof requestIdleCallback === 'function') {
+                requestIdleCallback(persist, { timeout: 3000 });
+            } else {
+                setTimeout(persist, 0);
+            }
         });
     }
 

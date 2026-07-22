@@ -1,5 +1,6 @@
 const SESSION_DUMP_VERSION = 1;
 const WORKSPACE_STORAGE_KEY = 'spider-electron.workspace.v1';
+const WORKSPACE_SELECTED_URL_KEY = 'spider-electron.workspace.selectedUrl.v1';
 const WORKSPACE_VERSION = 1;
 
 function cloneResultEntry(data) {
@@ -142,8 +143,33 @@ function buildWorkspaceSnapshot({
 function saveWorkspaceToSession(snapshot) {
     try {
         sessionStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify(snapshot));
+        if (snapshot.selectedUrl) {
+            sessionStorage.setItem(WORKSPACE_SELECTED_URL_KEY, snapshot.selectedUrl);
+        } else {
+            sessionStorage.removeItem(WORKSPACE_SELECTED_URL_KEY);
+        }
     } catch (error) {
         console.error('Не вдалося зберегти стан робочої області:', error);
+    }
+}
+
+function saveSelectedUrlToSession(selectedUrl) {
+    try {
+        if (!selectedUrl) {
+            sessionStorage.removeItem(WORKSPACE_SELECTED_URL_KEY);
+            return;
+        }
+        sessionStorage.setItem(WORKSPACE_SELECTED_URL_KEY, selectedUrl);
+    } catch (error) {
+        console.error('Не вдалося зберегти вибраний URL:', error);
+    }
+}
+
+function loadSelectedUrlFromSession() {
+    try {
+        return sessionStorage.getItem(WORKSPACE_SELECTED_URL_KEY) || '';
+    } catch {
+        return '';
     }
 }
 
@@ -157,6 +183,12 @@ function loadWorkspaceFromSession() {
         if (!parsed || parsed.version !== WORKSPACE_VERSION || !Array.isArray(parsed.results)) {
             return null;
         }
+        if (!parsed.selectedUrl) {
+            const selectedUrl = loadSelectedUrlFromSession();
+            if (selectedUrl) {
+                parsed.selectedUrl = selectedUrl;
+            }
+        }
         return parsed;
     } catch {
         return null;
@@ -166,6 +198,7 @@ function loadWorkspaceFromSession() {
 function clearWorkspaceSession() {
     try {
         sessionStorage.removeItem(WORKSPACE_STORAGE_KEY);
+        sessionStorage.removeItem(WORKSPACE_SELECTED_URL_KEY);
     } catch {
         // ignore
     }
@@ -181,6 +214,8 @@ if (typeof module !== 'undefined' && module.exports) {
         normalizeLoadedDump,
         buildWorkspaceSnapshot,
         saveWorkspaceToSession,
+        saveSelectedUrlToSession,
+        loadSelectedUrlFromSession,
         loadWorkspaceFromSession,
         clearWorkspaceSession,
     };

@@ -131,6 +131,23 @@ function formatRedirectCellLabel(data) {
     return String(hops);
 }
 
+function buildRedirectIntermediateUrlSet(allEntries = []) {
+    const intermediates = new Set();
+    const rows = Array.isArray(allEntries)
+        ? allEntries
+        : Array.from(allEntries?.values?.() || []);
+    for (const row of rows) {
+        const chain = row?.redirectChain;
+        if (!Array.isArray(chain) || chain.length < 3) {
+            continue;
+        }
+        for (let index = 1; index < chain.length - 1; index += 1) {
+            intermediates.add(chain[index]);
+        }
+    }
+    return intermediates;
+}
+
 function isUrlRedirectIntermediate(url, allEntries = []) {
     if (!url) {
         return false;
@@ -151,7 +168,7 @@ function isUrlRedirectIntermediate(url, allEntries = []) {
     return false;
 }
 
-function shouldShowInResultsTable(data, allEntries = []) {
+function shouldShowInResultsTable(data, allEntriesOrIntermediates = []) {
     if (!data?.url) {
         return false;
     }
@@ -166,7 +183,11 @@ function shouldShowInResultsTable(data, allEntries = []) {
     if (data.redirectHopOnly) {
         return false;
     }
-    if (isUrlRedirectIntermediate(data.url, allEntries)) {
+    if (allEntriesOrIntermediates instanceof Set) {
+        if (allEntriesOrIntermediates.has(data.url)) {
+            return false;
+        }
+    } else if (isUrlRedirectIntermediate(data.url, allEntriesOrIntermediates)) {
         return false;
     }
     return true;
@@ -186,6 +207,7 @@ const exported = {
     formatRedirectChainTooltip,
     formatRedirectCellLabel,
     isUrlRedirectIntermediate,
+    buildRedirectIntermediateUrlSet,
     shouldShowInResultsTable,
     redirectHopOnlyFields,
 };

@@ -54,6 +54,29 @@ function createTableFilters(deps) {
     let knownStatusCodes = new Set();
     let searchRefreshTimer = null;
     const SEARCH_REFRESH_DELAY_MS = 200;
+    let displayedResultsCache = null;
+
+    function invalidateDisplayedResultsCache() {
+        displayedResultsCache = null;
+    }
+
+    function getDisplayedResultsCacheKey() {
+        const sortState = getSortState();
+        return [
+            scanStore.getDataRevision?.() ?? scanStore.scanResults.size,
+            scanStore.scanResults.size,
+            getUiState(),
+            activeContentFilter,
+            activeStatusFilter,
+            activeIndexingFilter,
+            activeH1Filter,
+            activeDuplicateFilter,
+            activeSourceFilter,
+            activeSearchQuery,
+            sortState.column || '',
+            sortState.direction || '',
+        ].join('\0');
+    }
 
     function setActiveContentFilter(value) {
         activeContentFilter = normalizeContentTypeFilter(value);
@@ -95,17 +118,18 @@ function createTableFilters(deps) {
         return all;
     }
 
-    function getTableEntries() {
-        const pool = getScannableTablePool();
-        const visible = pool.filter((data) => shouldShowInResultsTable(data, pool));
+    function getTableEntries(pool = getScannableTablePool(), redirectIntermediates = null) {
+        const intermediates = redirectIntermediates || buildRedirectIntermediateUrlSet(pool);
+        const visible = pool.filter((data) => shouldShowInResultsTable(data, intermediates));
         if (activeContentFilter === 'all') {
             return visible;
         }
         return visible.filter((data) => matchesResourceTypeFilterImpl(data, activeContentFilter));
     }
 
-    function getFilteredResults() {
-        return getTableEntries().filter((data) => passesTableFiltersImpl(data, {
+    function getFilteredResults(tableEntries = null) {
+        const entries = tableEntries ?? getTableEntries();
+        return entries.filter((data) => passesTableFiltersImpl(data, {
             activeSearchQuery,
             activeSourceFilter,
             activeStatusFilter,
@@ -119,12 +143,13 @@ function createTableFilters(deps) {
         }));
     }
 
-    function getDisplayedResults() {
-        const entries = getFilteredResults();
+    function sortDisplayedEntries(entries) {
         const sortState = getSortState();
         const sortHelpers = {
             getRowMetrics,
             getReferrersForUrl: (url) => scanStore.getReferrersForUrl(url),
+            getOutgoingLinksFrom: (url) => scanStore.getOutgoingLinksFrom(url),
+            getInsertionIndex: (url) => scanStore.getInsertionIndex(url),
         };
         if (sortState.column) {
             entries.sort((a, b) => compareRowsImpl(
@@ -143,11 +168,53 @@ function createTableFilters(deps) {
                 sortHelpers,
             ));
         } else {
-            entries.sort((a, b) => (
-                scanStore.insertionOrder.indexOf(a.url) - scanStore.insertionOrder.indexOf(b.url)
-            ));
+            const orderIndex = scanStore.insertionOrderIndex;
+            entries.sort((a, b) => {
+                const ia = orderIndex.get(a.url) ?? Number.MAX_SAFE_INTEGER;
+                const ib = orderIndex.get(b.url) ?? Number.MAX_SAFE_INTEGER;
+                return ia - ib;
+            });
         }
         return entries;
+    }
+
+    function computeDisplayedResultsSnapshot() {
+        const pool = getScannableTablePool();
+        const redirectIntermediates = buildRedirectIntermediateUrlSet(pool);
+        const tableEntries = getTableEntries(pool, redirectIntermediates);
+        const filtered = getFilteredResults(tableEntries);
+        const entries = sortDisplayedEntries(filtered);
+        return {
+            entries,
+            poolSize: tableEntries.length,
+            displayedUrlSet: new Set(entries.map((entry) => entry.url)),
+        };
+    }
+
+    function getDisplayedResultsSnapshot() {
+        const cacheKey = getDisplayedResultsCacheKey();
+        if (displayedResultsCache?.key === cacheKey) {
+            return displayedResultsCache.snapshot;
+        }
+        const snapshot = computeDisplayedResultsSnapshot();
+        displayedResultsCache = { key: cacheKey, snapshot };
+        return snapshot;
+    }
+
+    function getDisplayedResults() {
+        return getDisplayedResultsSnapshot().entries;
+    }
+
+    function getCachedDisplayedCount() {
+        return getDisplayedResultsSnapshot().entries.length;
+    }
+
+    function getCachedPoolSize() {
+        return getDisplayedResultsSnapshot().poolSize;
+    }
+
+    function isUrlInDisplayedResults(url) {
+        return getDisplayedResultsSnapshot().displayedUrlSet.has(url);
     }
 
     function areDefaultTableFiltersActive() {
@@ -252,6 +319,7 @@ function createTableFilters(deps) {
         setActiveSourceFilter('all');
         setActiveContentFilter('all');
         knownStatusCodes = new Set();
+        invalidateDisplayedResultsCache();
         invalidateDuplicateCounts();
         if (tableSearch) {
             tableSearch.value = '';
@@ -279,6 +347,7 @@ function createTableFilters(deps) {
         setActiveSourceFilter(filters.source || filters.viewMode || filters.externalLinks || 'all');
         setActiveContentFilter(filters.content || filters.externalType || 'all');
         activeSearchQuery = filters.search || '';
+        invalidateDisplayedResultsCache();
         if (tableSearch) {
             tableSearch.value = activeSearchQuery;
         }
@@ -315,6 +384,7 @@ function createTableFilters(deps) {
         }
         searchRefreshTimer = setTimeout(() => {
             searchRefreshTimer = null;
+            invalidateDisplayedResultsCache();
             onFilterChange({ immediate: true });
             if (typeof onPersistWorkspace === 'function') {
                 onPersistWorkspace();
@@ -332,6 +402,7 @@ function createTableFilters(deps) {
         } else {
             setSortState({ column: col, direction: 'asc' });
         }
+        invalidateDisplayedResultsCache();
         deps.onTableHeadRefresh();
         onFilterChange({ immediate: true });
     }
@@ -341,6 +412,7 @@ function createTableFilters(deps) {
             return;
         }
         setActiveContentFilter(nextValue);
+        invalidateDisplayedResultsCache();
         if (typeof sanitizeSortState === 'function') {
             sanitizeSortState();
         }
@@ -364,6 +436,7 @@ function createTableFilters(deps) {
         if (statusFilter) {
             statusFilter.addEventListener('change', () => {
                 activeStatusFilter = statusFilter.value;
+                invalidateDisplayedResultsCache();
                 onFilterChange({ immediate: true });
             });
         }
@@ -371,6 +444,7 @@ function createTableFilters(deps) {
         if (indexingFilter) {
             indexingFilter.addEventListener('change', () => {
                 activeIndexingFilter = indexingFilter.value;
+                invalidateDisplayedResultsCache();
                 onFilterChange({ immediate: true });
             });
         }
@@ -378,6 +452,7 @@ function createTableFilters(deps) {
         if (h1Filter) {
             h1Filter.addEventListener('change', () => {
                 activeH1Filter = h1Filter.value;
+                invalidateDisplayedResultsCache();
                 onFilterChange({ immediate: true });
             });
         }
@@ -385,6 +460,7 @@ function createTableFilters(deps) {
         if (duplicateFilter) {
             duplicateFilter.addEventListener('change', () => {
                 activeDuplicateFilter = duplicateFilter.value;
+                invalidateDisplayedResultsCache();
                 onFilterChange({ immediate: true });
             });
         }
@@ -392,6 +468,7 @@ function createTableFilters(deps) {
         if (sourceFilter) {
             sourceFilter.addEventListener('change', () => {
                 setActiveSourceFilter(sourceFilter.value);
+                invalidateDisplayedResultsCache();
                 onFilterChange({ immediate: true });
                 if (typeof onPersistWorkspace === 'function') {
                     onPersistWorkspace();
@@ -408,6 +485,7 @@ function createTableFilters(deps) {
                 if (event.key === 'Escape') {
                     tableSearch.value = '';
                     activeSearchQuery = '';
+                    invalidateDisplayedResultsCache();
                     onFilterChange({ immediate: true });
                     if (typeof onPersistWorkspace === 'function') {
                         onPersistWorkspace();
@@ -424,6 +502,11 @@ function createTableFilters(deps) {
         getTableEntries,
         getFilteredResults,
         getDisplayedResults,
+        getDisplayedResultsSnapshot,
+        getCachedDisplayedCount,
+        getCachedPoolSize,
+        isUrlInDisplayedResults,
+        invalidateDisplayedResultsCache,
         areDefaultTableFiltersActive,
         hasActiveLinkFilters,
         getFilteredOutgoingLinks,

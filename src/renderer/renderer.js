@@ -268,6 +268,9 @@ tableView = createTableView({
     filterCount,
     detailContent,
     getDisplayedResults: () => tableFilters.getDisplayedResults(),
+    getDisplayedResultsSnapshot: () => tableFilters.getDisplayedResultsSnapshot(),
+    getCachedPoolSize: () => tableFilters.getCachedPoolSize(),
+    isUrlInDisplayedResults: (url) => tableFilters.isUrlInDisplayedResults(url),
     getTableEntries: () => tableFilters.getTableEntries(),
     getRowData,
     getUiState: () => uiState,
@@ -363,7 +366,7 @@ function selectRow(url) {
         tr.classList.toggle('bg-blue-50', tr.dataset.url === url);
     });
     syncSelectedRowUi();
-    scheduleWorkspacePersist();
+    workspace?.scheduleWorkspacePersistSelectedUrl?.();
 }
 
 workspace = createWorkspaceController({
@@ -422,6 +425,7 @@ scanHandlers = createScanHandlers({
     persistWorkspaceNow,
     cancelWorkspacePersistTimer: () => workspace.cancelWorkspacePersistTimer(),
     scheduleWorkspacePersist,
+    invalidateDisplayedResultsCache: () => tableFilters.invalidateDisplayedResultsCache(),
     updateUrlInputProgress,
     elements: {
         statusText,
@@ -438,7 +442,8 @@ scanHandlers.bindSpiderIpc();
 
 function updateExportButton() {
     const canExport = uiState === 'idle' || uiState === 'paused';
-    const hasVisibleRows = tableFilters.getFilteredResults().length > 0;
+    const hasVisibleRows = scanStore.scanResults.size > 0
+        && tableFilters.getCachedDisplayedCount() > 0;
     exportButton.disabled = !hasVisibleRows;
     exportButton.classList.toggle('hidden', !canExport || scanStore.scanResults.size === 0);
 }
@@ -493,6 +498,7 @@ function scheduleStartupTableRefresh() {
 
 function clearScanData() {
     scanStore.clearData();
+    tableFilters.invalidateDisplayedResultsCache();
     tableView.resetTableRenderCache();
     selectedUrl = null;
     sortState = { column: null, direction: 'asc' };

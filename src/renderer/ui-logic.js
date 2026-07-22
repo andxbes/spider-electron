@@ -1335,6 +1335,13 @@ function getRowMetricsImpl(data, helpers = {}) {
     };
 }
 
+function resolveInsertionIndex(url, insertionOrder, helpers = {}) {
+    if (typeof helpers.getInsertionIndex === 'function') {
+        return helpers.getInsertionIndex(url);
+    }
+    return insertionOrder.indexOf(url);
+}
+
 function compareRowsImpl(a, b, sortState = { column: null, direction: 'asc' }, insertionOrder = [], helpers = {}) {
     const { column, direction } = sortState;
     const mul = direction === 'asc' ? 1 : -1;
@@ -1358,8 +1365,8 @@ function compareRowsImpl(a, b, sortState = { column: null, direction: 'asc' }, i
     let vb;
     switch (column) {
         case 'index':
-            va = insertionOrder.indexOf(a.url);
-            vb = insertionOrder.indexOf(b.url);
+            va = resolveInsertionIndex(a.url, insertionOrder, helpers);
+            vb = resolveInsertionIndex(b.url, insertionOrder, helpers);
             break;
         case 'url':
             va = a.url;
@@ -1435,8 +1442,8 @@ function compareRowsImpl(a, b, sortState = { column: null, direction: 'asc' }, i
             vb = redirectHopCountSortValue(b);
             break;
         default:
-            va = insertionOrder.indexOf(a.url);
-            vb = insertionOrder.indexOf(b.url);
+            va = resolveInsertionIndex(a.url, insertionOrder, helpers);
+            vb = resolveInsertionIndex(b.url, insertionOrder, helpers);
     }
 
     if (va < vb) return -1 * mul;
