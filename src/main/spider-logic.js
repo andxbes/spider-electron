@@ -86,6 +86,7 @@ const { resolveUserAgent } = require('../shared/user-agents');
 const {
     FALLBACK_SITEMAP_PATHS,
     parseSitemapsFromRobotsTxt,
+    normalizeSitemapUrlList,
     fetchSitemapPageUrls,
     discoverSitemapUrls,
     seedQueueFromSitemaps,
@@ -679,7 +680,13 @@ async function startSpider(startUrl, options, browserWindow) {
     setScanRequestDelayMs(options?.requestDelayMs);
 
     if (useSitemap) {
-        const sitemapPageCount = await seedQueueFromSitemaps(startUrl, browserWindow, getRobots, session);
+        const sitemapPageCount = await seedQueueFromSitemaps(
+            startUrl,
+            browserWindow,
+            getRobots,
+            session,
+            { sitemapUrls: options?.sitemapUrls }
+        );
         if (getScanSession() !== session) {
             return;
         }
@@ -758,6 +765,7 @@ module.exports = {
     buildRobotsBlockedStub,
     isPageLimitReached,
     parseSitemapsFromRobotsTxt,
+    normalizeSitemapUrlList,
     discoverSitemapUrls,
     fetchSitemapPageUrls,
     seedQueueFromSitemaps,

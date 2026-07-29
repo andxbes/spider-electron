@@ -18,7 +18,7 @@ const {
     waitBeforeRequest,
 } = require('./request-delay');
 
-const FETCH_TIMEOUT_MS = 5000;
+const FETCH_TIMEOUT_MS = 20_000;
 const { MAX_REDIRECT_HOPS } = require('../shared/redirect-chain');
 
 let fetchImpl = undiciFetch;
@@ -58,15 +58,16 @@ function resetFetchForTests() {
     fetchImpl = undiciFetch;
 }
 
-async function fetchPage(url, { skipDelay = false } = {}) {
+async function fetchPage(url, { skipDelay = false, timeoutMs = FETCH_TIMEOUT_MS } = {}) {
     if (!skipDelay) {
         await waitBeforeRequest();
     }
     const authHeaders = scanAuthContext
         ? getAuthHeadersForUrl(url, scanAuthContext.hostname, scanAuthContext)
         : {};
+    const timeout = Math.max(1, Number(timeoutMs) || FETCH_TIMEOUT_MS);
     return fetchImpl(url, {
-        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+        signal: AbortSignal.timeout(timeout),
         redirect: 'manual',
         headers: { 'User-Agent': getScanUserAgent(), ...authHeaders },
     });

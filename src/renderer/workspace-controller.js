@@ -186,10 +186,14 @@ function createWorkspaceController(deps) {
         return true;
     }
 
-    function applySessionDump(dump, filePath = '') {
+    async function applySessionDump(dump, filePath = '') {
         const normalized = normalizeLoadedDump({ ...dump, filePath });
         tableFilters.resetTableFilters();
         populateScanResults(normalized);
+
+        if (normalized.settings && typeof applyDumpSettings === 'function') {
+            await applyDumpSettings(normalized.settings);
+        }
 
         setSelectedUrl(null);
         setLastScanProgress(normalized.progressAtSave);

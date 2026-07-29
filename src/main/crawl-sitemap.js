@@ -5,6 +5,8 @@ const { enqueueUrl, getQueueLength } = require('./crawl-queue');
 const { isInternalRobotsDisallowed } = require('./crawl-network');
 
 const FALLBACK_SITEMAP_PATHS = ['/sitemap_index.xml', '/sitemap.xml', '/index.xml'];
+/** Sitemap XML can be large; page crawl keeps the shorter FETCH_TIMEOUT_MS. */
+const SITEMAP_FETCH_TIMEOUT_MS = 60_000;
 
 function parseSitemapsFromRobotsTxt(text) {
     const sitemaps = [];
@@ -15,6 +17,40 @@ function parseSitemapsFromRobotsTxt(text) {
         }
     }
     return sitemaps;
+}
+
+/** Normalize user/robots sitemap list: lines or array → absolute unique URLs. */
+function normalizeSitemapUrlList(raw, startUrl) {
+    const lines = Array.isArray(raw)
+        ? raw
+        : String(raw || '').split(/\r?\n/);
+    let base;
+    try {
+        const origin = new URL(startUrl);
+        base = `${origin.protocol}//${origin.host}`;
+    } catch {
+        return [];
+    }
+    const result = [];
+    const seen = new Set();
+    for (const line of lines) {
+        const trimmed = String(line || '').trim();
+        if (!trimmed || trimmed.startsWith('#')) {
+            continue;
+        }
+        let href;
+        try {
+            href = new URL(trimmed, base).href;
+        } catch {
+            continue;
+        }
+        if (seen.has(href)) {
+            continue;
+        }
+        seen.add(href);
+        result.push(href);
+    }
+    return result;
 }
 
 async function mapWithConcurrency(items, fn, concurrency, shouldAbort) {
@@ -49,8 +85,9 @@ async function mapWithConcurrency(items, fn, concurrency, shouldAbort) {
 
 async function fetchSitemapResponse(sitemapUrl, allowedHostname, maxHops = 5) {
     let currentUrl = sitemapUrl;
+    const fetchOpts = { timeoutMs: SITEMAP_FETCH_TIMEOUT_MS };
     for (let hop = 0; hop <= maxHops; hop += 1) {
-        const response = await fetchPage(currentUrl);
+        const response = await fetchPage(currentUrl, fetchOpts);
         if (!isRedirectStatus(response.status)) {
             return { response, finalUrl: currentUrl };
         }
@@ -67,7 +104,7 @@ async function fetchSitemapResponse(sitemapUrl, allowedHostname, maxHops = 5) {
         }
         currentUrl = nextUrl;
     }
-    const response = await fetchPage(currentUrl);
+    const response = await fetchPage(currentUrl, fetchOpts);
     return { response, finalUrl: currentUrl };
 }
 
@@ -159,7 +196,12 @@ async function fetchSitemapPageUrls(sitemapUrl, allowedHostname, fetchedSitemaps
     }
 }
 
-async function discoverSitemapUrls(startUrl, getRobots) {
+async function discoverSitemapUrls(startUrl, getRobots, options = {}) {
+    const customSitemaps = normalizeSitemapUrlList(options.sitemapUrls, startUrl);
+    if (customSitemaps.length > 0) {
+        return customSitemaps;
+    }
+
     const start = new URL(startUrl);
     const origin = `${start.protocol}//${start.host}`;
     const { text } = await getRobots(start);
@@ -174,10 +216,10 @@ async function discoverSitemapUrls(startUrl, getRobots) {
     return [...new Set(sitemapUrls)];
 }
 
-async function seedQueueFromSitemaps(startUrl, browserWindow, getRobots, session = null) {
+async function seedQueueFromSitemaps(startUrl, browserWindow, getRobots, session = null, options = {}) {
     const start = new URL(startUrl);
     const concurrency = Math.max(1, session?.concurrency || 1);
-    const sitemapUrls = await discoverSitemapUrls(startUrl, getRobots);
+    const sitemapUrls = await discoverSitemapUrls(startUrl, getRobots, options);
     if (session?.stopped) {
         return 0;
     }
@@ -238,7 +280,9 @@ async function seedQueueFromSitemaps(startUrl, browserWindow, getRobots, session
 
 module.exports = {
     FALLBACK_SITEMAP_PATHS,
+    SITEMAP_FETCH_TIMEOUT_MS,
     parseSitemapsFromRobotsTxt,
+    normalizeSitemapUrlList,
     mapWithConcurrency,
     fetchSitemapPageUrls,
     discoverSitemapUrls,

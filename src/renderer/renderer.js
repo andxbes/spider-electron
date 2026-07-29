@@ -524,8 +524,16 @@ async function beginScan(startUrl, { clearResults = true } = {}) {
     statusText.textContent = `Починаю сканування з ${startUrl}...`;
 
     const settings = await loadSettings();
+    const sitemapField = document.getElementById('sitemapUrls');
+    if (sitemapField && typeof setSessionSitemapUrlsText === 'function') {
+        setSessionSitemapUrlsText(sitemapField.value);
+    }
+    const sitemapUrls = typeof parseSessionSitemapUrls === 'function'
+        ? parseSessionSitemapUrls()
+        : [];
     window.api.startSpider(startUrl, {
         useSitemap: settings.useSitemap,
+        sitemapUrls,
         respectRobotsTxt: settings.respectRobotsTxt,
         userAgentPreset: settings.userAgentPreset,
         userAgentCustom: settings.userAgentCustom,
@@ -590,12 +598,16 @@ async function saveSessionDumpToFile() {
         alert('Немає результатів для збереження.');
         return;
     }
+    const settings = typeof collectDumpSettings === 'function'
+        ? await collectDumpSettings()
+        : null;
     const payload = buildSessionDumpPayload({
         scanResults: scanStore.scanResults,
         insertionOrder: scanStore.insertionOrder,
         startUrl: urlInput.value.trim(),
         uiState,
         lastScanProgress,
+        settings,
     });
     const result = await window.api.saveSessionDump(payload);
     if (result?.canceled) {
@@ -621,7 +633,7 @@ async function loadSessionDumpFromFile() {
         alert(result?.error || 'Не вдалося завантажити дамп.');
         return;
     }
-    workspace.applySessionDump(result.dump, result.filePath || '');
+    await workspace.applySessionDump(result.dump, result.filePath || '');
 }
 
 async function handleMenuLoadedDump(payload) {
@@ -632,7 +644,7 @@ async function handleMenuLoadedDump(payload) {
     if (!canContinue) {
         return;
     }
-    workspace.applySessionDump(payload.dump, payload.filePath || '');
+    await workspace.applySessionDump(payload.dump, payload.filePath || '');
 }
 
 window.api.onSessionDumpRequestSave(() => saveSessionDumpToFile());

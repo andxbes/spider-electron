@@ -34,6 +34,27 @@ describe('session-dump renderer', () => {
         assert.equal(payload.resultCount, 2);
     });
 
+    it('buildSessionDumpPayload includes spider settings', () => {
+        const scanResults = new Map([
+            ['https://a', { url: 'https://a', status: 200 }],
+        ]);
+        const payload = buildSessionDumpPayload({
+            scanResults,
+            insertionOrder: ['https://a'],
+            startUrl: 'https://a',
+            uiState: 'idle',
+            lastScanProgress: null,
+            settings: {
+                useSitemap: true,
+                sitemapUrlsText: 'https://a/sitemap.xml',
+                concurrency: 5,
+            },
+        });
+        assert.equal(payload.settings.useSitemap, true);
+        assert.equal(payload.settings.sitemapUrlsText, 'https://a/sitemap.xml');
+        assert.equal(payload.settings.concurrency, 5);
+    });
+
     it('normalizeLoadedDump rebuilds insertion order from results', () => {
         const normalized = normalizeLoadedDump({
             version: 1,
@@ -41,6 +62,21 @@ describe('session-dump renderer', () => {
             results: [{ url: 'https://example.com/x', status: 200 }],
         });
         assert.deepEqual(normalized.insertionOrder, ['https://example.com/x']);
+        assert.equal(normalized.settings, null);
+    });
+
+    it('normalizeLoadedDump keeps settings from dump', () => {
+        const normalized = normalizeLoadedDump({
+            version: 1,
+            startUrl: 'https://example.com',
+            results: [{ url: 'https://example.com/x', status: 200 }],
+            settings: {
+                useSitemap: true,
+                sitemapUrlsText: '/sitemap.xml',
+            },
+        });
+        assert.equal(normalized.settings.useSitemap, true);
+        assert.equal(normalized.settings.sitemapUrlsText, '/sitemap.xml');
     });
 
     it('buildWorkspaceSnapshot stores filters', () => {

@@ -77,13 +77,14 @@ function buildSessionDumpPayload({
     startUrl,
     uiState,
     lastScanProgress,
+    settings,
 }) {
     const results = insertionOrder
         .map((url) => scanResults.get(url))
         .filter(Boolean)
         .map(cloneResultEntry);
 
-    return {
+    const payload = {
         version: SESSION_DUMP_VERSION,
         startUrl: startUrl || '',
         uiStateAtSave: uiState,
@@ -92,6 +93,10 @@ function buildSessionDumpPayload({
         results,
         resultCount: results.length,
     };
+    if (settings && typeof settings === 'object') {
+        payload.settings = { ...settings };
+    }
+    return payload;
 }
 
 function normalizeLoadedDump(dump) {
@@ -111,6 +116,7 @@ function normalizeLoadedDump(dump) {
         progressAtSave: dump.progressAtSave || null,
         insertionOrder,
         results,
+        settings: dump.settings && typeof dump.settings === 'object' ? { ...dump.settings } : null,
     };
 }
 

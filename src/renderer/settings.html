@@ -36,10 +36,24 @@
               <span class="font-medium">Спочатку з sitemap + обхід посилань на сторінках</span>
               <span class="block text-sm text-zinc-500 mt-1">
                 Читає Sitemap з robots.txt (або типові шляхи), додає URL у чергу,
-                потім аналізує посилання на кожній сторінці.
+                потім аналізує посилання на кожній сторінці. Якщо нижче вказані власні
+                sitemap — robots.txt і типові шляхи не використовуються.
               </span>
             </span>
           </label>
+          <div class="mt-4">
+            <label for="sitemapUrls" class="block font-medium mb-1">Sitemap URL (необовʼязково)</label>
+            <textarea
+              id="sitemapUrls"
+              rows="3"
+              class="w-full p-2 border border-zinc-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none font-mono text-sm"
+              placeholder="https://example.com/sitemap.xml&#10;/custom-sitemap.xml"
+            ></textarea>
+            <p class="text-sm text-zinc-500 mt-1">
+              Один URL на рядок (абсолютний або шлях від кореня сайту). Працює лише якщо
+              увімкнено обхід з sitemap. Не зберігається у файл — лише поки відкрито вікно.
+            </p>
+          </div>
           <label class="flex items-start gap-3 cursor-pointer select-none mt-4">
             <input
               type="checkbox"

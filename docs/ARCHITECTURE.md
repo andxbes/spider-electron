@@ -1,6 +1,6 @@
 # Spider-Electron — внутрішня документація
 
-> Останнє оновлення: 2026-07-22 (probe: статус першого редиректу, не фінальний 200)  
+> Останнє оновлення: 2026-07-29 (HTTP timeout сторінок 20s)  
 > Короткий довідник для розробки та правок. Детальніше про підтримку — [DOC_MAINTENANCE.md](./DOC_MAINTENANCE.md).
 
 ## Що це
@@ -77,6 +77,7 @@ tests/
 ├── renderer/ui-logic.test.js
 ├── renderer/ui-hooks.test.js
 ├── renderer/session-dump.test.js
+├── renderer/settings-store.test.js
 ├── renderer/renderer-scope.test.js
 └── preload/ipc-channels.test.js
 ```
@@ -202,13 +203,13 @@ Renderer
 
 **Запуск:** `ipcMain.on('start-spider')` → `startSpider()` → `processQueue()` (рекурсія через `setTimeout(..., 0)`).
 
-**Опція sitemap (`useSitemap`):** перед обходом читається `robots.txt`, з нього витягуються рядки `Sitemap:`. Якщо їх немає — пробуються `/sitemap_index.xml`, `/sitemap.xml`, `/index.xml`. XML парситься (індекс + вкладені sitemap + `urlset`), URL сторінок додаються в чергу **першими** (по мірі читання вкладених файлів, з оновленням `spider-progress`). Вкладені sitemap завантажуються **паралельно** з лімітом `concurrency` (як основний обхід); кожен HTTP-запит sitemap чекає `requestDelayMs` (jitter ±20%). Referrer для таких URL — адреса sitemap-файлу. Зупинка (`spider-stop`) перериває фазу sitemap.
+**Опція sitemap (`useSitemap`):** перед обходом читається `robots.txt`, з нього витягуються рядки `Sitemap:`. Якщо їх немає — пробуються `/sitemap_index.xml`, `/sitemap.xml`, `/index.xml`. Якщо в опціях передано непорожній `sitemapUrls` (масив рядків з UI) — використовуються **лише** ці URL (абсолютні або шляхи від кореня сайту); рядки з robots.txt і типові шляхи **не** беруться. XML парситься (індекс + вкладені sitemap + `urlset`), URL сторінок додаються в чергу **першими** (по мірі читання вкладених файлів, з оновленням `spider-progress`). Вкладені sitemap завантажуються **паралельно** з лімітом `concurrency` (як основний обхід); кожен HTTP-запит sitemap чекає `requestDelayMs` (jitter ±20%). Referrer для таких URL — адреса sitemap-файлу. Зупинка (`spider-stop`) перериває фазу sitemap.
 
 **На кожній сторінці (`crawl`):**
 
 1. Skip, якщо URL вже в `visitedUrls` або ліміт досягнуто.
 2. Перевірка **robots.txt** (внутрішні URL) — якщо `Disallow` і увімкнено `respectRobotsTxt` (за замовч.), HTTP-запит **не** виконується: ні `crawl`, ні `probe`; `status: 0`. Якщо `respectRobotsTxt: false` — сторінки скануються, але `robotsAllowed` / `robotsRule` у результаті лишаються. Зовнішні URL перевіряються по HTTP навіть при забороні в robots.txt їхнього хоста.
-3. `fetch` з timeout 5s, `redirect: 'manual'`, User-Agent з налаштувань; пауза `requestDelayMs` (за замовч. 500 мс, jitter ±20%) перед кожним HTTP-запитом (сторінки, probe і sitemap); за наявності — `Authorization` (Basic/Bearer) **лише для URL з hostname скану**.
+3. `fetch` з timeout **20s** для сторінок/probe (`FETCH_TIMEOUT_MS`), **60s** для sitemap XML (`SITEMAP_FETCH_TIMEOUT_MS`); `redirect: 'manual'`, User-Agent з налаштувань; пауза `requestDelayMs` (за замовч. 500 мс, jitter ±20%) перед кожним HTTP-запитом (сторінки, probe і sitemap); за наявності — `Authorization` (Basic/Bearer) **лише для URL з hostname скану**.
 4. **3xx** — фіксація `redirectUrl`, ланцюг до **20** переходів (`redirect-chain.js`); метадані на стартовому URL; **status** на стартовому URL — код **першого** редиректу (301/302…), не фінальний 200. Те саме для `probe`. При циклі або перевищенні ліміту — `redirectInfinite`. Enqueue цілі (лише той самий `hostname`); ціль redirect теж перевіряється robots.txt перед fetch. Probe **не** перезаписує URL, уже пройдені через `crawl` (`visitedUrls`).
 5. **4xx/5xx** — `status` = код відповіді, `title` порожній.
 6. **200 HTML** — тіло відповіді парситься в **worker thread** (`html-parse-pool.js`): cheerio → title, meta, headings, OG, `collectPageLinks`. На main лишаються fetch, robots, черга, IPC. Хуки `crawl:extractPage` без `ctx.$` отримують уже зібрані поля (для додаткових полів без DOM).
@@ -228,7 +229,7 @@ Renderer
 | `maxPages` (опція UI) | 0 = без ліміту | renderer → main |
 | `concurrency` (опція UI) | 1–50, за замовч. 3 | паралельних `crawl()` / `probe()` |
 | HTML parse pool | `min(8, CPU−1)` воркерів | `html-parse-pool.js` (`DEFAULT_POOL_SIZE`) |
-| HTTP timeout | 5000 ms | `crawl-network.js` |
+| HTTP timeout | **20000 ms** (сторінки/probe); **60000 ms** sitemap | `crawl-network.js` / `crawl-sitemap.js` |
 | Пауза між запитами | 500 ms (0–60000, jitter ±20%) | `request-delay.js`, налаштування |
 | User-Agent | з налаштувань (`userAgentPreset` / `userAgentCustom`) | `user-agents.js`, `setScanUserAgent` |
 | Область обходу | один `hostname` | ~146, ~210 |
@@ -239,7 +240,7 @@ Renderer
 
 | Напрямок | Канал | Payload |
 |----------|-------|---------|
-| R → M | `start-spider` | `{ startUrl, options: { useSitemap?, respectRobotsTxt?, requestDelayMs?, userAgentPreset?, userAgentCustom?, maxPages?, concurrency?, authType?, authUsername?, authPassword?, authToken? } }` |
+| R → M | `start-spider` | `{ startUrl, options: { useSitemap?, sitemapUrls?, respectRobotsTxt?, requestDelayMs?, userAgentPreset?, userAgentCustom?, maxPages?, concurrency?, authType?, authUsername?, authPassword?, authToken? } }` |
 | R → M | `spider-pause` / `spider-resume` / `spider-stop` | керування скануванням |
 | R → M | `shell:open-external` | відкрити URL у браузері |
 | R ↔ M | `settings:get` / `settings:save` | налаштування у `userData/settings.json` (див. нижче) |
@@ -271,7 +272,13 @@ Renderer
 | `authPassword` | string | Пароль для Basic (у файлі як є) |
 | `authToken` | string | Bearer-токен |
 
-При старті скану renderer передає ці поля в `start-spider`; main встановлює auth-контекст для hostname стартового URL. Зовнішні URL (probe) заголовок не отримують.
+**Сесійне (не в `settings.json`):** `sitemapUrls` — текст у полі налаштувань (один URL на рядок). Зберігається лише в памʼяті renderer (`settings-store.js`) поки відкрито вікно; при старті скану передається в `start-spider` як масив. Якщо непорожній і `useSitemap` — discovery ігнорує robots.txt / fallback-шляхи. У **дамп сканування** потрапляє як `settings.sitemapUrlsText` разом з усіма збереженими полями спайдера.
+
+При старті скану renderer передає збережені поля (+ сесійні `sitemapUrls`) в `start-spider`; main встановлює auth-контекст для hostname стартового URL. Зовнішні URL (probe) заголовок не отримують.
+
+### Дамп сканування (`.spider.json`)
+
+Файл містить `results`, `insertionOrder`, `startUrl`, прогрес і **`settings`**: усі поля з `settings.json` плюс `sitemapUrlsText`. При завантаженні дампу (`applySessionDump` → `applyDumpSettings`) відновлюються результати й налаштування: персистентні пишуться в `settings.json`, sitemap — у сесійну памʼять UI. Старі дампи без `settings` лишаються валідними.
 
 ## Модель даних `spider-result`
 
@@ -357,7 +364,7 @@ Renderer
 - Файл основного експорту: `spider_<hostname>_YYYY-MM-DD-HH-MM-SS.csv`.
 - **Вкладки «Вхідні» / «Вихідні посилання»** (панель деталей): кнопка «Експорт CSV» — повний список посилань окремим файлом (без обмеження довжини комірки). Колонки: URL, Tag, rel, Follow, Anchor Text (+ External для вихідних). Сортування як у таблиці вкладки.
 - Ім'я файлу посилань: `<host>_<path>-in|out-YYYY-MM-DD-HH-MM-SS.csv` (час старту скану).
-- Дамп: `spider_<hostname>_YYYY-MM-DDTHH-MM-SS.spider.json` — аналогічно.
+- Дамп: `spider_<hostname>_YYYY-MM-DDTHH-MM-SS.spider.json` — результати + `settings` (усі опції спайдера і `sitemapUrlsText`).
 
 ## Збір посилань (link-collector.js)
 
@@ -417,7 +424,8 @@ npm run make:mac       # macOS zip (з Linux); dmg — лише збірка н�
   - `main/session-dump` — валідація дампу;
   - `renderer/ui-logic` — фільтри, класифікація, сортування, CSV preview;
   - `renderer/ui-hooks` — патерн розширення колонок;
-  - `renderer/session-dump` — серіалізація результатів;
+  - `renderer/session-dump` — серіалізація результатів + `settings` у дампі;
+  - `renderer/settings-store` — collect/apply dump settings, session sitemap;
   - `renderer/renderer-scope` — smoke завантаження renderer-модулів;
   - `preload` — whitelist IPC-каналів.
 - **Не покрито E2E:** Electron UI, реальні HTTP-запити, діалоги файлів — лише unit/integration на рівні модулів.

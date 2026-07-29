@@ -3,6 +3,8 @@ const assert = require('node:assert/strict');
 const {
     fetchSitemapPageUrls,
     mapWithConcurrency,
+    normalizeSitemapUrlList,
+    discoverSitemapUrls,
 } = require('../../src/main/crawl-sitemap');
 const {
     setFetchForTests,
@@ -145,5 +147,47 @@ describe('crawl-sitemap', () => {
         const elapsedMs = Date.now() - startedAt;
         assert.equal(fetchCount, 2);
         assert.ok(elapsedMs >= 120, `expected delay between fetches, got ${elapsedMs}ms`);
+    });
+
+    it('normalizeSitemapUrlList resolves relative paths and skips comments', () => {
+        const urls = normalizeSitemapUrlList(
+            '# comment\n/custom.xml\nhttps://example.com/a.xml\n/custom.xml\n',
+            'https://example.com/page'
+        );
+        assert.deepEqual(urls, [
+            'https://example.com/custom.xml',
+            'https://example.com/a.xml',
+        ]);
+    });
+
+    it('discoverSitemapUrls uses custom list and skips robots', async () => {
+        let robotsCalled = false;
+        const urls = await discoverSitemapUrls(
+            'https://example.com/',
+            async () => {
+                robotsCalled = true;
+                return { text: 'Sitemap: https://example.com/from-robots.xml' };
+            },
+            {
+                sitemapUrls: [
+                    'https://example.com/custom-a.xml',
+                    '/custom-b.xml',
+                ],
+            }
+        );
+        assert.equal(robotsCalled, false);
+        assert.deepEqual(urls, [
+            'https://example.com/custom-a.xml',
+            'https://example.com/custom-b.xml',
+        ]);
+    });
+
+    it('discoverSitemapUrls falls back to robots when custom list empty', async () => {
+        const urls = await discoverSitemapUrls(
+            'https://example.com/',
+            async () => ({ text: 'Sitemap: https://example.com/from-robots.xml\n' }),
+            { sitemapUrls: ['', '  ', '# only comment'] }
+        );
+        assert.deepEqual(urls, ['https://example.com/from-robots.xml']);
     });
 });

@@ -1,6 +1,7 @@
 function getSettingsFormElements(form) {
     return {
         useSitemapInput: form.querySelector('#useSitemap'),
+        sitemapUrlsInput: form.querySelector('#sitemapUrls'),
         respectRobotsTxtInput: form.querySelector('#respectRobotsTxt'),
         maxPagesInput: form.querySelector('#maxPages'),
         concurrencyInput: form.querySelector('#concurrency'),
@@ -18,6 +19,14 @@ function getSettingsFormElements(form) {
         saveStatus: form.querySelector('#saveStatus'),
         settingsPathHint: form.querySelector('#settingsPathHint'),
     };
+}
+
+let settingsFormController = null;
+
+function syncSessionSitemapUrlsFromForm(elements) {
+    if (elements.sitemapUrlsInput) {
+        setSessionSitemapUrlsText(elements.sitemapUrlsInput.value);
+    }
 }
 
 function populateUserAgentPresetSelect(selectEl, selectedId) {
@@ -77,6 +86,9 @@ async function populateSettingsForm(form) {
     }
 
     elements.useSitemapInput.checked = loaded.useSitemap;
+    if (elements.sitemapUrlsInput) {
+        elements.sitemapUrlsInput.value = getSessionSitemapUrlsText();
+    }
     if (elements.respectRobotsTxtInput) {
         elements.respectRobotsTxtInput.checked = loaded.respectRobotsTxt !== false;
     }
@@ -119,8 +131,13 @@ function bindSettingsForm(form) {
         syncAuthFieldsVisibility(elements);
     });
 
+    elements.sitemapUrlsInput?.addEventListener('input', () => {
+        syncSessionSitemapUrlsFromForm(elements);
+    });
+
     form.addEventListener('submit', async (event) => {
         event.preventDefault();
+        syncSessionSitemapUrlsFromForm(elements);
         const userAgentSettings = getUserAgentSettingsFromElements(elements);
         const { filePath } = await saveSettings({
             useSitemap: elements.useSitemapInput.checked,
@@ -145,6 +162,7 @@ function bindSettingsForm(form) {
 
     return {
         refresh: () => populateSettingsForm(form),
+        syncSessionSitemap: () => syncSessionSitemapUrlsFromForm(elements),
     };
 }
 
@@ -154,6 +172,7 @@ function initSettingsPage() {
         return;
     }
     const controller = bindSettingsForm(form);
+    settingsFormController = controller;
     controller.refresh();
 }
 
@@ -166,6 +185,7 @@ function initSettingsModal() {
     }
 
     const controller = bindSettingsForm(form);
+    settingsFormController = controller;
     const closeButtons = modal.querySelectorAll('[data-settings-close]');
 
     function openModal() {
@@ -178,6 +198,7 @@ function initSettingsModal() {
     }
 
     function closeModal() {
+        controller.syncSessionSitemap();
         modal.classList.add('hidden');
         modal.setAttribute('aria-hidden', 'true');
         document.body.classList.remove('settings-modal-open');
@@ -194,6 +215,11 @@ function initSettingsModal() {
             closeModal();
         }
     });
+}
+
+/** Refresh settings form after dump restore (sitemap + persisted fields). */
+function refreshOpenSettingsForms() {
+    settingsFormController?.refresh();
 }
 
 initSettingsPage();
