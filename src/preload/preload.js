@@ -19,6 +19,7 @@ const validInvokeChannels = [
     'spider-pause',
     'spider-resume',
     'session:save',
+    'session:save-json',
     'session:load',
 ];
 
@@ -97,6 +98,12 @@ contextBridge.exposeInMainWorld('api', {
     saveSessionDump: (payload) => {
         if (validInvokeChannels.includes('session:save')) {
             return ipcRenderer.invoke('session:save', payload);
+        }
+        return Promise.resolve({ ok: false });
+    },
+    saveSessionDumpJson: ({ startUrl, dumpJson }) => {
+        if (validInvokeChannels.includes('session:save-json')) {
+            return ipcRenderer.invoke('session:save-json', { startUrl, dumpJson });
         }
         return Promise.resolve({ ok: false });
     },

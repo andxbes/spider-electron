@@ -6,6 +6,7 @@ const {
     emitSpiderResult,
     extractPageViaHooks,
     filterDiscoveredLinksViaHooks,
+    setSpiderResultCoalescingForTests,
 } = require('../../src/main/crawl-hooks');
 const { registerDefaultCrawlHooks } = require('../../src/main/crawl-defaults');
 
@@ -25,6 +26,7 @@ describe('crawl-hooks', () => {
     beforeEach(() => {
         crawlHookRegistry.clear();
         registerDefaultCrawlHooks();
+        setSpiderResultCoalescingForTests();
     });
 
     it('extractPageViaHooks runs default extractors', () => {

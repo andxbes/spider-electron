@@ -122,6 +122,26 @@ async function getRobotsTxtFieldsForUrl(url) {
     }
 }
 
+/** Sync robots fields from cache only (no fetch) — for end-of-scan payload. */
+function getRobotsTxtFieldsFromCache(url) {
+    try {
+        const urlObject = new URL(url);
+        const cached = robotsCache.get(urlObject.host);
+        if (!cached) {
+            return {
+                robotsAllowed: null,
+                robotsRule: '',
+            };
+        }
+        return getRobotsTxtInfo(cached.parser, cached.text, url);
+    } catch {
+        return {
+            robotsAllowed: null,
+            robotsRule: '',
+        };
+    }
+}
+
 function shouldBlockByRobotsTxt(parser, url) {
     if (!getRespectRobotsTxt()) {
         return false;
@@ -178,6 +198,7 @@ module.exports = {
     timedFetch,
     getRobots,
     getRobotsTxtFieldsForUrl,
+    getRobotsTxtFieldsFromCache,
     isInternalRobotsDisallowed,
     shouldBlockByRobotsTxt,
     sendRobotsBlockedResult,

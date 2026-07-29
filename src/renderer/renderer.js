@@ -601,7 +601,7 @@ async function saveSessionDumpToFile() {
     const settings = typeof collectDumpSettings === 'function'
         ? await collectDumpSettings()
         : null;
-    const payload = buildSessionDumpPayload({
+    const jsonString = buildSessionDumpJson({
         scanResults: scanStore.scanResults,
         insertionOrder: scanStore.insertionOrder,
         startUrl: urlInput.value.trim(),
@@ -609,7 +609,10 @@ async function saveSessionDumpToFile() {
         lastScanProgress,
         settings,
     });
-    const result = await window.api.saveSessionDump(payload);
+    const result = await window.api.saveSessionDumpJson({
+        startUrl: urlInput.value.trim(),
+        dumpJson: jsonString,
+    });
     if (result?.canceled) {
         return;
     }
@@ -633,18 +636,38 @@ async function loadSessionDumpFromFile() {
         alert(result?.error || 'Не вдалося завантажити дамп.');
         return;
     }
-    await workspace.applySessionDump(result.dump, result.filePath || '');
+    let dump;
+    try {
+        dump = JSON.parse(result.dumpJson);
+    } catch {
+        alert('Не вдалося розібрати файл дампу.');
+        return;
+    }
+    await workspace.applySessionDump(dump, result.filePath || '');
 }
 
 async function handleMenuLoadedDump(payload) {
-    if (!payload?.ok || !payload.dump) {
+    if (!payload?.ok) {
         return;
     }
     const canContinue = await ensureCanReplaceSession('Завантаження дампу');
     if (!canContinue) {
         return;
     }
-    await workspace.applySessionDump(payload.dump, payload.filePath || '');
+    // payload may carry either .dump (legacy) or .dumpJson (new fast path)
+    let dump = payload.dump;
+    if (!dump && payload.dumpJson) {
+        try {
+            dump = JSON.parse(payload.dumpJson);
+        } catch {
+            alert('Не вдалося розібрати файл дампу.');
+            return;
+        }
+    }
+    if (!dump) {
+        return;
+    }
+    await workspace.applySessionDump(dump, payload.filePath || '');
 }
 
 window.api.onSessionDumpRequestSave(() => saveSessionDumpToFile());

@@ -10,6 +10,9 @@ const {
 const {
     emitSpiderResult,
     extractPageViaHooks,
+    flushPendingSpiderResults,
+    setSpiderResultCoalescingForTests,
+    resetSpiderResultCoalescing,
 } = require('./crawl-hooks');
 require('./crawl-defaults');
 require('./plugins');
@@ -77,6 +80,7 @@ const {
     timedFetch,
     getRobots,
     getRobotsTxtFieldsForUrl,
+    getRobotsTxtFieldsFromCache,
     sendRobotsBlockedResult,
     isInternalRobotsDisallowed,
     shouldBlockByRobotsTxt,
@@ -110,12 +114,19 @@ const {
     buildRobotsBlockedStub,
 } = require('./probe');
 
-async function buildReferrersEndPayload() {
+/** Skip mega referrers IPC when map is huge — renderer already has per-row referrers. */
+const REFERRERS_END_FULL_SYNC_MAX = 8000;
+
+function buildReferrersEndPayload() {
+    const keys = [...getReferrersMapKeys()];
+    if (keys.length > REFERRERS_END_FULL_SYNC_MAX) {
+        return { referrers: {}, robotsByUrl: {}, skipFullSync: true, referrerKeyCount: keys.length };
+    }
+
     const referrers = buildAllReferrersPayload();
     const robotsByUrl = {};
-
-    for (const url of getReferrersMapKeys()) {
-        const fields = await getRobotsTxtFieldsForUrl(url);
+    for (const url of keys) {
+        const fields = getRobotsTxtFieldsFromCache(url);
         if (fields.robotsAllowed !== null || fields.robotsRule) {
             robotsByUrl[url] = fields;
         }
@@ -482,6 +493,7 @@ async function completeScan(session, endMessage) {
         return;
     }
     await terminateHtmlParsePool();
+    flushPendingSpiderResults();
     sendFinalProgress(session, endMessage);
     session.finished = true;
     if (getScanSession() === session) {
@@ -494,9 +506,12 @@ async function completeScan(session, endMessage) {
     console.log(endMessage);
 
     session.browserWindow.webContents.send('spider-end', endMessage);
-    void buildReferrersEndPayload().then((payload) => {
+    try {
+        const payload = buildReferrersEndPayload();
         session.browserWindow.webContents.send('spider-referrers-update', payload);
-    });
+    } catch (error) {
+        console.error('Не вдалося надіслати referrers-update:', error.message);
+    }
 }
 
 async function startSpider(startUrl, options, browserWindow) {
@@ -671,6 +686,7 @@ async function startSpider(startUrl, options, browserWindow) {
 
     clearCrawlRuntime();
     clearReferrers();
+    resetSpiderResultCoalescing();
     setScanAuthContext({
         hostname: scanHostname,
         ...normalizeAuthSettings(options),
@@ -718,6 +734,7 @@ function resetSpiderStateForTests() {
     clearScanUserAgent();
     clearScanRequestDelayMs();
     setRespectRobotsTxt(true);
+    setSpiderResultCoalescingForTests();
     void terminateHtmlParsePool();
 }
 

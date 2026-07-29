@@ -1,6 +1,6 @@
 # Spider-Electron — внутрішня документація
 
-> Останнє оновлення: 2026-07-29 (HTTP timeout сторінок 20s)  
+> Останнє оновлення: 2026-07-29 (IPC batch + легша фіналізація великих сканів)  
 > Короткий довідник для розробки та правок. Детальніше про підтримку — [DOC_MAINTENANCE.md](./DOC_MAINTENANCE.md).
 
 ## Що це
@@ -216,7 +216,7 @@ Renderer
 7. Якщо `<meta name="robots" content="nofollow">` — не додає нові посилання.
 8. Збір URL з HTML: `<a>`, `<link>`, `<script>`, `<img>`, … — HTML-сторінки через `crawl`; **медіа, CSS, JS і зовнішні** — stub у batch, потім **probe** (status + `content-type` + robots.txt + `X-Robots-Tag`, без HTML) — навіть при `rel=nofollow`. BFS лише для внутрішніх навігаційних: `a[href]`, `area[href]`, `form[action]`, `iframe[src]` (HTML). Stub для не-навігаційних ресурсів — **завжди**; для навігаційних — лише якщо URL не в черзі обходу. У `spider-result`: **Meta robots** — лише `<meta name="robots">` / `googlebot`; **X-Robots-Tag** — окремо з HTTP-заголовка; **responseHeaders** — усі заголовки відповіді (для UI / дампу).
 
-**Завершення:** порожня черга або досягнуто `maxPages` (якщо > 0) → `spider-referrers-update` → `spider-end`. На renderer після referrers — `materializeDiscoveredFromReferrers()`: URL з referrers, яких немає в `scanResults`, додаються як знайдені (`fetched: false`).
+**Завершення:** порожня черга або досягнуто `maxPages` (якщо > 0) → flush IPC-батчів результатів → `spider-progress` (`finished`) → `spider-end` → `spider-referrers-update`. Результати під час скану **коалесуються** (~75 мс / до 100 шт.) у `spider-results-batch`, щоб не забивати IPC на десятках тисяч URL. Якщо referrers-map > **8000** ключів — повний sync не надсилається (`skipFullSync`), renderer бере referrers з рядків. На renderer після end — `materializeDiscoveredFromReferrers()`; для великих сканів (>5k) пропускається `reinferAllLinkKinds`, sessionStorage workspace не пишеться (>2.5k).
 
 **Зупинка (`spider-stop`):** `stopSpiderSession()` — прапорець `stopped`, негайно `terminateHtmlParsePool()` (скасовує чергу парсингу), нові воркери не стартують. Активні `crawl`/`probe` дочекаються поточного `fetch`, але після стопу **не** парсять HTML, не шлють `spider-result` і не додають посилання в чергу. Коли `activeWorkers === 0` → `spider-end`.
 

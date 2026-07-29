@@ -180,6 +180,28 @@ function createTableFilters(deps) {
 
     function computeDisplayedResultsSnapshot() {
         const pool = getScannableTablePool();
+
+        const sortState = getSortState();
+        const hasNoActiveFilters = activeContentFilter === 'all'
+            && activeSourceFilter === 'all'
+            && activeStatusFilter === 'all'
+            && activeIndexingFilter === 'all'
+            && activeH1Filter === 'all'
+            && activeDuplicateFilter === 'all'
+            && !activeSearchQuery.trim();
+        const hasNoSort = !sortState.column
+            && activeContentFilter !== 'media';
+
+        if (hasNoActiveFilters && hasNoSort) {
+            const redirectIntermediates = buildRedirectIntermediateUrlSet(pool);
+            const entries = pool.filter((data) => shouldShowInResultsTable(data, redirectIntermediates));
+            return {
+                entries,
+                poolSize: entries.length,
+                displayedUrlSet: null,
+            };
+        }
+
         const redirectIntermediates = buildRedirectIntermediateUrlSet(pool);
         const tableEntries = getTableEntries(pool, redirectIntermediates);
         const filtered = getFilteredResults(tableEntries);
@@ -214,7 +236,11 @@ function createTableFilters(deps) {
     }
 
     function isUrlInDisplayedResults(url) {
-        return getDisplayedResultsSnapshot().displayedUrlSet.has(url);
+        const snapshot = getDisplayedResultsSnapshot();
+        if (snapshot.displayedUrlSet === null) {
+            return scanStore.scanResults.has(url);
+        }
+        return snapshot.displayedUrlSet.has(url);
     }
 
     function areDefaultTableFiltersActive() {

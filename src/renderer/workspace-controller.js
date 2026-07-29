@@ -3,6 +3,8 @@
  */
 (function initWorkspaceController(root) {
 const WORKSPACE_PERSIST_DELAY_MS = 200;
+/** sessionStorage cannot hold huge scans; skip to avoid multi-minute freezes. */
+const WORKSPACE_PERSIST_MAX_RESULTS = 2500;
 
 function createWorkspaceController(deps) {
     const {
@@ -75,6 +77,10 @@ function createWorkspaceController(deps) {
             workspacePersistTimer = null;
         }
         if (scanStore.scanResults.size === 0) {
+            clearWorkspaceSession();
+            return;
+        }
+        if (scanStore.scanResults.size > WORKSPACE_PERSIST_MAX_RESULTS) {
             clearWorkspaceSession();
             return;
         }

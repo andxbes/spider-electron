@@ -66,6 +66,31 @@ function registerSessionDumpHandlers(ipcMain) {
         return { ok: true, filePath };
     });
 
+    ipcMain.handle('session:save-json', async (event, { startUrl, dumpJson } = {}) => {
+        const browserWindow = getWindowFromEvent(event);
+        if (!browserWindow) {
+            return { ok: false, error: 'Вікно недоступне.' };
+        }
+
+        const { canceled, filePath } = await dialog.showSaveDialog(browserWindow, {
+            title: 'Зберегти дамп сканування',
+            defaultPath: defaultDumpFileName(startUrl || ''),
+            filters: [DUMP_FILTER],
+        });
+
+        if (canceled || !filePath) {
+            return { ok: false, canceled: true };
+        }
+
+        try {
+            await fs.mkdir(path.dirname(filePath), { recursive: true });
+            await fs.writeFile(filePath, dumpJson, 'utf-8');
+        } catch (err) {
+            return { ok: false, error: String(err.message || err) };
+        }
+        return { ok: true, filePath };
+    });
+
     ipcMain.handle('session:load', async (event) => {
         const browserWindow = getWindowFromEvent(event);
         if (!browserWindow) {
@@ -83,9 +108,11 @@ function registerSessionDumpHandlers(ipcMain) {
         }
 
         const filePath = filePaths[0];
+        let raw;
         let parsed;
         try {
-            parsed = JSON.parse(await fs.readFile(filePath, 'utf-8'));
+            raw = await fs.readFile(filePath, 'utf-8');
+            parsed = JSON.parse(raw);
         } catch {
             return { ok: false, error: 'Не вдалося прочитати JSON-файл.' };
         }
@@ -95,7 +122,9 @@ function registerSessionDumpHandlers(ipcMain) {
             return { ok: false, error: validation.error };
         }
 
-        return { ok: true, filePath, dump: parsed };
+        // Return the raw JSON string so the renderer can parse it directly,
+        // avoiding a large Structured Clone round-trip over IPC.
+        return { ok: true, filePath, dumpJson: raw };
     });
 }
 
@@ -138,10 +167,11 @@ function createApplicationMenu(getMainWindow) {
                                 dialog.showErrorBox('Помилка дампу', validation.error);
                                 return;
                             }
+                            // Send the raw JSON string to avoid a large Structured Clone.
                             win.webContents.send('session-dump-loaded', {
                                 ok: true,
                                 filePath: result.filePaths[0],
-                                dump,
+                                dumpJson: text,
                             });
                         } catch (error) {
                             dialog.showErrorBox('Помилка дампу', error.message || 'Не вдалося відкрити файл.');
