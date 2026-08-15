@@ -1,4 +1,4 @@
-const { normalizePageUrl, isSameHost, getUrlExtension } = require('../shared/url-utils');
+const { normalizePageUrl, isSameHost, getUrlExtension, isEmptyImageUrl } = require('../shared/url-utils');
 const { isCrawlableLink } = require('./link-collector');
 const { addReferrer } = require('./crawl-referrers');
 const {
@@ -60,6 +60,9 @@ function hasPendingWork() {
 }
 
 function needsLinkProbe(link) {
+    if (link.emptySrc || isEmptyImageUrl(link.url)) {
+        return false;
+    }
     if (link.external) {
         return true;
     }

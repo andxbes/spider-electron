@@ -226,6 +226,13 @@ function buildDefaultDetailRows(data, ctx) {
         ['Вхідних посилань', String(inCount)],
     ];
 
+    if (Number(data.emptyImgCount) > 0) {
+        rows.push([
+            'Порожніх img src',
+            `<span class="text-amber-700 font-medium">${data.emptyImgCount}</span>`,
+        ]);
+    }
+
     const dupCounts = getDuplicateCounts();
     const titleDup = getTextDuplicateCount(getPageTitle(data), dupCounts.title);
     const descDup = getTextDuplicateCount(data.metaDescription, dupCounts.description);
@@ -262,10 +269,11 @@ function buildDefaultExportColumns(ctx) {
         getResourceType,
         getH1Count,
         formatCsvUrlListPreview,
+        formatDisplayUrl,
     } = ctx.helpers;
 
     return [
-        { id: 'url', header: 'URL', value: (data) => `"${(data.url || '').replace(/"/g, '""')}"` },
+        { id: 'url', header: 'URL', value: (data) => `"${(formatDisplayUrl ? formatDisplayUrl(data.url) : (data.url || '')).replace(/"/g, '""')}"` },
         { id: 'status', header: 'Status', value: (data) => `"${(data.status || '')}"` },
         { id: 'metaRobots', header: 'Meta Robots', value: (data) => `"${(data.metaRobotsLabel || data.metaRobots || '').replace(/"/g, '""')}"` },
         { id: 'xRobotsTag', header: 'X-Robots-Tag', value: (data) => `"${(data.xRobotsTagLabel || data.xRobotsTag || '').replace(/"/g, '""')}"` },

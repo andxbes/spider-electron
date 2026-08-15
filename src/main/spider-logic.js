@@ -435,6 +435,7 @@ async function crawl(url, referrer, browserWindow) {
                 fetched: true,
                 headings: headings || [],
                 responseTimeMs,
+                emptyImgCount: parsed.pageLinks.filter((link) => link.emptySrc).length,
                 ...pluginPageFields,
             },
             metaRobotsRaw,

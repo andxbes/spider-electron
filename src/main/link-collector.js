@@ -5,6 +5,9 @@ const {
     getUrlPathnameLower,
     isSameHost,
     isSkippableHref,
+    isEmptyImageUrl,
+    isUnusableImageSrc,
+    EMPTY_IMAGE_URL,
     parseSrcsetUrls,
     looksLikeJavascriptUrl,
 } = require('../shared/url-utils');
@@ -217,6 +220,28 @@ function isCrawlableLink(link) {
     return false;
 }
 
+function imgHasUsableAddress(el) {
+    const src = el.attr('src');
+    if (src != null && !isUnusableImageSrc(src)) {
+        return true;
+    }
+    return parseSrcsetUrls(el.attr('srcset')).some((url) => !isUnusableImageSrc(url));
+}
+
+function pictureProvidesImageSource($, el) {
+    const picture = el.closest('picture');
+    if (!picture || picture.length === 0) {
+        return false;
+    }
+    return picture.find('source').toArray().some((node) => {
+        const source = $(node);
+        if (source.attr('src') && !isUnusableImageSrc(source.attr('src'))) {
+            return true;
+        }
+        return parseSrcsetUrls(source.attr('srcset')).some((url) => !isUnusableImageSrc(url));
+    });
+}
+
 function collectPageLinks($, currentUrl, allowedHostname) {
     const links = [];
     const seen = new Set();
@@ -256,6 +281,23 @@ function collectPageLinks($, currentUrl, allowedHostname) {
         } catch {
             // невалідний URL
         }
+    };
+
+    const addEmptyImageLink = (text = '', context = {}) => {
+        links.push({
+            url: EMPTY_IMAGE_URL,
+            text: String(text || '').trim().slice(0, 200),
+            external: false,
+            kind: 'images',
+            tag: 'img',
+            rel: '',
+            relFollowAllowed: null,
+            relIndexAllowed: null,
+            relLabel: '',
+            emptySrc: true,
+            ...(context.imgAltMissing === true ? { imgAltMissing: true } : {}),
+            ...(context.imgAlt !== undefined ? { imgAlt: context.imgAlt } : {}),
+        });
     };
 
     $('a[href]').each((_, link) => {
@@ -320,7 +362,7 @@ function collectPageLinks($, currentUrl, allowedHostname) {
         addLink($(input).attr('src'), $(input).attr('alt') || 'input', { tag: 'input[type=image][src]' });
     });
 
-    $('img[src]').each((_, img) => {
+    $('img').each((_, img) => {
         const el = $(img);
         const attribs = el.get(0)?.attribs || {};
         const hasAltAttr = Object.prototype.hasOwnProperty.call(attribs, 'alt');
@@ -330,9 +372,18 @@ function collectPageLinks($, currentUrl, allowedHostname) {
             imgAltMissing: !hasAltAttr,
             ...(hasAltAttr ? { imgAlt: el.attr('alt') ?? '' } : {}),
         };
-        addLink(el.attr('src'), linkText, imgContext);
+        const src = el.attr('src');
+        if (src != null && !isUnusableImageSrc(src)) {
+            addLink(src, linkText, imgContext);
+        }
         for (const srcsetUrl of parseSrcsetUrls(el.attr('srcset'))) {
+            if (isUnusableImageSrc(srcsetUrl)) {
+                continue;
+            }
             addLink(srcsetUrl, linkText, { tag: 'img[srcset]', ...imgContext });
+        }
+        if (!imgHasUsableAddress(el) && !pictureProvidesImageSource($, el)) {
+            addEmptyImageLink(linkText, imgContext);
         }
     });
 

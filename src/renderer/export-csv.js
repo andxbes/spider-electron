@@ -8,6 +8,7 @@ const {
     getLinkTag,
     getLinkRelInfo,
     isExternalOutlink,
+    formatDisplayUrl,
 } = root;
 
 function formatCsvStamp(date) {
@@ -19,14 +20,44 @@ function csvEscape(value) {
     return `"${String(value ?? '').replace(/"/g, '""')}"`;
 }
 
-function buildCsvFileName(startUrl) {
+function normalizeTableFilterMeta(meta = {}) {
+    return {
+        contentType: sanitizeFilePart(meta.contentType || meta.content || 'all') || 'all',
+        sourceFilter: sanitizeFilePart(meta.sourceFilter || meta.source || 'all') || 'all',
+        status: sanitizeFilePart(meta.status || 'all') || 'all',
+        indexing: sanitizeFilePart(meta.indexing || 'all') || 'all',
+        issue: sanitizeFilePart(meta.issue || 'all') || 'all',
+        search: sanitizeFilePart(String(meta.search || '').trim().slice(0, 20)),
+    };
+}
+
+function formatTableFiltersFileSlug(meta = {}) {
+    const filters = normalizeTableFilterMeta(meta);
+    const parts = [filters.contentType, filters.sourceFilter];
+    if (filters.status !== 'all') {
+        parts.push(`status-${filters.status}`);
+    }
+    if (filters.indexing !== 'all') {
+        parts.push(`idx-${filters.indexing}`);
+    }
+    if (filters.issue !== 'all') {
+        parts.push(filters.issue);
+    }
+    if (filters.search) {
+        parts.push(`q-${filters.search}`);
+    }
+    return parts.join('-');
+}
+
+function buildCsvFileName(startUrl, meta = {}, stampDate) {
     let host = '';
     try {
         host = new URL(startUrl).hostname.replace(/[^a-zA-Z0-9.-]/g, '_');
     } catch {
         host = 'scan';
     }
-    return `spider_${host}_${formatCsvStamp(new Date())}.csv`;
+    const filterSlug = formatTableFiltersFileSlug(meta);
+    return `spider_${host}-${filterSlug}_${formatCsvStamp(stampDate || new Date())}.csv`;
 }
 
 function sanitizeFilePart(value) {
@@ -106,8 +137,11 @@ function linkToCsvRow(link, type, pageUrl) {
     const followValue = relInfo.applicable
         ? formatFollowCsv(relInfo.relFollowAllowed)
         : '—';
-    const sourceUrl = type === 'in' ? getLinkUrlForCsv(link, type) : (pageUrl || '');
-    const targetUrl = type === 'in' ? (pageUrl || '') : getLinkUrlForCsv(link, type);
+    const displayUrl = (value) => (
+        typeof formatDisplayUrl === 'function' ? formatDisplayUrl(value) : (value || '')
+    );
+    const sourceUrl = type === 'in' ? displayUrl(getLinkUrlForCsv(link, type)) : displayUrl(pageUrl);
+    const targetUrl = type === 'in' ? displayUrl(pageUrl) : displayUrl(getLinkUrlForCsv(link, type));
     const cells = [
         sourceUrl,
         getLinkTag(link),
@@ -144,7 +178,7 @@ function exportFilteredResultsToCsv(entries, ctx) {
         csvRows.push(columns.map((col) => col.value(data, ctx)).join(','));
     }
 
-    downloadCsvFile(buildCsvFileName(ctx.startUrl || ''), csvRows);
+    downloadCsvFile(buildCsvFileName(ctx.startUrl || '', ctx.filters || {}), csvRows);
 }
 
 function buildPageLinksCsvRows({ pageUrl, type, links, sortState }) {
@@ -193,6 +227,7 @@ const exported = {
     formatCsvStamp,
     csvEscape,
     buildCsvFileName,
+    formatTableFiltersFileSlug,
     sanitizeFilePart,
     urlToFileSlug,
     findDisplayedRowIndex,

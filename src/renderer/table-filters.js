@@ -38,17 +38,15 @@ function createTableFilters(deps) {
         contentTypeTabs,
         statusFilter,
         indexingFilter,
-        h1Filter,
-        duplicateFilter,
         sourceFilter,
+        issueFilter,
         tableSearch,
     } = elements;
 
     let activeContentFilter = 'all';
     let activeStatusFilter = 'all';
     let activeIndexingFilter = 'all';
-    let activeH1Filter = 'all';
-    let activeDuplicateFilter = 'all';
+    let activeIssueFilter = 'all';
     let activeSourceFilter = 'all';
     let activeSearchQuery = '';
     let knownStatusCodes = new Set();
@@ -69,8 +67,7 @@ function createTableFilters(deps) {
             activeContentFilter,
             activeStatusFilter,
             activeIndexingFilter,
-            activeH1Filter,
-            activeDuplicateFilter,
+            activeIssueFilter,
             activeSourceFilter,
             activeSearchQuery,
             sortState.column || '',
@@ -108,6 +105,9 @@ function createTableFilters(deps) {
         if (sourceFilter && sourceFilter.value !== activeSourceFilter) {
             sourceFilter.value = activeSourceFilter;
         }
+        if (issueFilter && issueFilter.value !== activeIssueFilter) {
+            issueFilter.value = activeIssueFilter;
+        }
     }
 
     function getScannableTablePool() {
@@ -134,12 +134,12 @@ function createTableFilters(deps) {
             activeSourceFilter,
             activeStatusFilter,
             activeIndexingFilter,
-            activeH1Filter,
-            activeDuplicateFilter,
+            activeIssueFilter,
             activeContentFilter,
             scanHostname: getScanHostname(),
             getDuplicateCounts: () => scanStore.getDuplicateCounts(),
             getReferrersForUrl: (url) => scanStore.getReferrersForUrl(url),
+            getOutgoingLinksFrom: (url) => scanStore.getOutgoingLinksFrom(url),
         }));
     }
 
@@ -186,8 +186,7 @@ function createTableFilters(deps) {
             && activeSourceFilter === 'all'
             && activeStatusFilter === 'all'
             && activeIndexingFilter === 'all'
-            && activeH1Filter === 'all'
-            && activeDuplicateFilter === 'all'
+            && activeIssueFilter === 'all'
             && !activeSearchQuery.trim();
         const hasNoSort = !sortState.column
             && activeContentFilter !== 'media';
@@ -248,8 +247,7 @@ function createTableFilters(deps) {
             && activeSourceFilter === 'all'
             && activeStatusFilter === 'all'
             && activeIndexingFilter === 'all'
-            && activeH1Filter === 'all'
-            && activeDuplicateFilter === 'all'
+            && activeIssueFilter === 'all'
             && !activeSearchQuery.trim()
             && !getSortState().column;
     }
@@ -339,8 +337,7 @@ function createTableFilters(deps) {
     function resetTableFilters() {
         activeStatusFilter = 'all';
         activeIndexingFilter = 'all';
-        activeH1Filter = 'all';
-        activeDuplicateFilter = 'all';
+        activeIssueFilter = 'all';
         activeSearchQuery = '';
         setActiveSourceFilter('all');
         setActiveContentFilter('all');
@@ -356,11 +353,8 @@ function createTableFilters(deps) {
         if (indexingFilter) {
             indexingFilter.value = 'all';
         }
-        if (h1Filter) {
-            h1Filter.value = 'all';
-        }
-        if (duplicateFilter) {
-            duplicateFilter.value = 'all';
+        if (issueFilter) {
+            issueFilter.value = 'all';
         }
         updateStatusFilterOptions({ force: true });
     }
@@ -368,8 +362,7 @@ function createTableFilters(deps) {
     function applyFilterState(filters) {
         activeStatusFilter = filters.status || 'all';
         activeIndexingFilter = filters.indexing || 'all';
-        activeH1Filter = filters.h1 || 'all';
-        activeDuplicateFilter = filters.duplicate || 'all';
+        activeIssueFilter = resolveIssueFilter(filters);
         setActiveSourceFilter(filters.source || filters.viewMode || filters.externalLinks || 'all');
         setActiveContentFilter(filters.content || filters.externalType || 'all');
         activeSearchQuery = filters.search || '';
@@ -383,11 +376,8 @@ function createTableFilters(deps) {
         if (indexingFilter) {
             indexingFilter.value = activeIndexingFilter;
         }
-        if (h1Filter) {
-            h1Filter.value = activeH1Filter;
-        }
-        if (duplicateFilter) {
-            duplicateFilter.value = activeDuplicateFilter;
+        if (issueFilter) {
+            issueFilter.value = activeIssueFilter;
         }
         updateStatusFilterOptions({ force: true });
     }
@@ -397,8 +387,7 @@ function createTableFilters(deps) {
             content: activeContentFilter,
             status: activeStatusFilter,
             indexing: activeIndexingFilter,
-            h1: activeH1Filter,
-            duplicate: activeDuplicateFilter,
+            issue: activeIssueFilter,
             source: activeSourceFilter,
             search: activeSearchQuery,
         };
@@ -475,25 +464,21 @@ function createTableFilters(deps) {
             });
         }
 
-        if (h1Filter) {
-            h1Filter.addEventListener('change', () => {
-                activeH1Filter = h1Filter.value;
-                invalidateDisplayedResultsCache();
-                onFilterChange({ immediate: true });
-            });
-        }
-
-        if (duplicateFilter) {
-            duplicateFilter.addEventListener('change', () => {
-                activeDuplicateFilter = duplicateFilter.value;
-                invalidateDisplayedResultsCache();
-                onFilterChange({ immediate: true });
-            });
-        }
-
         if (sourceFilter) {
             sourceFilter.addEventListener('change', () => {
                 setActiveSourceFilter(sourceFilter.value);
+                invalidateDisplayedResultsCache();
+                onFilterChange({ immediate: true });
+                if (typeof onPersistWorkspace === 'function') {
+                    onPersistWorkspace();
+                }
+            });
+        }
+
+        if (issueFilter) {
+            issueFilter.addEventListener('change', () => {
+                activeIssueFilter = normalizeIssueFilter(issueFilter.value);
+                issueFilter.value = activeIssueFilter;
                 invalidateDisplayedResultsCache();
                 onFilterChange({ immediate: true });
                 if (typeof onPersistWorkspace === 'function') {

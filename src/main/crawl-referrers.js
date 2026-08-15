@@ -4,7 +4,7 @@ const referrersMap = new Map();
 
 function isImgReferrerTag(tag) {
     const normalized = String(tag || '');
-    return normalized === 'img[src]' || normalized === 'img[srcset]';
+    return normalized === 'img[src]' || normalized === 'img[srcset]' || normalized === 'img';
 }
 
 function normalizeImgAltState(meta = {}) {

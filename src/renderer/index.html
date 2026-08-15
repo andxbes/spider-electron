@@ -118,28 +118,6 @@
             </select>
           </label>
           <label class="flex items-center gap-1.5">
-            <span class="text-zinc-500 whitespace-nowrap">H1:</span>
-            <select
-              id="h1Filter"
-              class="px-2 py-1 border border-zinc-300 rounded bg-white text-zinc-800 min-w-[7rem]"
-            >
-              <option value="all">Усі</option>
-              <option value="multiple">Більше 1</option>
-            </select>
-          </label>
-          <label class="flex items-center gap-1.5">
-            <span class="text-zinc-500 whitespace-nowrap">Дублікати:</span>
-            <select
-              id="duplicateFilter"
-              class="px-2 py-1 border border-zinc-300 rounded bg-white text-zinc-800 min-w-[9rem]"
-            >
-              <option value="all">Усі</option>
-              <option value="h1">H1</option>
-              <option value="title">Title</option>
-              <option value="description">Meta description</option>
-            </select>
-          </label>
-          <label class="flex items-center gap-1.5">
             <span class="text-zinc-500 whitespace-nowrap">Джерело:</span>
             <select
               id="sourceFilter"
@@ -148,6 +126,20 @@
               <option value="all">Усі</option>
               <option value="internal">Внутрішні</option>
               <option value="external">Зовнішні</option>
+            </select>
+          </label>
+          <label class="flex items-center gap-1.5">
+            <span class="text-zinc-500 whitespace-nowrap">Проблеми:</span>
+            <select
+              id="issueFilter"
+              class="px-2 py-1 border border-zinc-300 rounded bg-white text-zinc-800 min-w-[12rem]"
+            >
+              <option value="all">Усі</option>
+              <option value="empty-src">Порожні зображення</option>
+              <option value="h1-multiple">H1 більше 1</option>
+              <option value="dup-h1">Дублікат H1</option>
+              <option value="dup-title">Дублікат Title</option>
+              <option value="dup-description">Дублікат Meta description</option>
             </select>
           </label>
           </div>

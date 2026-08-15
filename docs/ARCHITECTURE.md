@@ -1,6 +1,6 @@
 # Spider-Electron — внутрішня документація
 
-> Останнє оновлення: 2026-08-16 (вкладки HTML/Media взаємовиключні для img 404)  
+> Останнє оновлення: 2026-08-16 (фільтр «Порожні зображення»: порожній src і img 404)  
 > Короткий довідник для розробки та правок. Детальніше про підтримку — [DOC_MAINTENANCE.md](./DOC_MAINTENANCE.md).
 
 ## Що це
@@ -291,7 +291,10 @@ Renderer
   kind?: string,
   tag?: string,
   text?: string,
-  title?: string,          // лише HTML-сторінки; JS/CSS/media — порожній
+  emptySrc?: boolean,      // img без src/srcset; url = spider-electron:empty-img
+  emptyImgCount?: number,  // скільки порожніх img на HTML-сторінці
+  imgAlt?: string,
+  imgAltMissing?: boolean,
   referrers: [{
     href: string,
     text: string,
@@ -351,7 +354,7 @@ Renderer
   - `Усі` — усі записи в `scanResults`.
 - **Джерело** — `external: true/false` (або `hostname` URL).
 - Стан фільтрів — `activeContentFilter`, `activeSourceFilter` у пам’яті; не скидається під час сканування.
-- Інші фільтри: статус HTTP, індексація, H1, дублікати.
+- Інші фільтри: статус HTTP, індексація, **проблеми** (`empty-src` / порожні зображення, `h1-multiple`, `dup-h1` / `dup-title` / `dup-description`). Окремих селектів H1 і дублікатів більше немає.
 
 Колонки **Внутр.** / **Зовн.** — кількість посилань **з** обраної сторінки (через `referrersMap`: хто посилається **на** URL з цієї сторінки як джерела).
 
@@ -361,7 +364,7 @@ Renderer
 
 - BOM `\uFEFF` для Excel/кирилиці.
 - **Основна таблиця:** експорт відфільтрованих сторінок; колонки включають Internal/External Links (скорочений preview у комірках).
-- Файл основного експорту: `spider_<hostname>_YYYY-MM-DD-HH-MM-SS.csv`.
+- Файл основного експорту: `spider_<hostname>-<content>-<source>[-status-…][-idx-…][-empty-src|h1-multiple|dup-…][-q-…]_YYYY-MM-DD-HH-MM-SS.csv`. `content` / `source` — вкладка типу та фільтр джерела (навіть якщо `all`); статус, індексація, проблема й пошук додаються лише коли не дефолтні.
 - **Вкладки «Вхідні» / «Вихідні посилання»** (панель деталей): кнопка «Експорт CSV» — повний список посилань окремим файлом (без обмеження довжини комірки). Колонки: Source URL, Tag, rel, Follow, Anchor Text (+ External для вихідних), **Target URL останньою**. Для вхідних Source URL — реферер, Target URL — обрана сторінка; для вихідних навпаки. Сортування як у таблиці вкладки.
 - Ім'я файлу посилань: `<slug>-<rowIndex>-in|out-<contentType>-<sourceFilter>-YYYY-MM-DD-HH-MM-SS.csv`. `slug` — останній сегмент шляху URL (або hostname), **до 10 символів**; `rowIndex` — 1-based номер рядка в поточній відфільтрованій таблиці (колонка `#`); `contentType` — вкладка Усі/HTML/JS/CSS/Media; `sourceFilter` — Усі/внутрішні/зовнішні. Час — старт скану.
 - Дамп: `spider_<hostname>_YYYY-MM-DDTHH-MM-SS.spider.json` — результати + `settings` (усі опції спайдера і `sitemapUrlsText`).
@@ -370,6 +373,7 @@ Renderer
 
 - `<link rel="preconnect">` і `<link rel="dns-prefetch">` пропускаються під час `collectPageLinks` — вони не є адресами URL-ресурсів.
 - Атрибут **`srcset`** (`img`, `picture source`) — усі кандидати з рядка (`parseSrcsetUrls` у `url-utils.js`), не лише перший; кожен URL probe-иться окремо.
+- **Порожній `<img>`** (немає `src`/`srcset`, або значення порожнє / `javascript:` / `#` / `about:blank`) — не probe-иться; у Media з’являється службовий рядок `spider-electron:empty-img` з підписом **«немає адреси»**. На HTML-сторінці в результаті є `emptyImgCount`. Фільтр **Проблеми → Порожні зображення** показує: службовий рядок і сторінки з порожнім `<img>`; **зображення зі статусом 404** (включно з `img[src]`, що повернув HTML 404); сторінки, з яких такі картинки ведуть. Відео/аудіо 404 і звичайні HTML 404 сюди не входять. `<img>` всередині `<picture>` з валідним `<source>` не вважається порожнім.
 
 ## Залежності
 

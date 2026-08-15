@@ -13,6 +13,45 @@ function loadExportCsv() {
     return root;
 }
 
+describe('export-csv main table', () => {
+    it('buildCsvFileName includes content and source filters', () => {
+        const api = loadExportCsv();
+        const stamp = new Date('2026-06-17T16:30:45.000Z');
+        const fileName = api.buildCsvFileName(
+            'https://example.com/',
+            { content: 'html', source: 'external' },
+            stamp
+        );
+        assert.equal(fileName, 'spider_example.com-html-external_2026-06-17-16-30-45.csv');
+    });
+
+    it('buildCsvFileName appends only non-default table filters', () => {
+        const api = loadExportCsv();
+        const stamp = new Date('2026-06-17T16:30:45.000Z');
+        const fileName = api.buildCsvFileName(
+            'https://spitche.com/',
+            {
+                content: 'media',
+                source: 'internal',
+                status: '404',
+                indexing: 'blocked',
+                issue: 'dup-title',
+                search: 'logo',
+            },
+            stamp
+        );
+        assert.equal(
+            fileName,
+            'spider_spitche.com-media-internal-status-404-idx-blocked-dup-title-q-logo_2026-06-17-16-30-45.csv'
+        );
+    });
+
+    it('formatTableFiltersFileSlug defaults to all-all', () => {
+        const api = loadExportCsv();
+        assert.equal(api.formatTableFiltersFileSlug({}), 'all-all');
+    });
+});
+
 describe('export-csv page links', () => {
     it('urlToFileSlug keeps last path segment within 10 chars', () => {
         const api = loadExportCsv();

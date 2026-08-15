@@ -19,6 +19,7 @@ const PAGE_EXTRACT_FIELDS = [
     'xRobotsTagStatus',
     'xRobotsTagLabel',
     'responseHeaders',
+    'emptyImgCount',
 ];
 
 function isEmptyExtractField(field, value) {
@@ -229,15 +230,17 @@ function createScanStore(options = {}) {
             }
             const refText = refs[0]?.text || '';
             const robotsFields = latestRobotsByUrl.get(url) || {};
+            const isEmptyImg = typeof isEmptyImageUrl === 'function' && isEmptyImageUrl(url);
             const upsertResult = upsertRaw({
                 url,
                 status: '',
                 title: '',
                 text: refText,
-                external: isExternalUrlImpl(url, getScanHostname()),
+                external: isEmptyImg ? false : isExternalUrlImpl(url, getScanHostname()),
                 fetched: false,
-                kind: '',
-                tag: '',
+                kind: isEmptyImg ? 'images' : '',
+                tag: isEmptyImg ? 'img' : '',
+                emptySrc: isEmptyImg,
                 referrers: refs,
                 ...robotsFields,
             }, { deferUi: true });

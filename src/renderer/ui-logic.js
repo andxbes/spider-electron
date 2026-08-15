@@ -163,6 +163,134 @@ function getUrlExtension(url) {
     }
 }
 
+const EMPTY_IMAGE_URL = 'spider-electron:empty-img';
+const EMPTY_IMAGE_LABEL = 'немає адреси';
+
+function isEmptyImageUrl(url) {
+    return String(url || '') === EMPTY_IMAGE_URL;
+}
+
+function formatDisplayUrl(url) {
+    return isEmptyImageUrl(url) ? EMPTY_IMAGE_LABEL : String(url || '');
+}
+
+function normalizeIssueFilter(value) {
+    if (
+        value === 'empty-src'
+        || value === 'empty-img'
+        || value === 'empty-images'
+        || value === 'missing-src'
+        || value === 'broken-images'
+    ) {
+        return 'empty-src';
+    }
+    if (value === 'h1-multiple' || value === 'multiple') {
+        return 'h1-multiple';
+    }
+    if (value === 'dup-h1' || value === 'h1') {
+        return 'dup-h1';
+    }
+    if (value === 'dup-title' || value === 'title') {
+        return 'dup-title';
+    }
+    if (value === 'dup-description' || value === 'description') {
+        return 'dup-description';
+    }
+    return 'all';
+}
+
+function resolveIssueFilter(filters = {}) {
+    if (filters.issue && filters.issue !== 'all') {
+        return normalizeIssueFilter(filters.issue);
+    }
+    if (filters.h1 === 'multiple') {
+        return 'h1-multiple';
+    }
+    if (filters.duplicate && filters.duplicate !== 'all') {
+        return normalizeIssueFilter(filters.duplicate);
+    }
+    return 'all';
+}
+
+function matchesIssueFilterImpl(data, issue, helpers = {}) {
+    const value = normalizeIssueFilter(issue);
+    if (value === 'all') {
+        return true;
+    }
+    if (value === 'empty-src') {
+        return rowHasBrokenImage(data, helpers.getOutgoingLinksFrom || (() => []));
+    }
+    if (value === 'h1-multiple') {
+        return getH1Count(data) > 1;
+    }
+    const counts = typeof helpers.getDuplicateCounts === 'function'
+        ? helpers.getDuplicateCounts()
+        : { h1: new Map(), title: new Map(), description: new Map() };
+    if (value === 'dup-h1') {
+        return hasDuplicateH1(data, counts.h1);
+    }
+    if (value === 'dup-title') {
+        return hasDuplicateField(getPageTitle(data), counts.title);
+    }
+    if (value === 'dup-description') {
+        return hasDuplicateField(data.metaDescription, counts.description);
+    }
+    return true;
+}
+
+function isNotFoundStatus(status) {
+    return status === 404 || status === '404';
+}
+
+function isImageLikeResource(data) {
+    if (!data) {
+        return false;
+    }
+    if (data.emptySrc === true || isEmptyImageUrl(data.url)) {
+        return true;
+    }
+    const tag = String(data.tag || '').toLowerCase();
+    if (
+        isImgOutlinkTag(tag)
+        || tag === 'source[srcset]'
+        || tag === 'source[src]'
+        || tag === 'link[rel=icon]'
+        || tag.includes('apple-touch-icon')
+        || tag === 'input[type=image][src]'
+    ) {
+        return true;
+    }
+    if (inferLinkKind(data) === 'images') {
+        return true;
+    }
+    return String(data.contentType || '').toLowerCase().startsWith('image/');
+}
+
+function rowHasEmptyImgSrc(data, getOutgoingLinksFrom = () => []) {
+    if (!data) {
+        return false;
+    }
+    if (data.emptySrc === true || isEmptyImageUrl(data.url)) {
+        return true;
+    }
+    if (Number(data.emptyImgCount) > 0) {
+        return true;
+    }
+    const outgoing = getOutgoingLinksFrom(data.url) || [];
+    return outgoing.some((link) => link.emptySrc === true || isEmptyImageUrl(link.url));
+}
+
+function rowHasBrokenImage(data, getOutgoingLinksFrom = () => []) {
+    if (rowHasEmptyImgSrc(data, getOutgoingLinksFrom)) {
+        return true;
+    }
+    if (isImageLikeResource(data) && isNotFoundStatus(data.status)) {
+        return true;
+    }
+    const outgoing = getOutgoingLinksFrom(data.url) || [];
+    return outgoing.some((link) => isImageLikeResource(link) && isNotFoundStatus(link.status));
+}
+
 function isHtmlContentType(contentType) {
     const ct = (contentType || '').toLowerCase();
     return ct.includes('text/html') || ct.includes('application/xhtml');
@@ -539,12 +667,17 @@ function normalizeLinkEntryImpl(data, scanHostname = '') {
     const url = data.url || data.href;
     const hasStatus = data.status !== '' && data.status !== undefined && data.status !== null;
     const fetched = data.fetched ?? hasStatus;
-    const external = typeof data.external === 'boolean'
-        ? data.external
-        : isExternalUrlImpl(url, scanHostname);
-    const tag = data.tag || '';
+    const isEmptyImg = data.emptySrc === true || isEmptyImageUrl(url);
+    const external = isEmptyImg
+        ? false
+        : (typeof data.external === 'boolean'
+            ? data.external
+            : isExternalUrlImpl(url, scanHostname));
+    const tag = data.tag || (isEmptyImg ? 'img' : '');
     let kind = data.kind || '';
-    if (isJavascriptResource({ ...data, url, tag, kind })) {
+    if (isEmptyImg) {
+        kind = 'images';
+    } else if (isJavascriptResource({ ...data, url, tag, kind })) {
         kind = 'javascript';
     } else if (isCssResource({ ...data, url, tag, kind })) {
         kind = 'css';
@@ -563,6 +696,7 @@ function normalizeLinkEntryImpl(data, scanHostname = '') {
         kind,
         tag,
         fetched,
+        ...(isEmptyImg ? { emptySrc: true } : {}),
     };
     return {
         ...entry,
@@ -621,7 +755,8 @@ function inferKindFromTag(tag) {
         return 'css';
     }
     if (
-        t === 'img[src]'
+        t === 'img'
+        || t === 'img[src]'
         || t === 'img[srcset]'
         || t === 'input[type=image][src]'
         || t === 'link[rel=icon]'
@@ -926,6 +1061,9 @@ function getRowSearchTextImpl(data, getReferrersForUrl = () => []) {
         headingText,
         referrerText,
         formatLinkKindLabel(getResourceKind(data)),
+        (isEmptyImageUrl(data.url) || Number(data.emptyImgCount) > 0 || rowHasBrokenImage(data))
+            ? `${EMPTY_IMAGE_LABEL} немае адреси empty src empty img порожній img порожні зображення broken image`
+            : '',
     ].filter(Boolean).join(' ').toLowerCase();
 }
 
@@ -939,7 +1077,7 @@ function matchesSearchFilterImpl(data, searchQuery = '', getReferrersForUrl = ()
 
 function isImgOutlinkTag(tag) {
     const normalized = String(tag || '');
-    return normalized === 'img[src]' || normalized === 'img[srcset]';
+    return normalized === 'img' || normalized === 'img[src]' || normalized === 'img[srcset]';
 }
 
 function isImgAltEdge(entry) {
@@ -1196,12 +1334,12 @@ function passesTableFiltersImpl(data, ctx) {
         activeSourceFilter = 'all',
         activeStatusFilter = 'all',
         activeIndexingFilter = 'all',
-        activeH1Filter = 'all',
-        activeDuplicateFilter = 'all',
+        activeIssueFilter = 'all',
         activeContentFilter = 'all',
         scanHostname = '',
         getDuplicateCounts = () => ({ h1: new Map(), title: new Map(), description: new Map() }),
         getReferrersForUrl = () => [],
+        getOutgoingLinksFrom = () => [],
     } = ctx || {};
     if (!matchesSearchFilterImpl(data, activeSearchQuery, getReferrersForUrl)) {
         return false;
@@ -1218,20 +1356,8 @@ function passesTableFiltersImpl(data, ctx) {
     if (activeIndexingFilter === 'blocked' && !isIndexingBlocked(data)) {
         return false;
     }
-    if (activeH1Filter === 'multiple' && getH1Count(data) <= 1) {
+    if (!matchesIssueFilterImpl(data, activeIssueFilter, { getDuplicateCounts, getOutgoingLinksFrom })) {
         return false;
-    }
-    if (activeDuplicateFilter !== 'all') {
-        const counts = getDuplicateCounts();
-        if (activeDuplicateFilter === 'h1' && !hasDuplicateH1(data, counts.h1)) {
-            return false;
-        }
-        if (activeDuplicateFilter === 'title' && !hasDuplicateField(getPageTitle(data), counts.title)) {
-            return false;
-        }
-        if (activeDuplicateFilter === 'description' && !hasDuplicateField(data.metaDescription, counts.description)) {
-            return false;
-        }
     }
     return true;
 }
@@ -1510,6 +1636,16 @@ const exported = {
     statusSortValue,
     getUrlExtension,
     isHtmlContentType,
+    isEmptyImageUrl,
+    formatDisplayUrl,
+    EMPTY_IMAGE_URL,
+    EMPTY_IMAGE_LABEL,
+    normalizeIssueFilter,
+    resolveIssueFilter,
+    matchesIssueFilterImpl,
+    rowHasEmptyImgSrc,
+    rowHasBrokenImage,
+    isImageLikeResource,
     mapKindToFilterKind,
     isJavascriptResource,
     isCssResource,

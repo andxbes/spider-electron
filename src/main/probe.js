@@ -3,6 +3,7 @@ const {
     resolveRedirectTarget,
     getContentType,
     normalizePageUrl,
+    isEmptyImageUrl,
 } = require('../shared/url-utils');
 const { createRedirectChainTracker } = require('../shared/redirect-chain');
 const { isCrawlableLink } = require('./link-collector');
@@ -58,6 +59,7 @@ function buildDiscoveredLinkResult(link) {
         referrers: getReferrersListForUrl(link.url),
         ...(link.imgAltMissing === true ? { imgAltMissing: true } : {}),
         ...(link.imgAlt !== undefined ? { imgAlt: link.imgAlt } : {}),
+        ...(link.emptySrc === true ? { emptySrc: true } : {}),
     });
 }
 
@@ -86,6 +88,7 @@ function buildProbeLinkFields(url, link, fields) {
         referrers: getReferrersListForUrl(url),
         ...(link.imgAltMissing === true ? { imgAltMissing: true } : {}),
         ...(link.imgAlt !== undefined ? { imgAlt: link.imgAlt } : {}),
+        ...(link.emptySrc === true ? { emptySrc: true } : {}),
         ...fields,
     };
 }
@@ -238,6 +241,22 @@ async function reportDiscoveredLinks(browserWindow, links, sourceUrl, allowedHos
 
     for (const link of filteredLinks) {
         const referrerMeta = buildReferrerLinkMeta(link);
+        if (link.emptySrc || isEmptyImageUrl(link.url)) {
+            addReferrer(link.url, sourceUrl, referrerMeta);
+            if (!reportedStubUrls.has(link.url)) {
+                reportedStubUrls.add(link.url);
+                stubs.push({
+                    ...buildDiscoveredLinkResult(link),
+                    emptySrc: true,
+                    external: false,
+                    fetched: false,
+                    status: '',
+                    robotsAllowed: null,
+                    robotsRule: '',
+                });
+            }
+            continue;
+        }
         const robotsFields = link.external
             ? { robotsAllowed: null, robotsRule: '' }
             : await getRobotsTxtFieldsForUrl(link.url);

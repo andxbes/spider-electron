@@ -6,6 +6,8 @@ const {
     getUrlPathnameLower,
     isSameHost,
     isSkippableHref,
+    isEmptyImageUrl,
+    isUnusableImageSrc,
     firstSrcsetUrl,
     parseSrcsetUrls,
     looksLikeJavascriptUrl,
@@ -32,6 +34,18 @@ describe('url-utils', () => {
         assert.equal(isSkippableHref('javascript:void(0)'), true);
         assert.equal(isSkippableHref('mailto:a@b.c'), true);
         assert.equal(isSkippableHref('/about'), false);
+    });
+
+    it('isEmptyImageUrl matches sentinel', () => {
+        assert.equal(isEmptyImageUrl('spider-electron:empty-img'), true);
+        assert.equal(isEmptyImageUrl('https://example.com/a.png'), false);
+        assert.equal(isEmptyImageUrl(''), false);
+    });
+
+    it('isUnusableImageSrc treats blank and placeholder src as empty', () => {
+        assert.equal(isUnusableImageSrc(''), true);
+        assert.equal(isUnusableImageSrc('about:blank'), true);
+        assert.equal(isUnusableImageSrc('https://example.com/a.png'), false);
     });
 
     it('firstSrcsetUrl picks first candidate', () => {

@@ -25,9 +25,8 @@ const statusActive = document.getElementById('status-active');
 const statusRate = document.getElementById('status-rate');
 const statusFilter = document.getElementById('statusFilter');
 const indexingFilter = document.getElementById('indexingFilter');
-const h1Filter = document.getElementById('h1Filter');
-const duplicateFilter = document.getElementById('duplicateFilter');
 const sourceFilter = document.getElementById('sourceFilter');
+const issueFilter = document.getElementById('issueFilter');
 const tableSearch = document.getElementById('tableSearch');
 const filterCount = document.getElementById('filterCount');
 
@@ -69,6 +68,8 @@ function getPresentationHelpers() {
         getLinkTag,
         getResourceType,
         formatCsvUrlListPreview,
+        formatDisplayUrl,
+        isEmptyImageUrl,
     };
 }
 
@@ -158,6 +159,9 @@ function urlActionButtons(url) {
 }
 
 function urlCellHtml(url, { compact = false } = {}) {
+    if (isEmptyImageUrl(url)) {
+        return '<span class="text-amber-700 italic font-medium" title="Тег img без src і srcset">немає адреси</span>';
+    }
     if (!url) {
         return '<span class="text-zinc-400 italic">—</span>';
     }
@@ -245,9 +249,8 @@ const tableFilters = createTableFilters({
         contentTypeTabs,
         statusFilter,
         indexingFilter,
-        h1Filter,
-        duplicateFilter,
         sourceFilter,
+        issueFilter,
         tableSearch,
     },
     onFilterChange: requestRefreshTable,
@@ -349,8 +352,12 @@ function syncSelectedRowUi() {
     if (!selectedUrl || !getRowData(selectedUrl)) {
         return;
     }
-    selectedUrlHint.textContent = truncate(selectedUrl, 80);
-    selectedUrlHint.title = selectedUrl;
+    selectedUrlHint.textContent = isEmptyImageUrl(selectedUrl)
+        ? 'немає адреси'
+        : truncate(selectedUrl, 80);
+    selectedUrlHint.title = isEmptyImageUrl(selectedUrl)
+        ? 'Тег img без src і srcset'
+        : selectedUrl;
     if (selectedUrlBar?.querySelector) {
         let actions = selectedUrlBar.querySelector('[data-url-actions]');
         if (!actions) {
@@ -358,7 +365,7 @@ function syncSelectedRowUi() {
             actions.dataset.urlActions = '1';
             selectedUrlBar.appendChild(actions);
         }
-        actions.innerHTML = urlActionButtons(selectedUrl);
+        actions.innerHTML = isEmptyImageUrl(selectedUrl) ? '' : urlActionButtons(selectedUrl);
     }
     renderDetailPanel();
     updateDetailLinkExportButton();
@@ -557,7 +564,11 @@ exportButton.addEventListener('click', () => {
         alert('Немає рядків для експорту за поточними фільтрами.');
         return;
     }
-    exportFilteredResultsToCsv(entries, { helpers: getPresentationHelpers(), startUrl: urlInput.value.trim() });
+    exportFilteredResultsToCsv(entries, {
+        helpers: getPresentationHelpers(),
+        startUrl: urlInput.value.trim(),
+        filters: tableFilters.getFilterSnapshot(),
+    });
 });
 
 detailLinkExportBtn?.addEventListener('click', () => {

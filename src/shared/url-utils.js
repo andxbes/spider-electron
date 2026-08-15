@@ -32,6 +32,23 @@ function isSameHost(url, hostname) {
     return new URL(url).hostname === hostname;
 }
 
+const EMPTY_IMAGE_URL = 'spider-electron:empty-img';
+
+function isEmptyImageUrl(url) {
+    return String(url || '') === EMPTY_IMAGE_URL;
+}
+
+function isUnusableImageSrc(href) {
+    if (isSkippableHref(href)) {
+        return true;
+    }
+    const value = String(href || '').trim().toLowerCase();
+    return value === 'about:blank'
+        || value === 'null'
+        || value === 'undefined'
+        || value === 'n/a';
+}
+
 function isSkippableHref(href) {
     const value = String(href || '').trim();
     if (!value) {
@@ -109,6 +126,9 @@ module.exports = {
     getUrlPathnameLower,
     isSameHost,
     isSkippableHref,
+    isEmptyImageUrl,
+    isUnusableImageSrc,
+    EMPTY_IMAGE_URL,
     firstSrcsetUrl,
     parseSrcsetUrls,
     looksLikeJavascriptUrl,

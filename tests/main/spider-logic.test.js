@@ -119,6 +119,34 @@ describe('spider-logic', () => {
         assert.ok(links.find((l) => l.tag === 'script[src]'));
     });
 
+    it('collectPageLinks reports empty img tags as sentinel media', () => {
+        const { EMPTY_IMAGE_URL } = require('../../src/shared/url-utils');
+        const html = `
+            <html><body>
+                <img>
+                <img src="">
+                <img src="   ">
+                <img src="/ok.png" alt="Logo">
+                <picture>
+                    <source srcset="/pic.webp">
+                    <img alt="from picture">
+                </picture>
+            </body></html>`;
+        const $ = cheerio.load(html);
+        const links = collectPageLinks($, 'https://example.com/', 'example.com');
+        const emptyLinks = links.filter((l) => l.url === EMPTY_IMAGE_URL);
+        assert.equal(emptyLinks.length, 3);
+        assert.equal(emptyLinks.every((l) => l.emptySrc && l.kind === 'images' && l.tag === 'img'), true);
+        assert.equal(emptyLinks.every((l) => l.external === false), true);
+        assert.ok(links.some((l) => l.url.endsWith('/ok.png')));
+        assert.ok(links.some((l) => l.url.endsWith('/pic.webp')));
+        assert.equal(
+            emptyLinks.some((l) => l.imgAlt === 'from picture'),
+            false,
+            'picture fallback img should not count as empty'
+        );
+    });
+
     it('collectPageLinks marks img without alt attribute', () => {
         const html = `
             <html><body>

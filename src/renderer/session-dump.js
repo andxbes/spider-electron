@@ -36,6 +36,8 @@ function cloneResultEntry(data) {
         tag: data.tag ?? '',
         text: data.text ?? data.linkText ?? data.title ?? '',
         imgAltMissing: data.imgAltMissing === true,
+        emptySrc: data.emptySrc === true,
+        emptyImgCount: Number(data.emptyImgCount) > 0 ? Number(data.emptyImgCount) : 0,
         referrers: Array.isArray(data.referrers)
             ? data.referrers.map((ref) => (
                 typeof ref === 'string'
@@ -107,6 +109,8 @@ function cloneResultEntryCompact(data) {
         tag: data.tag ?? '',
         text: data.text ?? data.linkText ?? data.title ?? '',
         imgAltMissing: data.imgAltMissing === true,
+        emptySrc: data.emptySrc === true,
+        emptyImgCount: Number(data.emptyImgCount) > 0 ? Number(data.emptyImgCount) : 0,
         referrers: Array.isArray(data.referrers)
             ? data.referrers.map((ref) => (
                 typeof ref === 'string'

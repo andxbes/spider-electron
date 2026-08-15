@@ -7,11 +7,17 @@ const {
     inferLinkKind,
     matchesStatusFilter,
     isIndexingAllowed,
+    rowHasEmptyImgSrc,
+    rowHasBrokenImage,
+    resolveIssueFilter,
     passesTableFiltersImpl,
     normalizeContentTypeFilter,
     normalizeSourceFilter,
     getResourceKind,
     matchesResourceTypeFilterImpl,
+    formatDisplayUrl,
+    EMPTY_IMAGE_URL,
+    EMPTY_IMAGE_LABEL,
     formatCsvUrlListPreview,
     compareRowsImpl,
     duplicateCountBadge,
@@ -53,6 +59,137 @@ describe('ui-logic', () => {
         assert.equal(matchesResourceTypeFilterImpl(row, 'media'), true);
         assert.equal(matchesResourceTypeFilterImpl(row, 'html'), false);
         assert.equal(getResourceKind(row), 'media');
+    });
+
+    it('empty img sentinel is media and displays as немає адреси', () => {
+        const row = {
+            url: EMPTY_IMAGE_URL,
+            tag: 'img',
+            kind: 'images',
+            emptySrc: true,
+            fetched: false,
+            status: '',
+            external: false,
+        };
+        assert.equal(formatDisplayUrl(EMPTY_IMAGE_URL), EMPTY_IMAGE_LABEL);
+        assert.equal(matchesResourceTypeFilterImpl(row, 'media'), true);
+        assert.equal(matchesResourceTypeFilterImpl(row, 'html'), false);
+        assert.equal(getResourceKind(row), 'media');
+        assert.equal(rowHasEmptyImgSrc(row), true);
+    });
+
+    it('passesTableFiltersImpl empty-src issue keeps pages with empty imgs', () => {
+        const page = {
+            url: 'https://example.com/about',
+            status: 200,
+            contentType: 'text/html',
+            fetched: true,
+            emptyImgCount: 2,
+            metaRobotsStatus: 'allowed',
+            robotsAllowed: true,
+            headings: [],
+        };
+        const ok = {
+            url: 'https://example.com/ok',
+            status: 200,
+            contentType: 'text/html',
+            fetched: true,
+            emptyImgCount: 0,
+            metaRobotsStatus: 'allowed',
+            robotsAllowed: true,
+            headings: [],
+        };
+        const ctx = {
+            activeIssueFilter: 'empty-src',
+            getDuplicateCounts: () => ({ h1: new Map(), title: new Map(), description: new Map() }),
+        };
+        assert.equal(passesTableFiltersImpl(page, ctx), true);
+        assert.equal(passesTableFiltersImpl(ok, ctx), false);
+    });
+
+    it('passesTableFiltersImpl empty-src also keeps 404 images', () => {
+        const brokenImg = {
+            url: 'https://lh7-us.googleusercontent.com/abc',
+            tag: 'img[src]',
+            kind: 'images',
+            status: 404,
+            contentType: 'text/html',
+            fetched: true,
+        };
+        const okImg = {
+            url: 'https://example.com/logo.png',
+            tag: 'img[src]',
+            kind: 'images',
+            status: 200,
+            contentType: 'image/png',
+            fetched: true,
+        };
+        const missingPage = {
+            url: 'https://example.com/gone',
+            tag: 'a[href]',
+            status: 404,
+            contentType: 'text/html',
+            fetched: true,
+            headings: [],
+        };
+        const video404 = {
+            url: 'https://example.com/clip.mp4',
+            tag: 'video[src]',
+            kind: 'media',
+            status: 404,
+            fetched: true,
+        };
+        const pageWithBrokenImg = {
+            url: 'https://example.com/gallery',
+            status: 200,
+            contentType: 'text/html',
+            fetched: true,
+            emptyImgCount: 0,
+            headings: [],
+        };
+        const ctx = {
+            activeIssueFilter: 'empty-src',
+            getDuplicateCounts: () => ({ h1: new Map(), title: new Map(), description: new Map() }),
+            getOutgoingLinksFrom: (url) => (url === pageWithBrokenImg.url ? [brokenImg] : []),
+        };
+        assert.equal(rowHasBrokenImage(brokenImg), true);
+        assert.equal(rowHasBrokenImage(okImg), false);
+        assert.equal(passesTableFiltersImpl(brokenImg, ctx), true);
+        assert.equal(passesTableFiltersImpl(okImg, ctx), false);
+        assert.equal(passesTableFiltersImpl(missingPage, ctx), false);
+        assert.equal(passesTableFiltersImpl(video404, ctx), false);
+        assert.equal(passesTableFiltersImpl(pageWithBrokenImg, ctx), true);
+    });
+
+    it('passesTableFiltersImpl issue h1-multiple and dup-title', () => {
+        const multiH1 = {
+            url: 'https://example.com/a',
+            status: 200,
+            fetched: true,
+            headings: [{ level: 1, text: 'One' }, { level: 1, text: 'Two' }],
+            title: 'About',
+        };
+        const single = {
+            url: 'https://example.com/b',
+            status: 200,
+            fetched: true,
+            headings: [{ level: 1, text: 'One' }],
+            title: 'Home',
+        };
+        const counts = {
+            h1: new Map(),
+            title: new Map([['about', 2]]),
+            description: new Map(),
+        };
+        const ctx = {
+            getDuplicateCounts: () => counts,
+        };
+        assert.equal(passesTableFiltersImpl(multiH1, { ...ctx, activeIssueFilter: 'h1-multiple' }), true);
+        assert.equal(passesTableFiltersImpl(single, { ...ctx, activeIssueFilter: 'h1-multiple' }), false);
+        assert.equal(passesTableFiltersImpl(multiH1, { ...ctx, activeIssueFilter: 'dup-title' }), true);
+        assert.equal(passesTableFiltersImpl(single, { ...ctx, activeIssueFilter: 'dup-title' }), false);
+        assert.equal(resolveIssueFilter({ h1: 'multiple' }), 'h1-multiple');
+        assert.equal(resolveIssueFilter({ duplicate: 'title' }), 'dup-title');
     });
 
     it('real HTML page still matches HTML tab', () => {
@@ -100,8 +237,7 @@ describe('ui-logic', () => {
             activeSourceFilter: 'all',
             activeStatusFilter: '2xx',
             activeIndexingFilter: 'all',
-            activeH1Filter: 'all',
-            activeDuplicateFilter: 'all',
+            activeIssueFilter: 'all',
             activeContentFilter: 'all',
             scanHostname: 'example.com',
             getDuplicateCounts: () => ({ h1: new Map(), title: new Map(), description: new Map() }),
