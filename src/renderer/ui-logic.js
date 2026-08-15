@@ -207,9 +207,6 @@ function matchesResourceTypeFilterImpl(data, activeContentFilter = 'all') {
     if (activeContentFilter === 'all') {
         return true;
     }
-    if (activeContentFilter === 'html') {
-        return !isDiscoveredOnly(data) && isHtmlContentType(data.contentType || '');
-    }
     if (activeContentFilter === 'javascript') {
         return isJavascriptResource(data);
     }
@@ -218,6 +215,12 @@ function matchesResourceTypeFilterImpl(data, activeContentFilter = 'all') {
     }
     if (activeContentFilter === 'media') {
         return isMediaResource(data);
+    }
+    if (activeContentFilter === 'html') {
+        if (isJavascriptResource(data) || isCssResource(data) || isMediaResource(data)) {
+            return false;
+        }
+        return !isDiscoveredOnly(data) && isHtmlContentType(data.contentType || '');
     }
     return false;
 }

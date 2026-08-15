@@ -324,6 +324,7 @@ function exportDetailLinksCsv() {
     if (!type) {
         return;
     }
+    const filters = tableFilters.getFilterSnapshot();
     const links = type === 'in'
         ? getReferrersForUrl(selectedUrl)
         : getOutgoingLinksFrom(selectedUrl);
@@ -333,6 +334,9 @@ function exportDetailLinksCsv() {
         links,
         sortState: linkTableSortState,
         scanStartedAt,
+        contentType: filters.content,
+        sourceFilter: filters.source,
+        displayedEntries: tableFilters.getDisplayedResults(),
     });
     if (!result.ok && result.reason === 'empty') {
         alert(type === 'in'

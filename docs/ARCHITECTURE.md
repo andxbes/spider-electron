@@ -1,6 +1,6 @@
 # Spider-Electron — внутрішня документація
 
-> Останнє оновлення: 2026-07-29 (IPC batch + легша фіналізація великих сканів)  
+> Останнє оновлення: 2026-08-16 (вкладки HTML/Media взаємовиключні для img 404)  
 > Короткий довідник для розробки та правок. Детальніше про підтримку — [DOC_MAINTENANCE.md](./DOC_MAINTENANCE.md).
 
 ## Що це
@@ -346,8 +346,8 @@ Renderer
 ## Фільтри таблиці (renderer.js)
 
 - **Тип** — вкладки `#contentTypeTabs` (див. вище); класифікація URL у `scanResults`:
-  - `HTML` — завантажені URL з `Content-Type: text/html` / `application/xhtml`;
-  - `JavaScript` / `CSS` / `Media` — за `kind`, тегом (`script[src]`, `link[rel=stylesheet]`) і розширенням URL;
+  - `Media` / `JavaScript` / `CSS` — за `kind`, тегом (`img[src]`, `script[src]`, `link[rel=stylesheet]`) і розширенням URL; мають пріоритет над Content-Type;
+  - `HTML` — завантажені URL з `Content-Type: text/html` / `application/xhtml`, **якщо** ресурс не класифікований як Media/JS/CSS (щоб 404 HTML-сторінка на `img[src]` не дублювалась у HTML);
   - `Усі` — усі записи в `scanResults`.
 - **Джерело** — `external: true/false` (або `hostname` URL).
 - Стан фільтрів — `activeContentFilter`, `activeSourceFilter` у пам’яті; не скидається під час сканування.
@@ -362,8 +362,8 @@ Renderer
 - BOM `\uFEFF` для Excel/кирилиці.
 - **Основна таблиця:** експорт відфільтрованих сторінок; колонки включають Internal/External Links (скорочений preview у комірках).
 - Файл основного експорту: `spider_<hostname>_YYYY-MM-DD-HH-MM-SS.csv`.
-- **Вкладки «Вхідні» / «Вихідні посилання»** (панель деталей): кнопка «Експорт CSV» — повний список посилань окремим файлом (без обмеження довжини комірки). Колонки: URL, Tag, rel, Follow, Anchor Text (+ External для вихідних). Сортування як у таблиці вкладки.
-- Ім'я файлу посилань: `<host>_<path>-in|out-YYYY-MM-DD-HH-MM-SS.csv` (час старту скану).
+- **Вкладки «Вхідні» / «Вихідні посилання»** (панель деталей): кнопка «Експорт CSV» — повний список посилань окремим файлом (без обмеження довжини комірки). Колонки: Source URL, Tag, rel, Follow, Anchor Text (+ External для вихідних), **Target URL останньою**. Для вхідних Source URL — реферер, Target URL — обрана сторінка; для вихідних навпаки. Сортування як у таблиці вкладки.
+- Ім'я файлу посилань: `<slug>-<rowIndex>-in|out-<contentType>-<sourceFilter>-YYYY-MM-DD-HH-MM-SS.csv`. `slug` — останній сегмент шляху URL (або hostname), **до 10 символів**; `rowIndex` — 1-based номер рядка в поточній відфільтрованій таблиці (колонка `#`); `contentType` — вкладка Усі/HTML/JS/CSS/Media; `sourceFilter` — Усі/внутрішні/зовнішні. Час — старт скану.
 - Дамп: `spider_<hostname>_YYYY-MM-DDTHH-MM-SS.spider.json` — результати + `settings` (усі опції спайдера і `sitemapUrlsText`).
 
 ## Збір посилань (link-collector.js)

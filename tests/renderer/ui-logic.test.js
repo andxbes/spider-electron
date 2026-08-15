@@ -11,6 +11,7 @@ const {
     normalizeContentTypeFilter,
     normalizeSourceFilter,
     getResourceKind,
+    matchesResourceTypeFilterImpl,
     formatCsvUrlListPreview,
     compareRowsImpl,
     duplicateCountBadge,
@@ -38,6 +39,32 @@ describe('ui-logic', () => {
 
     it('inferLinkKind uses tag for scripts', () => {
         assert.equal(inferLinkKind({ tag: 'script[src]', url: 'https://x.com/a' }), 'javascript');
+    });
+
+    it('broken img[src] with HTML 404 stays in Media, not HTML', () => {
+        const row = {
+            url: 'https://lh7-us.googleusercontent.com/abc',
+            tag: 'img[src]',
+            kind: 'images',
+            status: 404,
+            contentType: 'text/html',
+            fetched: true,
+        };
+        assert.equal(matchesResourceTypeFilterImpl(row, 'media'), true);
+        assert.equal(matchesResourceTypeFilterImpl(row, 'html'), false);
+        assert.equal(getResourceKind(row), 'media');
+    });
+
+    it('real HTML page still matches HTML tab', () => {
+        const row = {
+            url: 'https://example.com/about',
+            tag: 'a[href]',
+            status: 200,
+            contentType: 'text/html',
+            fetched: true,
+        };
+        assert.equal(matchesResourceTypeFilterImpl(row, 'html'), true);
+        assert.equal(matchesResourceTypeFilterImpl(row, 'media'), false);
     });
 
     it('matchesStatusFilter supports groups and exact codes', () => {
