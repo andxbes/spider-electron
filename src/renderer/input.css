@@ -175,4 +175,32 @@
   .detail-links-table td.detail-link-col-follow {
     white-space: nowrap;
   }
+
+  .detail-links-table tbody tr {
+    cursor: pointer;
+  }
+
+  .detail-links-table tbody tr:hover {
+    background-color: var(--color-zinc-50);
+  }
+
+  .detail-links-table tbody tr.detail-link-external {
+    background-color: color-mix(in oklab, var(--color-amber-50) 40%, transparent);
+  }
+
+  .detail-links-table tbody tr.detail-link-external:hover {
+    background-color: var(--color-zinc-50);
+  }
+
+  .detail-links-table tbody tr.detail-link-focused {
+    background-color: var(--color-blue-50);
+  }
+
+  .detail-links-table tbody tr.detail-link-focused:hover {
+    background-color: var(--color-blue-100);
+  }
+
+  .detail-links-table tbody tr:focus {
+    outline: none;
+  }
 }

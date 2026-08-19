@@ -515,6 +515,7 @@ function clearScanData() {
     sortState = { column: null, direction: 'asc' };
     tableView.renderTableHead();
     resultsTable.innerHTML = '';
+    detailPanel?.clearFocusedLinks?.();
     selectedUrlHint.textContent = 'Оберіть рядок у таблиці';
     if (selectedUrlBar?.querySelector) {
         selectedUrlBar.querySelector('[data-url-actions]')?.remove();

@@ -34,6 +34,69 @@ function createDetailPanel(deps) {
         return `<table class="w-full border-collapse"><tbody>${body}</tbody></table>`;
     }
 
+    const focusedLinkByContext = new Map();
+
+    function getLinkRowUrl(link) {
+        if (!link) {
+            return '';
+        }
+        if (typeof link === 'string') {
+            return link;
+        }
+        return link.url || link.href || '';
+    }
+
+    function getFocusContextKey() {
+        const tab = getActiveTab();
+        const pageUrl = getSelectedUrl() || '';
+        return `${tab}\t${pageUrl}`;
+    }
+
+    function getFocusedLinkUrl() {
+        return focusedLinkByContext.get(getFocusContextKey()) || '';
+    }
+
+    function setFocusedLinkUrl(url) {
+        const key = getFocusContextKey();
+        if (!url) {
+            focusedLinkByContext.delete(key);
+            return;
+        }
+        focusedLinkByContext.set(key, url);
+    }
+
+    function clearFocusedLinks() {
+        focusedLinkByContext.clear();
+    }
+
+    function getLinkTableRows() {
+        if (!detailContent?.querySelectorAll) {
+            return [];
+        }
+        return Array.from(detailContent.querySelectorAll('.detail-links-table tbody tr[data-url]'));
+    }
+
+    function syncFocusedLinkHighlight({ scroll = false, focusRow = false } = {}) {
+        const focusedUrl = getFocusedLinkUrl();
+        let focusedRow = null;
+        for (const tr of getLinkTableRows()) {
+            const isFocused = Boolean(focusedUrl) && tr.dataset.url === focusedUrl;
+            tr.classList.toggle('detail-link-focused', isFocused);
+            if (isFocused) {
+                focusedRow = tr;
+            }
+        }
+        if (!focusedRow) {
+            return;
+        }
+        if (scroll && typeof focusedRow.scrollIntoView === 'function') {
+            focusedRow.scrollIntoView({ block: 'nearest' });
+        }
+        if (focusRow && typeof focusedRow.focus === 'function') {
+            focusedRow.focus();
+        }
+    }
+
     function sortLinkRows(links) {
         return [...links].sort((a, b) => compareLinkRowsImpl(a, b, getLinkTableSortState()));
     }
@@ -46,9 +109,12 @@ function createDetailPanel(deps) {
             ? `<p class="px-4 py-2 text-xs text-zinc-500 border-b border-zinc-100 bg-zinc-50">${escapeHtml(caption)}</p>`
             : '';
         const linkTableSortState = getLinkTableSortState();
+        const focusedUrl = getFocusedLinkUrl();
         const rows = sortLinkRows(links)
             .map(
                 (link) => {
+                    const rowUrl = getLinkRowUrl(link);
+                    const focused = Boolean(rowUrl) && rowUrl === focusedUrl;
                     const external = isExternalOutlink(link);
                     const typeBadge = external
                         ? '<span class="inline-block ml-1 px-1 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-800 whitespace-nowrap" title="Зовнішнє посилання — не обходиться">зовн.</span>'
@@ -60,9 +126,14 @@ function createDetailPanel(deps) {
                             ? `<span class="font-mono">${escapeHtml(relInfo.rel)}</span>`
                             : '<span class="text-zinc-500 italic">follow</span>')
                         : '<span class="text-zinc-400 italic">—</span>';
+                    const rowClass = [
+                        'border-b border-zinc-100',
+                        external ? 'detail-link-external' : '',
+                        focused ? 'detail-link-focused' : '',
+                    ].filter(Boolean).join(' ');
                     return `
-        <tr class="border-b border-zinc-100 hover:bg-zinc-50${external ? ' bg-amber-50/40' : ''}">
-            <td class="p-2 detail-link-col-url">${urlCellHtml(link.url || link.href || link)}${typeBadge}</td>
+        <tr class="${rowClass}" data-url="${escapeHtml(rowUrl)}" tabindex="-1">
+            <td class="p-2 detail-link-col-url">${urlCellHtml(rowUrl)}${typeBadge}</td>
             <td class="p-2 font-mono text-zinc-600 text-[11px] detail-link-col-tag whitespace-nowrap">${escapeHtml(tag)}</td>
             <td class="p-2 text-zinc-600 detail-link-col-rel">${relCell}</td>
             <td class="p-2 whitespace-nowrap detail-link-col-follow">${formatRelAllowedStatus(relInfo.relFollowAllowed)}</td>
@@ -111,6 +182,7 @@ function createDetailPanel(deps) {
                 'Немає вхідних посилань (стартова або лише з sitemap)',
                 inlinks.length ? `Всього вхідних: ${inlinks.length}` : ''
             );
+            syncFocusedLinkHighlight({ scroll: true });
         } else if (activeTab === 'outlinks') {
             const allOutgoing = getOutgoingLinksFrom(data.url);
             const outgoing = getFilteredOutgoingLinks(data.url);
@@ -122,6 +194,7 @@ function createDetailPanel(deps) {
                 'Немає вихідних посилань за поточними фільтрами',
                 caption
             );
+            syncFocusedLinkHighlight({ scroll: true });
         }
     }
 
@@ -145,23 +218,56 @@ function createDetailPanel(deps) {
 
         detailContent.addEventListener('click', (event) => {
             const th = event.target.closest('.sortable-link-th');
-            if (!th) {
+            if (th) {
+                const col = th.dataset.sort;
+                if (!col) {
+                    return;
+                }
+                const state = getLinkTableSortState();
+                if (state.column === col) {
+                    setLinkTableSortState({
+                        column: col,
+                        direction: state.direction === 'asc' ? 'desc' : 'asc',
+                    });
+                } else {
+                    setLinkTableSortState({ column: col, direction: 'asc' });
+                }
+                renderDetailPanel();
                 return;
             }
-            const col = th.dataset.sort;
-            if (!col) {
+            const row = event.target.closest('.detail-links-table tbody tr[data-url]');
+            if (!row?.dataset.url) {
                 return;
             }
-            const state = getLinkTableSortState();
-            if (state.column === col) {
-                setLinkTableSortState({
-                    column: col,
-                    direction: state.direction === 'asc' ? 'desc' : 'asc',
-                });
-            } else {
-                setLinkTableSortState({ column: col, direction: 'asc' });
+            setFocusedLinkUrl(row.dataset.url);
+            syncFocusedLinkHighlight({ focusRow: true });
+        });
+
+        detailContent.addEventListener('keydown', (event) => {
+            if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') {
+                return;
             }
-            renderDetailPanel();
+            if (!event.target.closest?.('.detail-links-table')) {
+                return;
+            }
+            const rows = getLinkTableRows();
+            if (!rows.length) {
+                return;
+            }
+            const current = event.target.closest('tr[data-url]')
+                || rows.find((tr) => tr.dataset.url === getFocusedLinkUrl());
+            const index = current ? rows.indexOf(current) : -1;
+            const nextIndex = event.key === 'ArrowDown'
+                ? Math.min((index < 0 ? 0 : index + 1), rows.length - 1)
+                : Math.max((index < 0 ? 0 : index - 1), 0);
+            const next = rows[nextIndex];
+            if (!next || next === current) {
+                event.preventDefault();
+                return;
+            }
+            event.preventDefault();
+            setFocusedLinkUrl(next.dataset.url);
+            syncFocusedLinkHighlight({ scroll: true, focusRow: true });
         });
     }
 
@@ -169,6 +275,7 @@ function createDetailPanel(deps) {
         renderDetailPanel,
         setActiveTab,
         bindTabs,
+        clearFocusedLinks,
     };
 }
 
