@@ -9,6 +9,7 @@ const {
     isIndexingAllowed,
     rowHasEmptyImgSrc,
     rowHasBrokenImage,
+    rowHasExternalFollowAnchor,
     resolveIssueFilter,
     passesTableFiltersImpl,
     normalizeContentTypeFilter,
@@ -41,6 +42,12 @@ describe('ui-logic', () => {
 
     it('parseLinkRel treats ugc as restricted', () => {
         assert.equal(parseLinkRel('ugc').relFollowAllowed, false);
+    });
+
+    it('parseLinkRel keeps noopener as follow-allowed', () => {
+        assert.equal(parseLinkRel('noopener').relFollowAllowed, true);
+        assert.equal(parseLinkRel('noopener noreferrer').relFollowAllowed, true);
+        assert.equal(parseLinkRel('nofollow noopener').relFollowAllowed, false);
     });
 
     it('inferLinkKind uses tag for scripts', () => {
@@ -159,6 +166,94 @@ describe('ui-logic', () => {
         assert.equal(passesTableFiltersImpl(missingPage, ctx), false);
         assert.equal(passesTableFiltersImpl(video404, ctx), false);
         assert.equal(passesTableFiltersImpl(pageWithBrokenImg, ctx), true);
+    });
+
+    it('passesTableFiltersImpl ext-a-follow keeps pages and targets without nofollow', () => {
+        const followed = {
+            url: 'https://other.com/promo',
+            tag: 'a[href]',
+            external: true,
+            rel: 'noopener',
+            relFollowAllowed: true,
+            status: 200,
+            fetched: true,
+        };
+        const nofollow = {
+            url: 'https://other.com/ads',
+            tag: 'a[href]',
+            external: true,
+            rel: 'nofollow',
+            relFollowAllowed: false,
+            status: 200,
+            fetched: true,
+        };
+        const sponsored = {
+            url: 'https://other.com/paid',
+            tag: 'a[href]',
+            external: true,
+            rel: 'sponsored',
+            relFollowAllowed: false,
+            status: 200,
+            fetched: true,
+        };
+        const imgExternal = {
+            url: 'https://cdn.other.com/logo.png',
+            tag: 'img[src]',
+            external: true,
+            relFollowAllowed: true,
+            status: 200,
+            fetched: true,
+        };
+        const page = {
+            url: 'https://example.com/links',
+            status: 200,
+            contentType: 'text/html',
+            fetched: true,
+            external: false,
+            headings: [],
+        };
+        const cleanPage = {
+            url: 'https://example.com/clean',
+            status: 200,
+            contentType: 'text/html',
+            fetched: true,
+            external: false,
+            headings: [],
+        };
+        const outgoingByPage = {
+            [page.url]: [followed, nofollow, imgExternal],
+            [cleanPage.url]: [nofollow, sponsored],
+        };
+        const referrersByUrl = {
+            [followed.url]: [{
+                href: page.url,
+                tag: 'a[href]',
+                rel: 'noopener',
+                relFollowAllowed: true,
+            }],
+            [nofollow.url]: [{
+                href: page.url,
+                tag: 'a[href]',
+                rel: 'nofollow',
+                relFollowAllowed: false,
+            }],
+        };
+        const ctx = {
+            activeIssueFilter: 'ext-a-follow',
+            scanHostname: 'example.com',
+            getDuplicateCounts: () => ({ h1: new Map(), title: new Map(), description: new Map() }),
+            getOutgoingLinksFrom: (url) => outgoingByPage[url] || [],
+            getReferrersForUrl: (url) => referrersByUrl[url] || [],
+        };
+        assert.equal(rowHasExternalFollowAnchor(page, ctx), true);
+        assert.equal(rowHasExternalFollowAnchor(cleanPage, ctx), false);
+        assert.equal(passesTableFiltersImpl(page, ctx), true);
+        assert.equal(passesTableFiltersImpl(cleanPage, ctx), false);
+        assert.equal(passesTableFiltersImpl(followed, ctx), true);
+        assert.equal(passesTableFiltersImpl(nofollow, ctx), false);
+        assert.equal(passesTableFiltersImpl(sponsored, ctx), false);
+        assert.equal(passesTableFiltersImpl(imgExternal, ctx), false);
+        assert.equal(resolveIssueFilter({ issue: 'external-nofollow' }), 'ext-a-follow');
     });
 
     it('passesTableFiltersImpl issue h1-multiple and dup-title', () => {

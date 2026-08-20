@@ -1,6 +1,6 @@
 # Spider-Electron — внутрішня документація
 
-> Останнє оновлення: 2026-08-19 (focused-рядок у вкладках вхідних/вихідних посилань)  
+> Останнє оновлення: 2026-08-20 (фільтр проблем: зовнішні a без nofollow)  
 > Короткий довідник для розробки та правок. Детальніше про підтримку — [DOC_MAINTENANCE.md](./DOC_MAINTENANCE.md).
 
 ## Що це
@@ -354,7 +354,7 @@ Renderer
   - `Усі` — усі записи в `scanResults`.
 - **Джерело** — `external: true/false` (або `hostname` URL).
 - Стан фільтрів — `activeContentFilter`, `activeSourceFilter` у пам’яті; не скидається під час сканування.
-- Інші фільтри: статус HTTP, індексація, **проблеми** (`empty-src` / порожні зображення, `h1-multiple`, `dup-h1` / `dup-title` / `dup-description`). Окремих селектів H1 і дублікатів більше немає.
+- Інші фільтри: статус HTTP, індексація, **проблеми** (`empty-src` / порожні зображення, `ext-a-follow` / зовнішні `<a>` без `nofollow` / `sponsored` / `ugc`, `h1-multiple`, `dup-h1` / `dup-title` / `dup-description`). `rel=noopener` / `noreferrer` follow не блокують. Окремих селектів H1 і дублікатів більше немає.
 
 Колонки **Внутр.** / **Зовн.** — кількість посилань **з** обраної сторінки (через `referrersMap`: хто посилається **на** URL з цієї сторінки як джерела).
 
@@ -364,7 +364,7 @@ Renderer
 
 - BOM `\uFEFF` для Excel/кирилиці.
 - **Основна таблиця:** експорт відфільтрованих сторінок; колонки включають Internal/External Links (скорочений preview у комірках).
-- Файл основного експорту: `spider_<hostname>-<content>-<source>[-status-…][-idx-…][-empty-src|h1-multiple|dup-…][-q-…]_YYYY-MM-DD-HH-MM-SS.csv`. `content` / `source` — вкладка типу та фільтр джерела (навіть якщо `all`); статус, індексація, проблема й пошук додаються лише коли не дефолтні.
+- Файл основного експорту: `spider_<hostname>-<content>-<source>[-status-…][-idx-…][-empty-src|ext-a-follow|h1-multiple|dup-…][-q-…]_YYYY-MM-DD-HH-MM-SS.csv`. `content` / `source` — вкладка типу та фільтр джерела (навіть якщо `all`); статус, індексація, проблема й пошук додаються лише коли не дефолтні.
 - **Вкладки «Вхідні» / «Вихідні посилання»** (панель деталей): кнопка «Експорт CSV» — повний список посилань окремим файлом (без обмеження довжини комірки). Колонки: Source URL, Tag, rel, Follow, Anchor Text (+ External для вихідних), **Target URL останньою**. Для вхідних Source URL — реферер, Target URL — обрана сторінка; для вихідних навпаки. Сортування як у таблиці вкладки.
 - Ім'я файлу посилань: `<slug>-<rowIndex>-in|out-<contentType>-<sourceFilter>-YYYY-MM-DD-HH-MM-SS.csv`. `slug` — останній сегмент шляху URL (або hostname), **до 10 символів**; `rowIndex` — 1-based номер рядка в поточній відфільтрованій таблиці (колонка `#`); `contentType` — вкладка Усі/HTML/JS/CSS/Media; `sourceFilter` — Усі/внутрішні/зовнішні. Час — старт скану.
 - Дамп: `spider_<hostname>_YYYY-MM-DDTHH-MM-SS.spider.json` — результати + `settings` (усі опції спайдера і `sitemapUrlsText`).

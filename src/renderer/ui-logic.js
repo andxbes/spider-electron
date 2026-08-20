@@ -196,6 +196,14 @@ function normalizeIssueFilter(value) {
     if (value === 'dup-description' || value === 'description') {
         return 'dup-description';
     }
+    if (
+        value === 'ext-a-follow'
+        || value === 'external-a-follow'
+        || value === 'ext-a-nofollow'
+        || value === 'external-nofollow'
+    ) {
+        return 'ext-a-follow';
+    }
     return 'all';
 }
 
@@ -219,6 +227,9 @@ function matchesIssueFilterImpl(data, issue, helpers = {}) {
     }
     if (value === 'empty-src') {
         return rowHasBrokenImage(data, helpers.getOutgoingLinksFrom || (() => []));
+    }
+    if (value === 'ext-a-follow') {
+        return rowHasExternalFollowAnchor(data, helpers);
     }
     if (value === 'h1-multiple') {
         return getH1Count(data) > 1;
@@ -289,6 +300,46 @@ function rowHasBrokenImage(data, getOutgoingLinksFrom = () => []) {
     }
     const outgoing = getOutgoingLinksFrom(data.url) || [];
     return outgoing.some((link) => isImageLikeResource(link) && isNotFoundStatus(link.status));
+}
+
+function isFollowAllowedAnchor(link) {
+    if (!link || getLinkTag(link) !== 'a[href]') {
+        return false;
+    }
+    const relInfo = getLinkRelInfo(link);
+    return relInfo.applicable && relInfo.relFollowAllowed === true;
+}
+
+function isExternalFollowAnchor(link, scanHostname = '') {
+    return isFollowAllowedAnchor(link) && isExternalLinkImpl(link, scanHostname);
+}
+
+function rowHasExternalFollowAnchor(data, helpers = {}) {
+    if (!data) {
+        return false;
+    }
+    const scanHostname = helpers.scanHostname || '';
+    const getOutgoingLinksFrom = helpers.getOutgoingLinksFrom || (() => []);
+    const getReferrersForUrl = helpers.getReferrersForUrl || (() => []);
+
+    if (isExternalLinkImpl(data, scanHostname)) {
+        const refs = getReferrersForUrl(data.url) || [];
+        if (refs.some((ref) => isFollowAllowedAnchor({
+            tag: ref.tag || data.tag,
+            rel: ref.rel,
+            relFollowAllowed: ref.relFollowAllowed,
+            relIndexAllowed: ref.relIndexAllowed,
+            relLabel: ref.relLabel,
+        }))) {
+            return true;
+        }
+        if (!refs.length && isExternalFollowAnchor(data, scanHostname)) {
+            return true;
+        }
+    }
+
+    const outgoing = getOutgoingLinksFrom(data.url) || [];
+    return outgoing.some((link) => isExternalFollowAnchor(link, scanHostname));
 }
 
 function isHtmlContentType(contentType) {
@@ -1356,7 +1407,12 @@ function passesTableFiltersImpl(data, ctx) {
     if (activeIndexingFilter === 'blocked' && !isIndexingBlocked(data)) {
         return false;
     }
-    if (!matchesIssueFilterImpl(data, activeIssueFilter, { getDuplicateCounts, getOutgoingLinksFrom })) {
+    if (!matchesIssueFilterImpl(data, activeIssueFilter, {
+        getDuplicateCounts,
+        getOutgoingLinksFrom,
+        getReferrersForUrl,
+        scanHostname,
+    })) {
         return false;
     }
     return true;
@@ -1645,6 +1701,9 @@ const exported = {
     matchesIssueFilterImpl,
     rowHasEmptyImgSrc,
     rowHasBrokenImage,
+    isFollowAllowedAnchor,
+    isExternalFollowAnchor,
+    rowHasExternalFollowAnchor,
     isImageLikeResource,
     mapKindToFilterKind,
     isJavascriptResource,
