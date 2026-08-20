@@ -302,6 +302,68 @@ function rowHasBrokenImage(data, getOutgoingLinksFrom = () => []) {
     return outgoing.some((link) => isImageLikeResource(link) && isNotFoundStatus(link.status));
 }
 
+const MULTI_PART_PUBLIC_SUFFIXES = new Set([
+    'ac.uk', 'co.uk', 'gov.uk', 'ltd.uk', 'me.uk', 'net.uk', 'org.uk', 'plc.uk',
+    'com.au', 'net.au', 'org.au', 'edu.au',
+    'co.nz', 'net.nz', 'org.nz',
+    'co.za', 'org.za',
+    'co.jp', 'ne.jp', 'or.jp',
+    'com.br', 'com.mx', 'com.ar',
+    'com.tr', 'com.cn', 'com.tw',
+    'com.ua', 'org.ua', 'net.ua', 'in.ua', 'pp.ua',
+    'co.in', 'net.in', 'org.in',
+    'com.pl',
+]);
+
+function getHostnameFromUrl(url) {
+    try {
+        return new URL(url).hostname.toLowerCase();
+    } catch {
+        return '';
+    }
+}
+
+function getRegistrableDomain(hostname) {
+    const host = String(hostname || '').toLowerCase().replace(/\.$/, '');
+    if (!host) {
+        return '';
+    }
+    if (host === 'localhost' || /^\d{1,3}(\.\d{1,3}){3}$/.test(host)) {
+        return host;
+    }
+    const parts = host.split('.').filter(Boolean);
+    if (parts.length <= 2) {
+        return host;
+    }
+    const lastTwo = parts.slice(-2).join('.');
+    if (MULTI_PART_PUBLIC_SUFFIXES.has(lastTwo) && parts.length >= 3) {
+        return parts.slice(-3).join('.');
+    }
+    return lastTwo;
+}
+
+function isSameSiteHostname(hostname, scanHostname) {
+    const left = getRegistrableDomain(hostname);
+    const right = getRegistrableDomain(scanHostname);
+    return Boolean(left && right && left === right);
+}
+
+function isOffSiteUrl(url, scanHostname = '') {
+    if (!scanHostname) {
+        return false;
+    }
+    const host = getHostnameFromUrl(url);
+    return Boolean(host) && !isSameSiteHostname(host, scanHostname);
+}
+
+function isOffSiteLink(link, scanHostname = '') {
+    const url = link?.url || link?.href || '';
+    if (scanHostname) {
+        return isOffSiteUrl(url, scanHostname);
+    }
+    return isExternalLinkImpl(link, scanHostname);
+}
+
 function isFollowAllowedAnchor(link) {
     if (!link || getLinkTag(link) !== 'a[href]') {
         return false;
@@ -310,8 +372,12 @@ function isFollowAllowedAnchor(link) {
     return relInfo.applicable && relInfo.relFollowAllowed === true;
 }
 
+function isOffSiteFollowAnchor(link, scanHostname = '') {
+    return isFollowAllowedAnchor(link) && isOffSiteLink(link, scanHostname);
+}
+
 function isExternalFollowAnchor(link, scanHostname = '') {
-    return isFollowAllowedAnchor(link) && isExternalLinkImpl(link, scanHostname);
+    return isOffSiteFollowAnchor(link, scanHostname);
 }
 
 function rowHasExternalFollowAnchor(data, helpers = {}) {
@@ -322,7 +388,7 @@ function rowHasExternalFollowAnchor(data, helpers = {}) {
     const getOutgoingLinksFrom = helpers.getOutgoingLinksFrom || (() => []);
     const getReferrersForUrl = helpers.getReferrersForUrl || (() => []);
 
-    if (isExternalLinkImpl(data, scanHostname)) {
+    if (isOffSiteLink(data, scanHostname)) {
         const refs = getReferrersForUrl(data.url) || [];
         if (refs.some((ref) => isFollowAllowedAnchor({
             tag: ref.tag || data.tag,
@@ -333,13 +399,13 @@ function rowHasExternalFollowAnchor(data, helpers = {}) {
         }))) {
             return true;
         }
-        if (!refs.length && isExternalFollowAnchor(data, scanHostname)) {
+        if (!refs.length && isOffSiteFollowAnchor(data, scanHostname)) {
             return true;
         }
     }
 
     const outgoing = getOutgoingLinksFrom(data.url) || [];
-    return outgoing.some((link) => isExternalFollowAnchor(link, scanHostname));
+    return outgoing.some((link) => isOffSiteFollowAnchor(link, scanHostname));
 }
 
 function isHtmlContentType(contentType) {
@@ -1701,7 +1767,12 @@ const exported = {
     matchesIssueFilterImpl,
     rowHasEmptyImgSrc,
     rowHasBrokenImage,
+    getRegistrableDomain,
+    isSameSiteHostname,
+    isOffSiteUrl,
+    isOffSiteLink,
     isFollowAllowedAnchor,
+    isOffSiteFollowAnchor,
     isExternalFollowAnchor,
     rowHasExternalFollowAnchor,
     isImageLikeResource,

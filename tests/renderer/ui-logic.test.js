@@ -10,6 +10,9 @@ const {
     rowHasEmptyImgSrc,
     rowHasBrokenImage,
     rowHasExternalFollowAnchor,
+    isOffSiteFollowAnchor,
+    getRegistrableDomain,
+    isSameSiteHostname,
     resolveIssueFilter,
     passesTableFiltersImpl,
     normalizeContentTypeFilter,
@@ -204,6 +207,32 @@ describe('ui-logic', () => {
             status: 200,
             fetched: true,
         };
+        const subdomainApp = {
+            url: 'https://app.example.com/login',
+            tag: 'a[href]',
+            external: true,
+            rel: '',
+            relFollowAllowed: true,
+            status: 200,
+            fetched: true,
+        };
+        const preloadFont = {
+            url: 'https://fonts.gstatic.com/s/inter.woff2',
+            tag: 'link[rel=preload][as=font/woff2]',
+            external: true,
+            rel: '',
+            relFollowAllowed: true,
+            status: 200,
+            fetched: true,
+        };
+        const profileLink = {
+            url: 'https://gmpg.org/xfn/11',
+            tag: 'link[rel=profile]',
+            external: true,
+            rel: '',
+            status: 200,
+            fetched: true,
+        };
         const page = {
             url: 'https://example.com/links',
             status: 200,
@@ -222,7 +251,7 @@ describe('ui-logic', () => {
         };
         const outgoingByPage = {
             [page.url]: [followed, nofollow, imgExternal],
-            [cleanPage.url]: [nofollow, sponsored],
+            [cleanPage.url]: [nofollow, sponsored, subdomainApp, preloadFont, profileLink],
         };
         const referrersByUrl = {
             [followed.url]: [{
@@ -236,6 +265,12 @@ describe('ui-logic', () => {
                 tag: 'a[href]',
                 rel: 'nofollow',
                 relFollowAllowed: false,
+            }],
+            [subdomainApp.url]: [{
+                href: cleanPage.url,
+                tag: 'a[href]',
+                rel: '',
+                relFollowAllowed: true,
             }],
         };
         const ctx = {
@@ -253,7 +288,21 @@ describe('ui-logic', () => {
         assert.equal(passesTableFiltersImpl(nofollow, ctx), false);
         assert.equal(passesTableFiltersImpl(sponsored, ctx), false);
         assert.equal(passesTableFiltersImpl(imgExternal, ctx), false);
+        assert.equal(passesTableFiltersImpl(subdomainApp, ctx), false);
+        assert.equal(passesTableFiltersImpl(preloadFont, ctx), false);
+        assert.equal(passesTableFiltersImpl(profileLink, ctx), false);
+        assert.equal(isOffSiteFollowAnchor(subdomainApp, 'example.com'), false);
+        assert.equal(isOffSiteFollowAnchor(followed, 'example.com'), true);
+        assert.equal(isOffSiteFollowAnchor(preloadFont, 'example.com'), false);
         assert.equal(resolveIssueFilter({ issue: 'external-nofollow' }), 'ext-a-follow');
+    });
+
+    it('getRegistrableDomain treats subdomains as the same site', () => {
+        assert.equal(getRegistrableDomain('app.spitche.com'), 'spitche.com');
+        assert.equal(getRegistrableDomain('www.spitche.com'), 'spitche.com');
+        assert.equal(isSameSiteHostname('app.spitche.com', 'spitche.com'), true);
+        assert.equal(isSameSiteHostname('fonts.googleapis.com', 'spitche.com'), false);
+        assert.equal(getRegistrableDomain('shop.example.com.ua'), 'example.com.ua');
     });
 
     it('passesTableFiltersImpl issue h1-multiple and dup-title', () => {

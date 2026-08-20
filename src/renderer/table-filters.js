@@ -253,7 +253,9 @@ function createTableFilters(deps) {
     }
 
     function hasActiveLinkFilters() {
-        return activeSourceFilter !== 'all' || activeContentFilter !== 'all';
+        return activeSourceFilter !== 'all'
+            || activeContentFilter !== 'all'
+            || activeIssueFilter === 'ext-a-follow';
     }
 
     function getFilteredOutgoingLinks(pageUrl, getOutgoingLinksFrom) {
@@ -265,6 +267,10 @@ function createTableFilters(deps) {
         }
         if (activeContentFilter !== 'all') {
             links = links.filter((data) => matchesResourceTypeFilterImpl(data, activeContentFilter));
+        }
+        if (activeIssueFilter === 'ext-a-follow') {
+            const scanHostname = typeof getScanHostname === 'function' ? getScanHostname() : '';
+            links = links.filter((link) => isOffSiteFollowAnchor(link, scanHostname));
         }
         return links;
     }
