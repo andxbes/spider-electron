@@ -277,7 +277,8 @@ function createTableFilters(deps) {
         return activeSourceFilter !== 'all'
             || activeDomainFilter !== 'all'
             || activeContentFilter !== 'all'
-            || activeIssueFilter === 'ext-a-follow';
+            || activeIssueFilter === 'ext-a-follow'
+            || activeIssueFilter === 'non-latin';
     }
 
     function getFilteredOutgoingLinks(pageUrl, getOutgoingLinksFrom) {
@@ -294,6 +295,9 @@ function createTableFilters(deps) {
         }
         if (activeIssueFilter === 'ext-a-follow') {
             links = links.filter((link) => isOffSiteFollowAnchor(link, scanHostname));
+        }
+        if (activeIssueFilter === 'non-latin') {
+            links = links.filter((link) => urlHasNonLatin(link));
         }
         return links;
     }

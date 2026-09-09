@@ -256,6 +256,83 @@ function formatDisplayUrl(url) {
     return isEmptyImageUrl(url) ? EMPTY_IMAGE_LABEL : String(url || '');
 }
 
+function isNonLatinLetter(ch) {
+    return /\p{L}/u.test(ch) && !/\p{Script=Latin}/u.test(ch);
+}
+
+function stringHasNonLatinLetter(text) {
+    for (const ch of String(text || '')) {
+        if (isNonLatinLetter(ch)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function decodePercentEncodedUtf8(value) {
+    const raw = String(value || '');
+    try {
+        return decodeURIComponent(raw);
+    } catch {
+        return raw.replace(/(?:%[0-9A-Fa-f]{2})+/g, (chunk) => {
+            try {
+                return decodeURIComponent(chunk);
+            } catch {
+                return chunk;
+            }
+        });
+    }
+}
+
+function urlHasPunycodeHostname(url) {
+    try {
+        return new URL(url).hostname.split('.').some((label) => label.toLowerCase().startsWith('xn--'));
+    } catch {
+        return /(?:^|\/\/|\.)xn--/i.test(String(url || ''));
+    }
+}
+
+function urlHasNonLatinChars(url) {
+    const value = String(url || '');
+    if (!value || isEmptyImageUrl(value)) {
+        return false;
+    }
+    if (urlHasPunycodeHostname(value)) {
+        return true;
+    }
+    if (stringHasNonLatinLetter(value)) {
+        return true;
+    }
+    if (value.includes('%') && stringHasNonLatinLetter(decodePercentEncodedUtf8(value))) {
+        return true;
+    }
+    return false;
+}
+
+function urlHasNonLatin(entry) {
+    if (!entry) {
+        return false;
+    }
+    if (typeof entry === 'string') {
+        return urlHasNonLatinChars(entry);
+    }
+    if (typeof entry.nonLatin === 'boolean') {
+        return entry.nonLatin;
+    }
+    return urlHasNonLatinChars(entry.url || entry.href || '');
+}
+
+function rowHasNonLatinUrl(data, getOutgoingLinksFrom = () => []) {
+    if (!data) {
+        return false;
+    }
+    if (urlHasNonLatin(data)) {
+        return true;
+    }
+    const outgoing = getOutgoingLinksFrom(data.url) || [];
+    return outgoing.some((link) => urlHasNonLatin(link));
+}
+
 function normalizeIssueFilter(value) {
     if (
         value === 'empty-src'
@@ -286,6 +363,15 @@ function normalizeIssueFilter(value) {
     ) {
         return 'ext-a-follow';
     }
+    if (
+        value === 'non-latin'
+        || value === 'non-latin-url'
+        || value === 'cyrillic'
+        || value === 'cyrillic-url'
+        || value === 'idna'
+    ) {
+        return 'non-latin';
+    }
     return 'all';
 }
 
@@ -312,6 +398,9 @@ function matchesIssueFilterImpl(data, issue, helpers = {}) {
     }
     if (value === 'ext-a-follow') {
         return rowHasExternalFollowAnchor(data, helpers);
+    }
+    if (value === 'non-latin') {
+        return rowHasNonLatinUrl(data, helpers.getOutgoingLinksFrom || (() => []));
     }
     if (value === 'h1-multiple') {
         return getH1Count(data) > 1;
@@ -901,6 +990,7 @@ function normalizeLinkEntryImpl(data, scanHostname = '') {
         tag,
         fetched,
         ...(isEmptyImg ? { emptySrc: true } : {}),
+        nonLatin: urlHasNonLatinChars(url),
     };
     return {
         ...entry,
@@ -1268,6 +1358,9 @@ function getRowSearchTextImpl(data, getReferrersForUrl = () => []) {
         formatLinkKindLabel(getResourceKind(data)),
         (isEmptyImageUrl(data.url) || Number(data.emptyImgCount) > 0 || rowHasBrokenImage(data))
             ? `${EMPTY_IMAGE_LABEL} немае адреси empty src empty img порожній img порожні зображення broken image`
+            : '',
+        urlHasNonLatin(data)
+            ? 'кирилиця кириллица нелатиниця нелатиница cyrillic non-latin punycode xn-- idn'
             : '',
     ].filter(Boolean).join(' ').toLowerCase();
 }
@@ -1877,6 +1970,9 @@ const exported = {
     matchesIssueFilterImpl,
     rowHasEmptyImgSrc,
     rowHasBrokenImage,
+    rowHasNonLatinUrl,
+    urlHasNonLatin,
+    urlHasNonLatinChars,
     getRegistrableDomain,
     isSameSiteHostname,
     getLinkSourceKind,

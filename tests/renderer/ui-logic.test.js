@@ -9,6 +9,9 @@ const {
     isIndexingAllowed,
     rowHasEmptyImgSrc,
     rowHasBrokenImage,
+    rowHasNonLatinUrl,
+    urlHasNonLatin,
+    urlHasNonLatinChars,
     rowHasExternalFollowAnchor,
     isOffSiteFollowAnchor,
     getRegistrableDomain,
@@ -303,6 +306,50 @@ describe('ui-logic', () => {
         assert.equal(isOffSiteFollowAnchor(followed, 'example.com'), true);
         assert.equal(isOffSiteFollowAnchor(preloadFont, 'example.com'), false);
         assert.equal(resolveIssueFilter({ issue: 'external-nofollow' }), 'ext-a-follow');
+    });
+
+    it('urlHasNonLatinChars detects non-Latin letters, percent-encoding and punycode', () => {
+        assert.equal(urlHasNonLatinChars('https://example.com/about'), false);
+        assert.equal(urlHasNonLatinChars('https://example.com/caf%C3%A9'), false);
+        assert.equal(urlHasNonLatinChars('https://example.com/file%20name'), false);
+        assert.equal(urlHasNonLatinChars('https://example.com/привіт'), true);
+        assert.equal(urlHasNonLatinChars('https://example.com/%D0%BF%D1%80%D0%B8%D0%B2%D1%96%D1%82'), true);
+        assert.equal(urlHasNonLatinChars('https://example.com/λόγος'), true);
+        assert.equal(urlHasNonLatinChars('https://example.com/页面'), true);
+        assert.equal(urlHasNonLatinChars('https://xn--90a.example.com/'), true);
+        assert.equal(urlHasNonLatinChars(EMPTY_IMAGE_URL), false);
+        assert.equal(resolveIssueFilter({ issue: 'cyrillic' }), 'non-latin');
+    });
+
+    it('passesTableFiltersImpl non-latin keeps encoded URLs and pages that link to them', () => {
+        const encoded = {
+            url: 'https://example.com/%D0%BF%D1%80%D0%B8%D0%B2%D1%96%D1%82',
+            fetched: true,
+            status: 200,
+        };
+        const latin = {
+            url: 'https://example.com/about',
+            fetched: true,
+            status: 200,
+        };
+        const page = {
+            url: 'https://example.com/page',
+            fetched: true,
+            status: 200,
+        };
+        const ctx = {
+            activeIssueFilter: 'non-latin',
+            getOutgoingLinksFrom: (url) => (
+                url === page.url ? [encoded] : []
+            ),
+            getDuplicateCounts: () => ({ h1: new Map(), title: new Map(), description: new Map() }),
+        };
+        assert.equal(urlHasNonLatin(encoded), true);
+        assert.equal(passesTableFiltersImpl(encoded, ctx), true);
+        assert.equal(passesTableFiltersImpl(latin, ctx), false);
+        assert.equal(passesTableFiltersImpl(page, ctx), true);
+        assert.equal(rowHasNonLatinUrl(page, ctx.getOutgoingLinksFrom), true);
+        assert.equal(rowHasNonLatinUrl(latin, ctx.getOutgoingLinksFrom), false);
     });
 
     it('getRegistrableDomain treats subdomains as the same site', () => {
