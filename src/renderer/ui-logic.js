@@ -322,15 +322,8 @@ function urlHasNonLatin(entry) {
     return urlHasNonLatinChars(entry.url || entry.href || '');
 }
 
-function rowHasNonLatinUrl(data, getOutgoingLinksFrom = () => []) {
-    if (!data) {
-        return false;
-    }
-    if (urlHasNonLatin(data)) {
-        return true;
-    }
-    const outgoing = getOutgoingLinksFrom(data.url) || [];
-    return outgoing.some((link) => urlHasNonLatin(link));
+function rowHasNonLatinUrl(data) {
+    return urlHasNonLatin(data);
 }
 
 function normalizeIssueFilter(value) {
@@ -400,7 +393,7 @@ function matchesIssueFilterImpl(data, issue, helpers = {}) {
         return rowHasExternalFollowAnchor(data, helpers);
     }
     if (value === 'non-latin') {
-        return rowHasNonLatinUrl(data, helpers.getOutgoingLinksFrom || (() => []));
+        return rowHasNonLatinUrl(data);
     }
     if (value === 'h1-multiple') {
         return getH1Count(data) > 1;
