@@ -26,6 +26,7 @@ const statusRate = document.getElementById('status-rate');
 const statusFilter = document.getElementById('statusFilter');
 const indexingFilter = document.getElementById('indexingFilter');
 const sourceFilter = document.getElementById('sourceFilter');
+const domainFilter = document.getElementById('domainFilter');
 const issueFilter = document.getElementById('issueFilter');
 const tableSearch = document.getElementById('tableSearch');
 const filterCount = document.getElementById('filterCount');
@@ -63,6 +64,9 @@ function getPresentationHelpers() {
         getH1Texts,
         isDiscoveredOnly,
         isExternalLink,
+        getLinkSourceKind: (entry) => getLinkSourceKind(entry, getScanHostname()),
+        formatLinkSourceKindLabel,
+        scanHostname: getScanHostname(),
         formatLinkKindLabel,
         getResourceKind,
         getLinkTag,
@@ -120,7 +124,6 @@ function getRowMetrics(data) {
         getReferrersForUrl,
         getOutgoingLinksFrom,
         isDiscoveredOnly,
-        isExternalLink: (entry) => isExternalLinkImpl(entry, getScanHostname()),
         scanHostname: getScanHostname(),
     });
 }
@@ -250,12 +253,12 @@ const tableFilters = createTableFilters({
         statusFilter,
         indexingFilter,
         sourceFilter,
+        domainFilter,
         issueFilter,
         tableSearch,
     },
     onFilterChange: requestRefreshTable,
     onPersistWorkspace: scheduleWorkspacePersist,
-    isExternalLink,
     compareRowsImpl,
     getRowMetrics,
     invalidateDuplicateCounts,
@@ -308,6 +311,7 @@ detailPanel = createDetailPanel({
     setLinkTableSortState: (next) => { linkTableSortState = next; },
     getDetailHelpers: getPresentationHelpers,
     hasActiveLinkFilters: () => tableFilters.hasActiveLinkFilters(),
+    getScanHostname,
 });
 
 function updateDetailLinkExportButton() {
@@ -339,6 +343,8 @@ function exportDetailLinksCsv() {
         scanStartedAt,
         contentType: filters.content,
         sourceFilter: filters.source,
+        domainFilter: filters.domain,
+        scanHostname: getScanHostname(),
         displayedEntries: tableFilters.getDisplayedResults(),
     });
     if (!result.ok && result.reason === 'empty') {
@@ -502,8 +508,8 @@ function setUIState(state) {
 }
 
 function scheduleStartupTableRefresh() {
-    requestAnimationFrame(() => {
-        requestRefreshTable({ immediate: true });
+        requestAnimationFrame(() => {
+        requestRefreshTable({ immediate: true, refreshFilterOptions: true });
     });
 }
 

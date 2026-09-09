@@ -13,6 +13,14 @@ const {
     isOffSiteFollowAnchor,
     getRegistrableDomain,
     isSameSiteHostname,
+    getLinkSourceKind,
+    formatLinkSourceKindLabel,
+    collectScanHostnames,
+    getLinkHostname,
+    normalizeLinkEntryImpl,
+    passesDomainFilterForRowImpl,
+    getRowMetricsImpl,
+    isExternalLinkImpl,
     resolveIssueFilter,
     passesTableFiltersImpl,
     normalizeContentTypeFilter,
@@ -303,6 +311,70 @@ describe('ui-logic', () => {
         assert.equal(isSameSiteHostname('app.spitche.com', 'spitche.com'), true);
         assert.equal(isSameSiteHostname('fonts.googleapis.com', 'spitche.com'), false);
         assert.equal(getRegistrableDomain('shop.example.com.ua'), 'example.com.ua');
+    });
+
+    it('getLinkSourceKind marks same-site hosts as subdomain, not external', () => {
+        const scan = 'example.com';
+        assert.equal(getLinkSourceKind({ url: 'https://example.com/page' }, scan), 'internal');
+        assert.equal(getLinkSourceKind({ url: 'https://www.example.com/' }, scan), 'subdomain');
+        assert.equal(getLinkSourceKind({ url: 'https://app.example.com/login', external: true }, scan), 'subdomain');
+        assert.equal(getLinkSourceKind({ url: 'https://cdn.other.com/a.png', external: true }, scan), 'external');
+        assert.equal(formatLinkSourceKindLabel('subdomain'), 'Піддомен');
+        assert.equal(isExternalLinkImpl({ url: 'https://app.example.com/login', external: true }, scan), false);
+        assert.equal(isExternalLinkImpl({ url: 'https://cdn.other.com/a.png', external: true }, scan), true);
+        assert.equal(getLinkHostname({ url: 'https://other.test/x', hostname: 'app.example.com' }), 'app.example.com');
+        assert.equal(getLinkSourceKind({ url: 'https://other.test/x', hostname: 'cdn.example.com' }, scan), 'subdomain');
+        const normalized = normalizeLinkEntryImpl({ url: 'https://WWW.Example.com/page' }, scan);
+        assert.equal(normalized.hostname, 'www.example.com');
+        assert.equal(getLinkSourceKind(normalized, scan), 'subdomain');
+    });
+
+    it('source and domain filters separate subdomains from external hosts', () => {
+        const internal = { url: 'https://example.com/a', fetched: true, status: 200 };
+        const subdomain = { url: 'https://app.example.com/login', fetched: true, status: 200, external: true };
+        const offsite = { url: 'https://other.test/x', fetched: true, status: 200, external: true };
+        const ctx = {
+            activeSearchQuery: '',
+            activeSourceFilter: 'subdomain',
+            activeDomainFilter: 'all',
+            activeStatusFilter: 'all',
+            activeIndexingFilter: 'all',
+            activeIssueFilter: 'all',
+            activeContentFilter: 'all',
+            scanHostname: 'example.com',
+            getDuplicateCounts: () => ({ h1: new Map(), title: new Map(), description: new Map() }),
+            getReferrersForUrl: () => [],
+        };
+        assert.equal(passesTableFiltersImpl(internal, ctx), false);
+        assert.equal(passesTableFiltersImpl(subdomain, ctx), true);
+        assert.equal(passesTableFiltersImpl(offsite, ctx), false);
+        assert.equal(passesTableFiltersImpl(internal, { ...ctx, activeSourceFilter: 'internal' }), true);
+        assert.equal(passesTableFiltersImpl(offsite, { ...ctx, activeSourceFilter: 'external' }), true);
+        assert.equal(passesTableFiltersImpl(subdomain, { ...ctx, activeSourceFilter: 'external' }), false);
+        assert.equal(passesTableFiltersImpl(subdomain, { ...ctx, activeSourceFilter: 'all', activeDomainFilter: 'app.example.com' }), true);
+        assert.equal(passesTableFiltersImpl(internal, { ...ctx, activeSourceFilter: 'all', activeDomainFilter: 'app.example.com' }), false);
+        assert.equal(passesDomainFilterForRowImpl(subdomain, 'app.example.com'), true);
+        const grouped = collectScanHostnames([internal, subdomain, offsite], 'example.com');
+        assert.deepEqual(grouped.internal, ['example.com']);
+        assert.deepEqual(grouped.subdomains, ['app.example.com']);
+        assert.deepEqual(grouped.external, ['other.test']);
+    });
+
+    it('getRowMetricsImpl counts subdomain outlinks separately from external', () => {
+        const page = { url: 'https://example.com/', fetched: true };
+        const metrics = getRowMetricsImpl(page, {
+            scanHostname: 'example.com',
+            getReferrersForUrl: () => [],
+            getOutgoingLinksFrom: () => [
+                { url: 'https://example.com/a' },
+                { url: 'https://cdn.example.com/app.js', external: true },
+                { url: 'https://google.com/', external: true },
+            ],
+        });
+        assert.equal(metrics.linkCount, 3);
+        assert.equal(metrics.internalCount, 1);
+        assert.equal(metrics.subdomainCount, 1);
+        assert.equal(metrics.externalCount, 1);
     });
 
     it('passesTableFiltersImpl issue h1-multiple and dup-title', () => {
@@ -614,6 +686,7 @@ describe('ui-logic', () => {
     it('normalizeContentTypeFilter maps legacy values', () => {
         assert.equal(normalizeContentTypeFilter('images'), 'media');
         assert.equal(normalizeSourceFilter('links-external'), 'external');
+        assert.equal(normalizeSourceFilter('subdomains'), 'subdomain');
     });
 
     it('getResourceKind classifies javascript assets', () => {

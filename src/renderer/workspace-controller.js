@@ -203,7 +203,7 @@ function createWorkspaceController(deps) {
 
         setSelectedUrl(null);
         setLastScanProgress(normalized.progressAtSave);
-        requestRefreshTable({ immediate: true });
+        requestRefreshTable({ immediate: true, refreshFilterOptions: true });
         deps.setUIState('idle');
         updateUrlInputProgress(normalized.progressAtSave);
         statusScanned.textContent = `Проскановано: ${scanStore.scanResults.size}`;

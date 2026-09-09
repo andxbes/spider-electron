@@ -8,6 +8,7 @@ const TABLE_VISIBLE_INITIAL = 100;
 const TABLE_LAZY_LOAD_SIZE = 50;
 const TABLE_LAZY_SCROLL_THRESHOLD_PX = 160;
 const REFRESH_TABLE_DELAY_MS = 250;
+const IDLE_REFRESH_DELAY_MS = 32;
 const STATUS_FILTER_REFRESH_EVERY_N_PAGES = 100;
 
 function escapeSelectorValue(value) {
@@ -56,6 +57,8 @@ function createTableView(deps) {
     let renderedTableUrlSet = new Set();
     let refreshTableTimer = null;
     let lastPoolSize = 0;
+    let pendingFilterOptionsRefresh = false;
+    let detailSyncRaf = null;
 
     function getTableContext() {
         return {
@@ -69,16 +72,17 @@ function createTableView(deps) {
         return resolveTableColumns(getTableContext());
     }
 
-    function createTableRow(data, displayIndex) {
-        const columns = getColumns();
+    function createTableRow(data, displayIndex, columns, tableContext) {
+        const cols = columns || getColumns();
+        const ctx = tableContext || getTableContext();
         const tr = document.createElement('tr');
         tr.dataset.url = data.url;
         tr.className = 'border-b border-zinc-100 cursor-pointer hover:bg-zinc-50';
         if (getSelectedUrl() === data.url) {
             tr.classList.add('bg-blue-50');
         }
-        tr.innerHTML = columns.map((col) => applyResultsTdLayout(
-            col.renderCell(data, getTableContext(), displayIndex),
+        tr.innerHTML = cols.map((col) => applyResultsTdLayout(
+            col.renderCell(data, ctx, displayIndex),
             col
         )).join('');
         tr.addEventListener('click', (e) => {
@@ -127,17 +131,31 @@ function createTableView(deps) {
             });
             detailContent.innerHTML = '<p class="p-4 text-zinc-400 italic">Сторінка не відповідає поточним фільтрам</p>';
         } else if (selectedUrl && getRowData(selectedUrl) && !incremental) {
-            syncSelectedRowUi();
+            if (detailSyncRaf && typeof cancelAnimationFrame === 'function') {
+                cancelAnimationFrame(detailSyncRaf);
+            }
+            const syncUrl = selectedUrl;
+            const schedule = typeof requestAnimationFrame === 'function'
+                ? requestAnimationFrame
+                : (fn) => setTimeout(fn, 0);
+            detailSyncRaf = schedule(() => {
+                detailSyncRaf = null;
+                if (getSelectedUrl() === syncUrl && getRowData(syncUrl)) {
+                    syncSelectedRowUi();
+                }
+            });
         }
     }
 
     function appendTableRows(entries, startIndex, endIndex) {
+        const columns = getColumns();
+        const tableContext = getTableContext();
         for (let i = startIndex; i < endIndex; i++) {
             const data = entries[i];
             if (renderedTableUrlSet.has(data.url)) {
                 continue;
             }
-            resultsTable.appendChild(createTableRow(data, i + 1));
+            resultsTable.appendChild(createTableRow(data, i + 1, columns, tableContext));
             renderedTableUrlSet.add(data.url);
         }
     }
@@ -187,12 +205,14 @@ function createTableView(deps) {
 
     function refreshTableIncremental(entries, poolSize) {
         tableDisplayEntries = entries;
+        const columns = getColumns();
+        const tableContext = getTableContext();
 
         for (let i = 0; i < Math.min(tableRenderedCount, entries.length); i++) {
             const data = entries[i];
             const tr = resultsTable.querySelector(`tr[data-url="${escapeSelectorValue(data.url)}"]`);
             if (tr) {
-                tr.replaceWith(createTableRow(data, i + 1));
+                tr.replaceWith(createTableRow(data, i + 1, columns, tableContext));
             }
         }
 
@@ -216,12 +236,25 @@ function createTableView(deps) {
         renderResultsTableHead(resultsDataTable, pagesTableHead, getColumns(), deps.getSortState());
     }
 
-    function refreshTable() {
-        renderTableHead();
-        const incremental = canIncrementallyRefreshTable();
-        if (!incremental || deps.getScanResultsSize() % STATUS_FILTER_REFRESH_EVERY_N_PAGES === 0) {
-            updateStatusFilterOptions();
+    function maybeUpdateFilterOptions(incremental) {
+        const everyNPages = incremental
+            && deps.getScanResultsSize() % STATUS_FILTER_REFRESH_EVERY_N_PAGES === 0;
+        if (!pendingFilterOptionsRefresh && !everyNPages) {
+            return;
         }
+        pendingFilterOptionsRefresh = false;
+        updateStatusFilterOptions();
+    }
+
+    function refreshTable(options = {}) {
+        if (options.refreshFilterOptions) {
+            pendingFilterOptionsRefresh = true;
+        }
+        const incremental = canIncrementallyRefreshTable();
+        if (!incremental) {
+            renderTableHead();
+        }
+        maybeUpdateFilterOptions(incremental);
 
         const entries = deps.getDisplayedResultsSnapshot
             ? deps.getDisplayedResultsSnapshot().entries
@@ -249,7 +282,10 @@ function createTableView(deps) {
         finishTableRefresh(entries, poolSize);
     }
 
-    function requestRefreshTable({ immediate = false } = {}) {
+    function requestRefreshTable({ immediate = false, refreshFilterOptions = false } = {}) {
+        if (refreshFilterOptions) {
+            pendingFilterOptionsRefresh = true;
+        }
         if (immediate) {
             if (refreshTableTimer) {
                 clearTimeout(refreshTableTimer);
@@ -263,7 +299,7 @@ function createTableView(deps) {
             return;
         }
 
-        const delay = getUiState() === 'running' ? REFRESH_TABLE_DELAY_MS : 0;
+        const delay = getUiState() === 'running' ? REFRESH_TABLE_DELAY_MS : IDLE_REFRESH_DELAY_MS;
         refreshTableTimer = setTimeout(() => {
             refreshTableTimer = null;
             refreshTable();

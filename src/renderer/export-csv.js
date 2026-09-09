@@ -24,6 +24,7 @@ function normalizeTableFilterMeta(meta = {}) {
     return {
         contentType: sanitizeFilePart(meta.contentType || meta.content || 'all') || 'all',
         sourceFilter: sanitizeFilePart(meta.sourceFilter || meta.source || 'all') || 'all',
+        domainFilter: sanitizeFilePart(meta.domainFilter || meta.domain || 'all') || 'all',
         status: sanitizeFilePart(meta.status || 'all') || 'all',
         indexing: sanitizeFilePart(meta.indexing || 'all') || 'all',
         issue: sanitizeFilePart(meta.issue || 'all') || 'all',
@@ -34,6 +35,9 @@ function normalizeTableFilterMeta(meta = {}) {
 function formatTableFiltersFileSlug(meta = {}) {
     const filters = normalizeTableFilterMeta(meta);
     const parts = [filters.contentType, filters.sourceFilter];
+    if (filters.domainFilter !== 'all') {
+        parts.push(`host-${filters.domainFilter}`);
+    }
     if (filters.status !== 'all') {
         parts.push(`status-${filters.status}`);
     }
@@ -104,6 +108,7 @@ function normalizePageLinksFileMeta(meta = {}) {
     return {
         contentType: sanitizeFilePart(meta.contentType || 'all') || 'all',
         sourceFilter: sanitizeFilePart(meta.sourceFilter || 'all') || 'all',
+        domainFilter: sanitizeFilePart(meta.domainFilter || 'all') || 'all',
         rowIndex: Number.isFinite(rowIndex) && rowIndex > 0 ? rowIndex : 0,
     };
 }
@@ -111,8 +116,9 @@ function normalizePageLinksFileMeta(meta = {}) {
 function buildPageLinksCsvFileName(pageUrl, direction, scanStartedAt, meta = {}) {
     const slug = urlToFileSlug(pageUrl);
     const stamp = formatCsvStamp(scanStartedAt || new Date());
-    const { contentType, sourceFilter, rowIndex } = normalizePageLinksFileMeta(meta);
-    return `${slug}-${rowIndex}-${direction}-${contentType}-${sourceFilter}-${stamp}.csv`;
+    const { contentType, sourceFilter, domainFilter, rowIndex } = normalizePageLinksFileMeta(meta);
+    const domainPart = domainFilter !== 'all' ? `-${domainFilter}` : '';
+    return `${slug}-${rowIndex}-${direction}-${contentType}-${sourceFilter}${domainPart}-${stamp}.csv`;
 }
 
 function formatFollowCsv(allowed) {
@@ -129,7 +135,7 @@ function getLinkUrlForCsv(link, type) {
     return link.url || link.href || '';
 }
 
-function linkToCsvRow(link, type, pageUrl) {
+function linkToCsvRow(link, type, pageUrl, scanHostname = '') {
     const relInfo = getLinkRelInfo(link);
     const relValue = relInfo.applicable
         ? (relInfo.rel || 'follow')
@@ -150,7 +156,7 @@ function linkToCsvRow(link, type, pageUrl) {
         link.text || '',
     ];
     if (type === 'out') {
-        cells.push(isExternalOutlink(link) ? 'Так' : 'Ні');
+        cells.push(isExternalOutlink(link, scanHostname) ? 'Так' : 'Ні');
     }
     cells.push(targetUrl);
     return cells.map(csvEscape).join(',');
@@ -181,13 +187,13 @@ function exportFilteredResultsToCsv(entries, ctx) {
     downloadCsvFile(buildCsvFileName(ctx.startUrl || '', ctx.filters || {}), csvRows);
 }
 
-function buildPageLinksCsvRows({ pageUrl, type, links, sortState }) {
+function buildPageLinksCsvRows({ pageUrl, type, links, sortState, scanHostname = '' }) {
     const sorted = [...links].sort((a, b) => compareLinkRowsImpl(a, b, sortState));
     return {
         sorted,
         csvRows: [
             PAGE_LINKS_CSV_HEADERS[type].join(','),
-            ...sorted.map((link) => linkToCsvRow(link, type, pageUrl)),
+            ...sorted.map((link) => linkToCsvRow(link, type, pageUrl, scanHostname)),
         ],
     };
 }
@@ -200,6 +206,8 @@ function exportPageLinksToCsv({
     scanStartedAt,
     contentType,
     sourceFilter,
+    domainFilter,
+    scanHostname,
     rowIndex,
     displayedEntries,
 }) {
@@ -210,12 +218,19 @@ function exportPageLinksToCsv({
         return { ok: false, reason: 'empty' };
     }
 
-    const { sorted, csvRows } = buildPageLinksCsvRows({ pageUrl, type, links, sortState });
+    const { sorted, csvRows } = buildPageLinksCsvRows({
+        pageUrl,
+        type,
+        links,
+        sortState,
+        scanHostname,
+    });
     const resolvedRowIndex = rowIndex ?? findDisplayedRowIndex(pageUrl, displayedEntries);
     downloadCsvFile(
         buildPageLinksCsvFileName(pageUrl, type, scanStartedAt, {
             contentType,
             sourceFilter,
+            domainFilter,
             rowIndex: resolvedRowIndex,
         }),
         csvRows

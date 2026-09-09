@@ -125,7 +125,18 @@
             >
               <option value="all">Усі</option>
               <option value="internal">Внутрішні</option>
+              <option value="subdomain">Піддомени</option>
               <option value="external">Зовнішні</option>
+            </select>
+          </label>
+          <label class="flex items-center gap-1.5">
+            <span class="text-zinc-500 whitespace-nowrap">Домен:</span>
+            <select
+              id="domainFilter"
+              class="px-2 py-1 border border-zinc-300 rounded bg-white text-zinc-800 min-w-[8rem] max-w-[16rem]"
+              title="Фільтр за hostname"
+            >
+              <option value="all">Усі</option>
             </select>
           </label>
           <label class="flex items-center gap-1.5">

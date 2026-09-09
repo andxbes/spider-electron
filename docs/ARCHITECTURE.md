@@ -1,6 +1,6 @@
 # Spider-Electron — внутрішня документація
 
-> Останнє оновлення: 2026-08-20 (ext-a-follow: off-site a, без піддоменів і `<link>`)  
+> Останнє оновлення: 2026-09-09 (фільтри без зависання UI; піддомени окремо від зовнішніх)  
 > Короткий довідник для розробки та правок. Детальніше про підтримку — [DOC_MAINTENANCE.md](./DOC_MAINTENANCE.md).
 
 ## Що це
@@ -101,10 +101,10 @@ tests/
 | `crawl-hooks.js` | Точки розширення збору; `emitSpiderResult` перед IPC |
 | `hook-registry.js` | Універсальний реєстр хуків (main + renderer) |
 | `preload.js` | Whitelist каналів IPC, `window.api` |
-| `ui-logic.js` | Фільтри, класифікація ресурсів, rel/meta, дублікати, сортування (`compareRowsImpl` — ключі як у `sortKey` колонок) |
+| `ui-logic.js` | Фільтри, класифікація ресурсів і джерела (internal/subdomain/external), rel/meta, дублікати, сортування (`compareRowsImpl` — ключі як у `sortKey` колонок) |
 | `scan-store.js` | `Map` результатів, referrers, upsert з `ui:transformResult`; при повторному upsert збережені HTML-поля (title, meta, headings, OG) не затираються порожніми значеннями |
 | `ui-hooks.js` / `ui-defaults.js` | Колонки таблиці, рядки деталей, CSV — через хуки |
-| `table-filters.js` | Стан фільтрів таблиці, `getDisplayedResults`, прив'язка до DOM |
+| `table-filters.js` | Стан фільтрів таблиці (тип, джерело, домен, статус…), `getDisplayedResults`, прив'язка до DOM |
 | `table-view.js` | Lazy-render таблиці, thead/resize, інкрементальний refresh |
 | `detail-panel.js` | Вкладки деталей / inlinks / outlinks через `ui:detailRows` |
 | `workspace-controller.js` | Persist/restore workspace у sessionStorage, populate/clear results |
@@ -352,21 +352,23 @@ Renderer
   - `Media` / `JavaScript` / `CSS` — за `kind`, тегом (`img[src]`, `script[src]`, `link[rel=stylesheet]`) і розширенням URL; мають пріоритет над Content-Type;
   - `HTML` — завантажені URL з `Content-Type: text/html` / `application/xhtml`, **якщо** ресурс не класифікований як Media/JS/CSS (щоб 404 HTML-сторінка на `img[src]` не дублювалась у HTML);
   - `Усі` — усі записи в `scanResults`.
-- **Джерело** — `external: true/false` (або `hostname` URL).
-- Стан фільтрів — `activeContentFilter`, `activeSourceFilter` у пам’яті; не скидається під час сканування.
+- **Джерело** — внутрішні (той самий hostname скану) / піддомени (той самий реєстрований домен, інший hostname) / зовнішні (інший реєстрований домен). Прапорець `external` у `spider-result` лишається «не той hostname» (піддомени не обходяться), але UI класифікує за hostname, а не за цим прапорцем.
+- **Домен** — `#domainFilter`, список hostname з результатів (групи Скан / Піддомени / Зовнішні); можна звузити таблицю й вихідні посилання до одного хоста.
+- Стан фільтрів — `activeContentFilter`, `activeSourceFilter`, `activeDomainFilter` у пам’яті; не скидається під час сканування.
+- Зміна фільтрів **не** перераховує таблицю в тому ж `change`-події: coalescing ~32 мс (idle) / 250 мс (скан). Списки статусів і доменів оновлюються лише коли змінюються результати (кожні 100 сторінок під час скану, кінець скану, дамп), а не при кожному виборі в селекті. Hostname кешується на рядку (`hostname`), щоб не парсити URL на кожен фільтр.
 - Інші фільтри: статус HTTP, індексація, **проблеми** (`empty-src` / порожні зображення, `ext-a-follow` / off-site `<a>` без `nofollow` / `sponsored` / `ugc`, `h1-multiple`, `dup-h1` / `dup-title` / `dup-description`). Off-site = інший реєстрований домен (не піддомен скану, не `www`). `<link>` (preload, шрифти, profile) не рахуються. `rel=noopener` / `noreferrer` follow не блокують. Якщо обрано `ext-a-follow`, вкладка «Вихідні посилання» показує лише такі `<a>`. Окремих селектів H1 і дублікатів більше немає.
 
-Колонки **Внутр.** / **Зовн.** — кількість посилань **з** обраної сторінки (через `referrersMap`: хто посилається **на** URL з цієї сторінки як джерела).
+Колонки **Внутр.** / **Зовн.** — кількість посилань **з** обраної сторінки (через `referrersMap`: хто посилається **на** URL з цієї сторінки як джерела). **Зовн.** — лише off-site; піддомени рахуються окремо (`subdomainCount` у деталях і CSV).
 
-**Вихідні / вхідні посилання (панель деталей):** `rel`, `tag`, `kind` зберігаються на ребрі referrer (сторінка-джерело → цільовий URL), а не лише в stub цілі. Таблиця без колонки «Тип»; усі колонки сортуються (`linkTableSortState`). Вихідні додатково звужуються фільтрами **Джерело**, **Тип** і **Проблеми → Зовнішні a без nofollow**. Клік по рядку (або copy/open) підсвічує його як focused (`detail-link-focused`, як обраний рядок у головній таблиці); позиція зберігається для цієї сторінки й вкладки. Стрілки ↑/↓ переміщують виділення, після сортування/перемальовування focused рядок лишається видимим.
+**Вихідні / вхідні посилання (панель деталей):** `rel`, `tag`, `kind` зберігаються на ребрі referrer (сторінка-джерело → цільовий URL), а не лише в stub цілі. Таблиця без колонки «Тип»; усі колонки сортуються (`linkTableSortState`). Вихідні додатково звужуються фільтрами **Джерело**, **Домен**, **Тип** і **Проблеми → Зовнішні a без nofollow**. Піддомени мають бейдж «піддом.», зовнішні — «зовн.». Клік по рядку (або copy/open) підсвічує його як focused (`detail-link-focused`, як обраний рядок у головній таблиці); позиція зберігається для цієї сторінки й вкладки. Стрілки ↑/↓ переміщують виділення, після сортування/перемальовування focused рядок лишається видимим.
 
 ## CSV export (renderer.js)
 
 - BOM `\uFEFF` для Excel/кирилиці.
-- **Основна таблиця:** експорт відфільтрованих сторінок; колонки включають Internal/External Links (скорочений preview у комірках).
-- Файл основного експорту: `spider_<hostname>-<content>-<source>[-status-…][-idx-…][-empty-src|ext-a-follow|h1-multiple|dup-…][-q-…]_YYYY-MM-DD-HH-MM-SS.csv`. `content` / `source` — вкладка типу та фільтр джерела (навіть якщо `all`); статус, індексація, проблема й пошук додаються лише коли не дефолтні.
+- **Основна таблиця:** експорт відфільтрованих сторінок; колонки включають Internal/Subdomain/External Links (скорочений preview у комірках).
+- Файл основного експорту: `spider_<hostname>-<content>-<source>[-host-<domain>][-status-…][-idx-…][-empty-src|ext-a-follow|h1-multiple|dup-…][-q-…]_YYYY-MM-DD-HH-MM-SS.csv`. `content` / `source` — вкладка типу та фільтр джерела (навіть якщо `all`); `host-<domain>` — лише якщо обрано конкретний домен; статус, індексація, проблема й пошук додаються лише коли не дефолтні.
 - **Вкладки «Вхідні» / «Вихідні посилання»** (панель деталей): кнопка «Експорт CSV» — повний список посилань окремим файлом (без обмеження довжини комірки). Колонки: Source URL, Tag, rel, Follow, Anchor Text (+ External для вихідних), **Target URL останньою**. Для вхідних Source URL — реферер, Target URL — обрана сторінка; для вихідних навпаки. Сортування як у таблиці вкладки.
-- Ім'я файлу посилань: `<slug>-<rowIndex>-in|out-<contentType>-<sourceFilter>-YYYY-MM-DD-HH-MM-SS.csv`. `slug` — останній сегмент шляху URL (або hostname), **до 10 символів**; `rowIndex` — 1-based номер рядка в поточній відфільтрованій таблиці (колонка `#`); `contentType` — вкладка Усі/HTML/JS/CSS/Media; `sourceFilter` — Усі/внутрішні/зовнішні. Час — старт скану.
+- Ім'я файлу посилань: `<slug>-<rowIndex>-in|out-<contentType>-<sourceFilter>[-<domain>]-YYYY-MM-DD-HH-MM-SS.csv`. `slug` — останній сегмент шляху URL (або hostname), **до 10 символів**; `rowIndex` — 1-based номер рядка в поточній відфільтрованій таблиці (колонка `#`); `contentType` — вкладка Усі/HTML/JS/CSS/Media; `sourceFilter` — Усі/внутрішні/піддомени/зовнішні. Час — старт скану.
 - Дамп: `spider_<hostname>_YYYY-MM-DDTHH-MM-SS.spider.json` — результати + `settings` (усі опції спайдера і `sitemapUrlsText`).
 
 ## Збір посилань (link-collector.js)

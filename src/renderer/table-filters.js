@@ -27,7 +27,6 @@ function createTableFilters(deps) {
         elements,
         onFilterChange,
         onPersistWorkspace,
-        isExternalLink,
         compareRowsImpl,
         getRowMetrics,
         invalidateDuplicateCounts,
@@ -39,6 +38,7 @@ function createTableFilters(deps) {
         statusFilter,
         indexingFilter,
         sourceFilter,
+        domainFilter,
         issueFilter,
         tableSearch,
     } = elements;
@@ -48,8 +48,10 @@ function createTableFilters(deps) {
     let activeIndexingFilter = 'all';
     let activeIssueFilter = 'all';
     let activeSourceFilter = 'all';
+    let activeDomainFilter = 'all';
     let activeSearchQuery = '';
     let knownStatusCodes = new Set();
+    let knownDomainHosts = new Set();
     let searchRefreshTimer = null;
     const SEARCH_REFRESH_DELAY_MS = 200;
     let displayedResultsCache = null;
@@ -69,6 +71,7 @@ function createTableFilters(deps) {
             activeIndexingFilter,
             activeIssueFilter,
             activeSourceFilter,
+            activeDomainFilter,
             activeSearchQuery,
             sortState.column || '',
             sortState.direction || '',
@@ -84,6 +87,17 @@ function createTableFilters(deps) {
         activeSourceFilter = normalizeSourceFilter(value || 'all');
         if (sourceFilter) {
             sourceFilter.value = activeSourceFilter;
+        }
+    }
+
+    function setActiveDomainFilter(value) {
+        activeDomainFilter = normalizeDomainFilter(value || 'all');
+        if (domainFilter) {
+            const hasOption = [...domainFilter.options].some((opt) => opt.value === activeDomainFilter);
+            domainFilter.value = hasOption ? activeDomainFilter : 'all';
+            if (domainFilter.value !== activeDomainFilter) {
+                activeDomainFilter = 'all';
+            }
         }
     }
 
@@ -104,6 +118,10 @@ function createTableFilters(deps) {
         syncContentTypeTabsUi();
         if (sourceFilter && sourceFilter.value !== activeSourceFilter) {
             sourceFilter.value = activeSourceFilter;
+        }
+        if (domainFilter && domainFilter.value !== activeDomainFilter) {
+            const hasOption = [...domainFilter.options].some((opt) => opt.value === activeDomainFilter);
+            domainFilter.value = hasOption ? activeDomainFilter : 'all';
         }
         if (issueFilter && issueFilter.value !== activeIssueFilter) {
             issueFilter.value = activeIssueFilter;
@@ -132,6 +150,7 @@ function createTableFilters(deps) {
         return entries.filter((data) => passesTableFiltersImpl(data, {
             activeSearchQuery,
             activeSourceFilter,
+            activeDomainFilter,
             activeStatusFilter,
             activeIndexingFilter,
             activeIssueFilter,
@@ -184,6 +203,7 @@ function createTableFilters(deps) {
         const sortState = getSortState();
         const hasNoActiveFilters = activeContentFilter === 'all'
             && activeSourceFilter === 'all'
+            && activeDomainFilter === 'all'
             && activeStatusFilter === 'all'
             && activeIndexingFilter === 'all'
             && activeIssueFilter === 'all'
@@ -245,6 +265,7 @@ function createTableFilters(deps) {
     function areDefaultTableFiltersActive() {
         return activeContentFilter === 'all'
             && activeSourceFilter === 'all'
+            && activeDomainFilter === 'all'
             && activeStatusFilter === 'all'
             && activeIndexingFilter === 'all'
             && activeIssueFilter === 'all'
@@ -254,29 +275,39 @@ function createTableFilters(deps) {
 
     function hasActiveLinkFilters() {
         return activeSourceFilter !== 'all'
+            || activeDomainFilter !== 'all'
             || activeContentFilter !== 'all'
             || activeIssueFilter === 'ext-a-follow';
     }
 
     function getFilteredOutgoingLinks(pageUrl, getOutgoingLinksFrom) {
         let links = getOutgoingLinksFrom(pageUrl);
-        if (activeSourceFilter === 'external') {
-            links = links.filter((link) => isExternalLink(link));
-        } else if (activeSourceFilter === 'internal') {
-            links = links.filter((link) => !isExternalLink(link));
+        const scanHostname = typeof getScanHostname === 'function' ? getScanHostname() : '';
+        if (activeSourceFilter !== 'all') {
+            links = links.filter((link) => getLinkSourceKind(link, scanHostname) === activeSourceFilter);
+        }
+        if (activeDomainFilter !== 'all') {
+            links = links.filter((link) => passesDomainFilterForRowImpl(link, activeDomainFilter));
         }
         if (activeContentFilter !== 'all') {
             links = links.filter((data) => matchesResourceTypeFilterImpl(data, activeContentFilter));
         }
         if (activeIssueFilter === 'ext-a-follow') {
-            const scanHostname = typeof getScanHostname === 'function' ? getScanHostname() : '';
             links = links.filter((link) => isOffSiteFollowAnchor(link, scanHostname));
         }
         return links;
     }
 
+    function isSelectFocused(el) {
+        return typeof document !== 'undefined' && document.activeElement === el;
+    }
+
     function updateStatusFilterOptions({ force = false } = {}) {
+        updateDomainFilterOptions({ force });
         if (!statusFilter) {
+            return;
+        }
+        if (!force && isSelectFocused(statusFilter)) {
             return;
         }
 
@@ -340,14 +371,70 @@ function createTableFilters(deps) {
         statusFilter.value = activeStatusFilter;
     }
 
+    function appendDomainFilterGroup(label, hosts) {
+        if (!domainFilter || !hosts.length) {
+            return;
+        }
+        const group = document.createElement('optgroup');
+        group.label = label;
+        for (const host of hosts) {
+            const el = document.createElement('option');
+            el.value = host;
+            el.textContent = host;
+            group.appendChild(el);
+        }
+        domainFilter.appendChild(group);
+    }
+
+    function updateDomainFilterOptions({ force = false } = {}) {
+        if (!domainFilter) {
+            return;
+        }
+        if (!force && typeof document !== 'undefined' && document.activeElement === domainFilter) {
+            return;
+        }
+
+        const grouped = collectScanHostnames(scanStore.scanResults.values(), getScanHostname());
+        const nextHosts = new Set([
+            ...grouped.internal,
+            ...grouped.subdomains,
+            ...grouped.external,
+        ]);
+        const hostsUnchanged = !force
+            && nextHosts.size === knownDomainHosts.size
+            && [...nextHosts].every((host) => knownDomainHosts.has(host));
+        if (hostsUnchanged) {
+            return;
+        }
+        knownDomainHosts = nextHosts;
+
+        domainFilter.innerHTML = '';
+        const allOption = document.createElement('option');
+        allOption.value = 'all';
+        allOption.textContent = 'Усі';
+        domainFilter.appendChild(allOption);
+
+        appendDomainFilterGroup('Скан', grouped.internal);
+        appendDomainFilterGroup('Піддомени', grouped.subdomains);
+        appendDomainFilterGroup('Зовнішні', grouped.external);
+
+        const hasCurrent = [...domainFilter.options].some((opt) => opt.value === activeDomainFilter);
+        if (!hasCurrent) {
+            activeDomainFilter = 'all';
+        }
+        domainFilter.value = activeDomainFilter;
+    }
+
     function resetTableFilters() {
         activeStatusFilter = 'all';
         activeIndexingFilter = 'all';
         activeIssueFilter = 'all';
         activeSearchQuery = '';
         setActiveSourceFilter('all');
+        setActiveDomainFilter('all');
         setActiveContentFilter('all');
         knownStatusCodes = new Set();
+        knownDomainHosts = new Set();
         invalidateDisplayedResultsCache();
         invalidateDuplicateCounts();
         if (tableSearch) {
@@ -362,7 +449,11 @@ function createTableFilters(deps) {
         if (issueFilter) {
             issueFilter.value = 'all';
         }
+        if (domainFilter) {
+            domainFilter.value = 'all';
+        }
         updateStatusFilterOptions({ force: true });
+        updateDomainFilterOptions({ force: true });
     }
 
     function applyFilterState(filters) {
@@ -386,6 +477,8 @@ function createTableFilters(deps) {
             issueFilter.value = activeIssueFilter;
         }
         updateStatusFilterOptions({ force: true });
+        updateDomainFilterOptions({ force: true });
+        setActiveDomainFilter(filters.domain || 'all');
     }
 
     function getFilterSnapshot() {
@@ -395,6 +488,7 @@ function createTableFilters(deps) {
             indexing: activeIndexingFilter,
             issue: activeIssueFilter,
             source: activeSourceFilter,
+            domain: activeDomainFilter,
             search: activeSearchQuery,
         };
     }
@@ -406,11 +500,16 @@ function createTableFilters(deps) {
         searchRefreshTimer = setTimeout(() => {
             searchRefreshTimer = null;
             invalidateDisplayedResultsCache();
-            onFilterChange({ immediate: true });
+            onFilterChange();
             if (typeof onPersistWorkspace === 'function') {
                 onPersistWorkspace();
             }
         }, SEARCH_REFRESH_DELAY_MS);
+    }
+
+    function scheduleFilterRefresh() {
+        invalidateDisplayedResultsCache();
+        onFilterChange();
     }
 
     function onTableSortChange(col) {
@@ -423,9 +522,8 @@ function createTableFilters(deps) {
         } else {
             setSortState({ column: col, direction: 'asc' });
         }
-        invalidateDisplayedResultsCache();
         deps.onTableHeadRefresh();
-        onFilterChange({ immediate: true });
+        scheduleFilterRefresh();
     }
 
     function onContentTypeTabChange(nextValue) {
@@ -433,11 +531,10 @@ function createTableFilters(deps) {
             return;
         }
         setActiveContentFilter(nextValue);
-        invalidateDisplayedResultsCache();
         if (typeof sanitizeSortState === 'function') {
             sanitizeSortState();
         }
-        onFilterChange({ immediate: true });
+        scheduleFilterRefresh();
         if (typeof onPersistWorkspace === 'function') {
             onPersistWorkspace();
         }
@@ -457,24 +554,31 @@ function createTableFilters(deps) {
         if (statusFilter) {
             statusFilter.addEventListener('change', () => {
                 activeStatusFilter = statusFilter.value;
-                invalidateDisplayedResultsCache();
-                onFilterChange({ immediate: true });
+                scheduleFilterRefresh();
             });
         }
 
         if (indexingFilter) {
             indexingFilter.addEventListener('change', () => {
                 activeIndexingFilter = indexingFilter.value;
-                invalidateDisplayedResultsCache();
-                onFilterChange({ immediate: true });
+                scheduleFilterRefresh();
             });
         }
 
         if (sourceFilter) {
             sourceFilter.addEventListener('change', () => {
                 setActiveSourceFilter(sourceFilter.value);
-                invalidateDisplayedResultsCache();
-                onFilterChange({ immediate: true });
+                scheduleFilterRefresh();
+                if (typeof onPersistWorkspace === 'function') {
+                    onPersistWorkspace();
+                }
+            });
+        }
+
+        if (domainFilter) {
+            domainFilter.addEventListener('change', () => {
+                setActiveDomainFilter(domainFilter.value);
+                scheduleFilterRefresh();
                 if (typeof onPersistWorkspace === 'function') {
                     onPersistWorkspace();
                 }
@@ -485,8 +589,7 @@ function createTableFilters(deps) {
             issueFilter.addEventListener('change', () => {
                 activeIssueFilter = normalizeIssueFilter(issueFilter.value);
                 issueFilter.value = activeIssueFilter;
-                invalidateDisplayedResultsCache();
-                onFilterChange({ immediate: true });
+                scheduleFilterRefresh();
                 if (typeof onPersistWorkspace === 'function') {
                     onPersistWorkspace();
                 }
@@ -502,8 +605,7 @@ function createTableFilters(deps) {
                 if (event.key === 'Escape') {
                     tableSearch.value = '';
                     activeSearchQuery = '';
-                    invalidateDisplayedResultsCache();
-                    onFilterChange({ immediate: true });
+                    scheduleFilterRefresh();
                     if (typeof onPersistWorkspace === 'function') {
                         onPersistWorkspace();
                     }

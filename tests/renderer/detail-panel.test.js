@@ -140,4 +140,33 @@ describe('detail panel focused link', () => {
         assert.match(detailContent.innerHTML, /detail-link-external[^>]*data-url="https:\/\/other.test\/ext"|data-url="https:\/\/other.test\/ext"[^>]*detail-link-external/);
         assert.equal(focusedRowUrl(detailContent.innerHTML), null);
     });
+
+    it('marks subdomain outlinks separately from external', () => {
+        const api = loadDetailPanel();
+        const detailContent = { innerHTML: '', addEventListener() {}, querySelectorAll: () => [] };
+        const panel = api.createDetailPanel({
+            detailContent,
+            getSelectedUrl: () => 'https://example.com/page',
+            getRowData: () => ({ url: 'https://example.com/page', status: 200 }),
+            getActiveTab: () => 'outlinks',
+            setActiveTab() {},
+            getReferrersForUrl: () => [],
+            getOutgoingLinksFrom: () => [],
+            getFilteredOutgoingLinks: () => [
+                { url: 'https://app.example.com/login', text: 'app', tag: 'a', external: true },
+                { url: 'https://other.test/ext', text: 'ext', tag: 'a', external: true },
+            ],
+            urlCellHtml: (url) => `<span>${url}</span>`,
+            getLinkTableSortState: () => ({ column: 'url', direction: 'asc' }),
+            setLinkTableSortState() {},
+            getDetailHelpers: () => ({}),
+            hasActiveLinkFilters: () => false,
+            getScanHostname: () => 'example.com',
+        });
+        panel.renderDetailPanel();
+        assert.match(detailContent.innerHTML, /detail-link-subdomain/);
+        assert.match(detailContent.innerHTML, /піддом\./);
+        assert.match(detailContent.innerHTML, /detail-link-external/);
+        assert.match(detailContent.innerHTML, /зовн\./);
+    });
 });

@@ -31,18 +31,100 @@ const OUTLINK_FONT_EXTENSIONS = new Set(['woff', 'woff2', 'ttf', 'eot', 'otf']);
 const OUTLINK_PLUGIN_EXTENSIONS = new Set(['swf', 'flv']);
 const OUTLINK_HTML_EXTENSIONS = new Set(['html', 'htm', 'php', 'asp', 'aspx', 'jsp', 'shtml']);
 
+function getLinkSourceKind(entry, scanHostname = '') {
+    const url = entry?.url || entry?.href || '';
+    if (isEmptyImageUrl(url) || entry?.emptySrc === true) {
+        return 'internal';
+    }
+    const host = getLinkHostname(entry);
+    const scanHost = String(scanHostname || '').toLowerCase().replace(/\.$/, '');
+    if (host && scanHost) {
+        if (host === scanHost) {
+            return 'internal';
+        }
+        if (isSameSiteHostname(host, scanHost)) {
+            return 'subdomain';
+        }
+        return 'external';
+    }
+    if (typeof entry?.external === 'boolean') {
+        return entry.external ? 'external' : 'internal';
+    }
+    return 'internal';
+}
+
+function formatLinkSourceKindLabel(kind) {
+    if (kind === 'subdomain') {
+        return 'Піддомен';
+    }
+    if (kind === 'external') {
+        return 'Зовнішнє';
+    }
+    return 'Внутрішнє';
+}
+
+function getLinkHostname(entry) {
+    if (entry && typeof entry.hostname === 'string') {
+        return entry.hostname;
+    }
+    return getHostnameFromUrl(entry?.url || entry?.href || '');
+}
+
+function collectScanHostnames(entries, scanHostname = '') {
+    const hosts = new Set();
+    for (const entry of entries || []) {
+        const host = getLinkHostname(entry);
+        if (host) {
+            hosts.add(host);
+        }
+    }
+    const scanHost = String(scanHostname || '').toLowerCase().replace(/\.$/, '');
+    const internal = [];
+    const subdomains = [];
+    const external = [];
+    for (const host of [...hosts].sort((a, b) => a.localeCompare(b))) {
+        if (scanHost && host === scanHost) {
+            internal.push(host);
+        } else if (scanHost && isSameSiteHostname(host, scanHost)) {
+            subdomains.push(host);
+        } else {
+            external.push(host);
+        }
+    }
+    return { internal, subdomains, external };
+}
+
 function passesSourceFilterForRowImpl(data, activeSourceFilter = 'all', scanHostname = '') {
     if (activeSourceFilter === 'all') {
         return true;
     }
-    const external = isExternalLinkImpl(data, scanHostname);
+    const kind = getLinkSourceKind(data, scanHostname);
     if (activeSourceFilter === 'external') {
-        return external;
+        return kind === 'external';
     }
     if (activeSourceFilter === 'internal') {
-        return !external;
+        return kind === 'internal';
+    }
+    if (activeSourceFilter === 'subdomain') {
+        return kind === 'subdomain';
     }
     return true;
+}
+
+function normalizeDomainFilter(value) {
+    const host = String(value || '').trim().toLowerCase().replace(/\.$/, '');
+    if (!host || host === 'all') {
+        return 'all';
+    }
+    return host;
+}
+
+function passesDomainFilterForRowImpl(data, activeDomainFilter = 'all') {
+    const domain = normalizeDomainFilter(activeDomainFilter);
+    if (domain === 'all') {
+        return true;
+    }
+    return getLinkHostname(data) === domain;
 }
 
 function escapeHtml(str) {
@@ -727,6 +809,9 @@ function normalizeSourceFilter(value) {
     if (value === 'internal' || value === 'links-internal' || value === 'no-external') {
         return 'internal';
     }
+    if (value === 'subdomain' || value === 'subdomains' || value === 'links-subdomain') {
+        return 'subdomain';
+    }
     if (value === 'all' || value === 'pages' || value === 'links-all' || value === 'links') {
         return 'all';
     }
@@ -806,9 +891,11 @@ function normalizeLinkEntryImpl(data, scanHostname = '') {
             kind = inferred === 'images' ? 'media' : inferred;
         }
     }
+    const hostname = isEmptyImg ? '' : getHostnameFromUrl(url);
     const entry = {
         ...data,
         url,
+        hostname,
         external,
         kind,
         tag,
@@ -822,10 +909,11 @@ function normalizeLinkEntryImpl(data, scanHostname = '') {
 }
 
 function isExternalLinkImpl(entry, scanHostname = '') {
-    if (typeof entry.external === 'boolean') {
-        return entry.external;
-    }
-    return isExternalUrlImpl(entry.url || entry.href || '', scanHostname);
+    return getLinkSourceKind(entry, scanHostname) === 'external';
+}
+
+function isSubdomainLinkImpl(entry, scanHostname = '') {
+    return getLinkSourceKind(entry, scanHostname) === 'subdomain';
 }
 
 function normalizeLinkKind(kind) {
@@ -1148,8 +1236,8 @@ function titleCellBadge(data, dupCounts) {
     return duplicateCountBadge(getTextDuplicateCount(pageTitle, dupCounts.title));
 }
 
-function isExternalOutlink(entry) {
-    return isExternalLinkImpl(entry);
+function isExternalOutlink(entry, scanHostname = '') {
+    return getLinkSourceKind(entry, scanHostname) === 'external';
 }
 
 function getRowSearchTextImpl(data, getReferrersForUrl = () => []) {
@@ -1449,6 +1537,7 @@ function passesTableFiltersImpl(data, ctx) {
     const {
         activeSearchQuery = '',
         activeSourceFilter = 'all',
+        activeDomainFilter = 'all',
         activeStatusFilter = 'all',
         activeIndexingFilter = 'all',
         activeIssueFilter = 'all',
@@ -1462,6 +1551,9 @@ function passesTableFiltersImpl(data, ctx) {
         return false;
     }
     if (!passesSourceFilterForRowImpl(data, activeSourceFilter, scanHostname)) {
+        return false;
+    }
+    if (!passesDomainFilterForRowImpl(data, activeDomainFilter)) {
         return false;
     }
     if (!matchesStatusFilter(data.status, activeStatusFilter)) {
@@ -1575,14 +1667,27 @@ function getRowMetricsImpl(data, helpers = {}) {
     const getReferrersForUrl = helpers.getReferrersForUrl || (() => []);
     const getOutgoingLinksFrom = helpers.getOutgoingLinksFrom || (() => []);
     const isDiscoveredOnlyFn = helpers.isDiscoveredOnly || isDiscoveredOnly;
-    const isExternalLinkFn = helpers.isExternalLink || ((entry) => isExternalLinkImpl(entry, helpers.scanHostname || ''));
     const scanHostname = helpers.scanHostname || '';
     const outgoing = isDiscoveredOnlyFn(data) ? [] : getOutgoingLinksFrom(data.url);
+    let internalCount = 0;
+    let subdomainCount = 0;
+    let externalCount = 0;
+    for (const link of outgoing) {
+        const kind = getLinkSourceKind(link, scanHostname);
+        if (kind === 'external') {
+            externalCount += 1;
+        } else if (kind === 'subdomain') {
+            subdomainCount += 1;
+        } else {
+            internalCount += 1;
+        }
+    }
     return {
         inCount: getReferrersForUrl(data.url).length,
         linkCount: outgoing.length,
-        internalCount: outgoing.filter((link) => !isExternalLinkFn(link, scanHostname)).length,
-        externalCount: outgoing.filter((link) => isExternalLinkFn(link, scanHostname)).length,
+        internalCount,
+        subdomainCount,
+        externalCount,
     };
 }
 
@@ -1680,6 +1785,11 @@ function compareRowsImpl(a, b, sortState = { column: null, direction: 'asc' }, i
             va = ma.externalCount;
             vb = mb.externalCount;
             break;
+        case 'subdomainCount':
+        case 'subdomainLinks':
+            va = ma.subdomainCount;
+            vb = mb.subdomainCount;
+            break;
         case 'ogTitle':
             va = (a.ogTitle || '').toLowerCase();
             vb = (b.ogTitle || '').toLowerCase();
@@ -1769,6 +1879,12 @@ const exported = {
     rowHasBrokenImage,
     getRegistrableDomain,
     isSameSiteHostname,
+    getLinkSourceKind,
+    formatLinkSourceKindLabel,
+    getLinkHostname,
+    collectScanHostnames,
+    normalizeDomainFilter,
+    passesDomainFilterForRowImpl,
     isOffSiteUrl,
     isOffSiteLink,
     isFollowAllowedAnchor,
@@ -1845,6 +1961,7 @@ const exported = {
     linkTableSortIndicator,
     normalizeLinkEntryImpl,
     isExternalLinkImpl,
+    isSubdomainLinkImpl,
     buildOutgoingLink,
     getRowMetricsImpl,
     matchesResourceTypeFilterImpl,

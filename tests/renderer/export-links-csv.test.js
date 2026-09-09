@@ -44,6 +44,15 @@ describe('export-csv main table', () => {
             fileName,
             'spider_spitche.com-media-internal-status-404-idx-blocked-dup-title-q-logo_2026-06-17-16-30-45.csv'
         );
+        const withDomain = api.buildCsvFileName(
+            'https://spitche.com/',
+            { content: 'all', source: 'subdomain', domain: 'cdn.spitche.com' },
+            stamp
+        );
+        assert.equal(
+            withDomain,
+            'spider_spitche.com-all-subdomain-host-cdn.spitche.com_2026-06-17-16-30-45.csv'
+        );
     });
 
     it('formatTableFiltersFileSlug defaults to all-all', () => {

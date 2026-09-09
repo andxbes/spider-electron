@@ -192,6 +192,14 @@
     background-color: var(--color-zinc-50);
   }
 
+  .detail-links-table tbody tr.detail-link-subdomain {
+    background-color: color-mix(in oklab, var(--color-sky-50) 50%, transparent);
+  }
+
+  .detail-links-table tbody tr.detail-link-subdomain:hover {
+    background-color: var(--color-zinc-50);
+  }
+
   .detail-links-table tbody tr.detail-link-focused {
     background-color: var(--color-blue-50);
   }

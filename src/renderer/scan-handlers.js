@@ -75,7 +75,7 @@ function createScanHandlers(deps) {
                 }
                 return;
             }
-            requestRefreshTable({ immediate: true });
+            requestRefreshTable({ immediate: true, refreshFilterOptions: true });
             deps.scheduleWorkspacePersist();
             if (getSelectedUrl()) {
                 renderDetailPanel();
@@ -91,7 +91,7 @@ function createScanHandlers(deps) {
             }
             return;
         }
-        requestRefreshTable({ immediate: true });
+            requestRefreshTable({ immediate: true, refreshFilterOptions: true });
         deps.scheduleWorkspacePersist();
         if (getSelectedUrl()) {
             renderDetailPanel();
@@ -225,7 +225,7 @@ function createScanHandlers(deps) {
             });
 
             await yieldThen(() => {
-                refreshTable();
+                refreshTable({ refreshFilterOptions: true });
             });
 
             if (resultCount <= WORKSPACE_PERSIST_MAX) {

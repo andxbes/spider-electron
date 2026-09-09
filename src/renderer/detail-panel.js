@@ -115,10 +115,12 @@ function createDetailPanel(deps) {
                 (link) => {
                     const rowUrl = getLinkRowUrl(link);
                     const focused = Boolean(rowUrl) && rowUrl === focusedUrl;
-                    const external = isExternalOutlink(link);
-                    const typeBadge = external
+                    const sourceKind = getLinkSourceKind(link, typeof deps.getScanHostname === 'function' ? deps.getScanHostname() : '');
+                    const typeBadge = sourceKind === 'external'
                         ? '<span class="inline-block ml-1 px-1 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-800 whitespace-nowrap" title="Зовнішнє посилання — не обходиться">зовн.</span>'
-                        : '';
+                        : sourceKind === 'subdomain'
+                            ? '<span class="inline-block ml-1 px-1 py-0.5 rounded text-[10px] font-semibold bg-sky-100 text-sky-800 whitespace-nowrap" title="Піддомен сканованого сайту">піддом.</span>'
+                            : '';
                     const tag = getLinkTag(link);
                     const relInfo = getLinkRelInfo(link);
                     const relCell = relInfo.applicable
@@ -128,7 +130,8 @@ function createDetailPanel(deps) {
                         : '<span class="text-zinc-400 italic">—</span>';
                     const rowClass = [
                         'border-b border-zinc-100',
-                        external ? 'detail-link-external' : '',
+                        sourceKind === 'external' ? 'detail-link-external' : '',
+                        sourceKind === 'subdomain' ? 'detail-link-subdomain' : '',
                         focused ? 'detail-link-focused' : '',
                     ].filter(Boolean).join(' ');
                     return `

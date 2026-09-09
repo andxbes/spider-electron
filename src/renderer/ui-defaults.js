@@ -116,8 +116,8 @@ function buildDefaultTableColumns(ctx) {
             thClass: 'sortable-th p-2 font-semibold cursor-pointer select-none hover:bg-zinc-200 text-center',
             thLabel: 'Links',
             renderCell: (data) => {
-                const { linkCount, internalCount, externalCount } = getRowMetrics(data);
-                const linksTitle = `Всього: ${linkCount}, внутрішніх: ${internalCount}, зовнішніх: ${externalCount}`;
+                const { linkCount, internalCount, subdomainCount, externalCount } = getRowMetrics(data);
+                const linksTitle = `Всього: ${linkCount}, внутрішніх: ${internalCount}, піддоменів: ${subdomainCount}, зовнішніх: ${externalCount}`;
                 return `<td class="p-2 text-center" title="${escapeHtml(linksTitle)}">${linkCount}</td>`;
             },
         },
@@ -169,7 +169,8 @@ function buildDefaultDetailRows(data, ctx) {
         getH1Count,
         getH1Texts,
         isDiscoveredOnly,
-        isExternalLink,
+        getLinkSourceKind,
+        formatLinkSourceKindLabel,
         formatLinkKindLabel,
         getResourceKind,
         getLinkTag,
@@ -181,7 +182,7 @@ function buildDefaultDetailRows(data, ctx) {
             ['Тип', escapeHtml(formatLinkKindLabel(getResourceKind(data)))],
             ['Тег', escapeHtml(getLinkTag(data))],
             ['Текст', data.text ? escapeHtml(data.text) : '<span class="text-zinc-400 italic">—</span>'],
-            ['Джерело', isExternalLink(data) ? 'Зовнішнє' : 'Внутрішнє'],
+            ['Джерело', escapeHtml(formatLinkSourceKindLabel(getLinkSourceKind(data)))],
             ['Завантажено', '<span class="text-zinc-500 italic">ні (лише знайдено)</span>'],
             ['Вхідних посилань', String(getReferrersForUrl(data.url).length)],
         ];
@@ -189,8 +190,7 @@ function buildDefaultDetailRows(data, ctx) {
 
     const h1List = (data.headings || []).filter((h) => h.level === 1);
     const h2List = (data.headings || []).filter((h) => h.level === 2);
-    const { inCount, linkCount, externalCount } = getRowMetrics(data);
-    const internalCount = linkCount - externalCount;
+    const { inCount, linkCount, internalCount, subdomainCount, externalCount } = getRowMetrics(data);
 
     const rows = [
         ['Address', urlCellHtml(data.url)],
@@ -222,6 +222,7 @@ function buildDefaultDetailRows(data, ctx) {
         ],
         ['Вихідних посилань', String(linkCount)],
         ['Зовнішніх посилань', externalCount > 0 ? String(externalCount) : '<span class="text-zinc-400 italic">0</span>'],
+        ['Піддоменних посилань', subdomainCount > 0 ? String(subdomainCount) : '<span class="text-zinc-400 italic">0</span>'],
         ['Внутрішніх посилань', String(internalCount)],
         ['Вхідних посилань', String(inCount)],
     ];
@@ -300,6 +301,11 @@ function buildDefaultExportColumns(ctx) {
             id: 'externalLinks',
             header: 'External Links',
             value: (data) => `"${getRowMetrics(data).externalCount}"`,
+        },
+        {
+            id: 'subdomainLinks',
+            header: 'Subdomain Links',
+            value: (data) => `"${getRowMetrics(data).subdomainCount}"`,
         },
         { id: 'redirectUrl', header: 'Redirect URL', value: (data) => `"${(data.redirectUrl || '').replace(/"/g, '""')}"` },
         {
