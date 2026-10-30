@@ -589,6 +589,16 @@ function createTableFilters(deps) {
             issueFilter.addEventListener('change', () => {
                 activeIssueFilter = normalizeIssueFilter(issueFilter.value);
                 issueFilter.value = activeIssueFilter;
+                // Проблемні URL — не HTML-сторінки; інакше на вкладці HTML список порожній.
+                if (
+                    (activeIssueFilter === 'ext-a-follow' || activeIssueFilter === 'empty-src')
+                    && activeContentFilter !== 'all'
+                ) {
+                    setActiveContentFilter('all');
+                }
+                if (activeIssueFilter === 'ext-a-follow' && activeSourceFilter === 'internal') {
+                    setActiveSourceFilter('all');
+                }
                 scheduleFilterRefresh();
                 if (typeof onPersistWorkspace === 'function') {
                     onPersistWorkspace();

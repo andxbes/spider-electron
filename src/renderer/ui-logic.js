@@ -387,7 +387,7 @@ function matchesIssueFilterImpl(data, issue, helpers = {}) {
         return true;
     }
     if (value === 'empty-src') {
-        return rowHasBrokenImage(data, helpers.getOutgoingLinksFrom || (() => []));
+        return rowHasBrokenImage(data);
     }
     if (value === 'ext-a-follow') {
         return rowHasExternalFollowAnchor(data, helpers);
@@ -441,29 +441,20 @@ function isImageLikeResource(data) {
     return String(data.contentType || '').toLowerCase().startsWith('image/');
 }
 
-function rowHasEmptyImgSrc(data, getOutgoingLinksFrom = () => []) {
+function rowHasEmptyImgSrc(data) {
     if (!data) {
         return false;
     }
-    if (data.emptySrc === true || isEmptyImageUrl(data.url)) {
-        return true;
-    }
-    if (Number(data.emptyImgCount) > 0) {
-        return true;
-    }
-    const outgoing = getOutgoingLinksFrom(data.url) || [];
-    return outgoing.some((link) => link.emptySrc === true || isEmptyImageUrl(link.url));
+    // Лише сам проблемний ресурс (sentinel / emptySrc), не сторінки з emptyImgCount.
+    return data.emptySrc === true || isEmptyImageUrl(data.url);
 }
 
-function rowHasBrokenImage(data, getOutgoingLinksFrom = () => []) {
-    if (rowHasEmptyImgSrc(data, getOutgoingLinksFrom)) {
+function rowHasBrokenImage(data) {
+    if (rowHasEmptyImgSrc(data)) {
         return true;
     }
-    if (isImageLikeResource(data) && isNotFoundStatus(data.status)) {
-        return true;
-    }
-    const outgoing = getOutgoingLinksFrom(data.url) || [];
-    return outgoing.some((link) => isImageLikeResource(link) && isNotFoundStatus(link.status));
+    // Лише сам 404-image рядок, не HTML-сторінки з яких він веде.
+    return isImageLikeResource(data) && isNotFoundStatus(data.status);
 }
 
 const MULTI_PART_PUBLIC_SUFFIXES = new Set([
@@ -549,27 +540,26 @@ function rowHasExternalFollowAnchor(data, helpers = {}) {
         return false;
     }
     const scanHostname = helpers.scanHostname || '';
-    const getOutgoingLinksFrom = helpers.getOutgoingLinksFrom || (() => []);
     const getReferrersForUrl = helpers.getReferrersForUrl || (() => []);
 
-    if (isOffSiteLink(data, scanHostname)) {
-        const refs = getReferrersForUrl(data.url) || [];
-        if (refs.some((ref) => isFollowAllowedAnchor({
-            tag: ref.tag || data.tag,
-            rel: ref.rel,
-            relFollowAllowed: ref.relFollowAllowed,
-            relIndexAllowed: ref.relIndexAllowed,
-            relLabel: ref.relLabel,
-        }))) {
-            return true;
-        }
-        if (!refs.length && isOffSiteFollowAnchor(data, scanHostname)) {
-            return true;
-        }
+    // Лише цільовий off-site URL (проблемний лінк), не сторінки з яких він веде.
+    if (!isOffSiteLink(data, scanHostname)) {
+        return false;
     }
-
-    const outgoing = getOutgoingLinksFrom(data.url) || [];
-    return outgoing.some((link) => isOffSiteFollowAnchor(link, scanHostname));
+    const refs = getReferrersForUrl(data.url) || [];
+    if (refs.some((ref) => isFollowAllowedAnchor({
+        tag: ref.tag || data.tag,
+        rel: ref.rel,
+        relFollowAllowed: ref.relFollowAllowed,
+        relIndexAllowed: ref.relIndexAllowed,
+        relLabel: ref.relLabel,
+    }))) {
+        return true;
+    }
+    if (!refs.length && isOffSiteFollowAnchor(data, scanHostname)) {
+        return true;
+    }
+    return false;
 }
 
 function isHtmlContentType(contentType) {

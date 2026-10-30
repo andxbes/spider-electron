@@ -99,7 +99,15 @@ describe('ui-logic', () => {
         assert.equal(rowHasEmptyImgSrc(row), true);
     });
 
-    it('passesTableFiltersImpl empty-src issue keeps pages with empty imgs', () => {
+    it('passesTableFiltersImpl empty-src keeps empty/broken images, not source pages', () => {
+        const emptyImg = {
+            url: EMPTY_IMAGE_URL,
+            emptySrc: true,
+            tag: 'img[src]',
+            kind: 'images',
+            status: null,
+            fetched: true,
+        };
         const page = {
             url: 'https://example.com/about',
             status: 200,
@@ -123,12 +131,14 @@ describe('ui-logic', () => {
         const ctx = {
             activeIssueFilter: 'empty-src',
             getDuplicateCounts: () => ({ h1: new Map(), title: new Map(), description: new Map() }),
+            getOutgoingLinksFrom: (url) => (url === page.url ? [emptyImg] : []),
         };
-        assert.equal(passesTableFiltersImpl(page, ctx), true);
+        assert.equal(passesTableFiltersImpl(emptyImg, ctx), true);
+        assert.equal(passesTableFiltersImpl(page, ctx), false);
         assert.equal(passesTableFiltersImpl(ok, ctx), false);
     });
 
-    it('passesTableFiltersImpl empty-src also keeps 404 images', () => {
+    it('passesTableFiltersImpl empty-src also keeps 404 images, not pages linking to them', () => {
         const brokenImg = {
             url: 'https://lh7-us.googleusercontent.com/abc',
             tag: 'img[src]',
@@ -179,10 +189,10 @@ describe('ui-logic', () => {
         assert.equal(passesTableFiltersImpl(okImg, ctx), false);
         assert.equal(passesTableFiltersImpl(missingPage, ctx), false);
         assert.equal(passesTableFiltersImpl(video404, ctx), false);
-        assert.equal(passesTableFiltersImpl(pageWithBrokenImg, ctx), true);
+        assert.equal(passesTableFiltersImpl(pageWithBrokenImg, ctx), false);
     });
 
-    it('passesTableFiltersImpl ext-a-follow keeps pages and targets without nofollow', () => {
+    it('passesTableFiltersImpl ext-a-follow keeps target URLs without nofollow, not source pages', () => {
         const followed = {
             url: 'https://other.com/promo',
             tag: 'a[href]',
@@ -291,9 +301,10 @@ describe('ui-logic', () => {
             getOutgoingLinksFrom: (url) => outgoingByPage[url] || [],
             getReferrersForUrl: (url) => referrersByUrl[url] || [],
         };
-        assert.equal(rowHasExternalFollowAnchor(page, ctx), true);
+        assert.equal(rowHasExternalFollowAnchor(page, ctx), false);
         assert.equal(rowHasExternalFollowAnchor(cleanPage, ctx), false);
-        assert.equal(passesTableFiltersImpl(page, ctx), true);
+        assert.equal(rowHasExternalFollowAnchor(followed, ctx), true);
+        assert.equal(passesTableFiltersImpl(page, ctx), false);
         assert.equal(passesTableFiltersImpl(cleanPage, ctx), false);
         assert.equal(passesTableFiltersImpl(followed, ctx), true);
         assert.equal(passesTableFiltersImpl(nofollow, ctx), false);
